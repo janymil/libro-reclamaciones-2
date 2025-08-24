@@ -2,12 +2,26 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { z } from "zod";
-import { insertComplaintSchema, insertEstablishmentSchema, insertArcoRequestSchema } from "@shared/schema";
-import { aiService } from "./services/aiService";
-import { businessDayCalculator } from "./services/businessDayCalculator";
-import { legalComplianceService } from "./services/legalComplianceService";
-import { emailService } from "./services/emailService";
-import { pdfService } from "./services/pdfService";
+import { 
+  insertComplaintSchema, 
+  insertEstablishmentSchema, 
+  insertArcoRequestSchema,
+  userRegistrationSchema,
+  loginSchema as authLoginSchema,
+  insertBusinessSchema,
+  insertLibroConfigurationSchema
+} from "@shared/schema";
+import { authService } from "./services/authService";
+import session from "express-session";
+import connectPg from "connect-pg-simple";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+
+// Comment out missing services for now - focus on core auth
+// import { aiService } from "./services/aiService";
+// import { businessDayCalculator } from "./services/businessDayCalculator";
+// import { legalComplianceService } from "./services/legalComplianceService";
+// import { pdfService } from "./services/pdfService";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -19,52 +33,214 @@ const complaintFormSchema = insertComplaintSchema.extend({
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Authentication middleware - Demo mode for now
+  // Security middleware with relaxed CSP for development
+  app.use(helmet({
+    contentSecurityPolicy: process.env.NODE_ENV === 'production' ? {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        connectSrc: ["'self'", "ws:", "wss:"],
+      },
+    } : false, // Disable CSP in development
+  }));
+
+  // Session configuration with PostgreSQL store
+  const PostgresSessionStore = connectPg(session);
+  const sessionStore = new PostgresSessionStore({
+    conString: process.env.DATABASE_URL,
+    createTableIfMissing: true,
+  });
+
+  app.use(session({
+    store: sessionStore,
+    secret: process.env.SESSION_SECRET || 'fallback-secret-only-for-dev',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    },
+  }));
+
+  // Rate limiting for authentication routes
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5, // Maximum 5 attempts per window
+    message: { message: "Demasiados intentos de login. Intenta en 15 minutos." },
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  // Registration rate limiting
+  const registerLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour  
+    max: 3, // Maximum 3 registrations per hour per IP
+    message: { message: "Límite de registros alcanzado. Intenta en 1 hora." },
+  });
+
+  // Authentication middleware
   const requireAuth = async (req: any, res: any, next: any) => {
-    // Demo mode: create a fake user for demonstration
-    req.user = {
-      id: 'demo-user-1',
-      email: 'demo@empresa.com',
-      firstName: 'Usuario',
-      lastName: 'Demo',
-      role: 'admin',
-      businessId: 'demo-business-1',
-      businessName: 'Empresa Demo SAC'
-    };
-    next();
+    if (!req.session.userId) {
+      return res.status(401).json({ message: "No autenticado" });
+    }
+
+    try {
+      const user = await authService.validateSessionUser(req.session.userId);
+      if (!user) {
+        req.session.destroy(() => {});
+        return res.status(401).json({ message: "Sesión inválida" });
+      }
+
+      req.user = user;
+      next();
+    } catch (error) {
+      console.error('Auth middleware error:', error);
+      return res.status(500).json({ message: "Error de autenticación" });
+    }
   };
 
-  // Auth routes
-  app.post('/api/auth/login', async (req, res) => {
+  // Step 1: User Registration (sends password via email)
+  app.post('/api/auth/register', registerLimiter, async (req, res) => {
     try {
-      const { email, password } = loginSchema.parse(req.body);
+      const userData = userRegistrationSchema.parse(req.body);
+      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const userAgent = req.get('User-Agent') || '';
+
+      const result = await authService.registerUser(userData, ipAddress, userAgent);
       
-      const user = await storage.getUserByEmail(email);
-      if (!user) {
-        return res.status(401).json({ message: "Invalid credentials" });
+      if (!result.success) {
+        return res.status(400).json({ message: result.message });
       }
-      
-      // Verify password (would use bcrypt.compare in production)
-      // For now, accepting any password for demo
-      
-      req.session.userId = user.id;
-      res.json({ user: { ...user, password: undefined } });
+
+      res.status(201).json({ 
+        message: result.message,
+        nextStep: 'check_email',
+        userId: result.userId 
+      });
     } catch (error) {
-      res.status(400).json({ message: "Invalid request data" });
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          message: "Datos inválidos", 
+          errors: error.errors 
+        });
+      }
+      console.error('Registration error:', error);
+      res.status(500).json({ message: "Error interno del servidor" });
     }
   });
 
-  app.post('/api/auth/logout', (req, res) => {
-    req.session.destroy((err) => {
-      if (err) {
-        return res.status(500).json({ message: "Logout failed" });
+  // Login with email and password
+  app.post('/api/auth/login', authLimiter, async (req, res) => {
+    try {
+      const loginData = authLoginSchema.parse(req.body);
+      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const userAgent = req.get('User-Agent') || '';
+
+      const result = await authService.loginUser(loginData, ipAddress, userAgent);
+      
+      if (!result.success) {
+        return res.status(401).json({ message: result.message });
       }
-      res.json({ message: "Logged out successfully" });
+
+      // Set session
+      req.session.userId = result.user!.id;
+      
+      res.json({ 
+        user: result.user,
+        message: result.message 
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          message: "Datos inválidos", 
+          errors: error.errors 
+        });
+      }
+      console.error('Login error:', error);
+      res.status(500).json({ message: "Error interno del servidor" });
+    }
+  });
+
+  // Logout
+  app.post('/api/auth/logout', async (req: any, res) => {
+    if (req.session.userId && req.user) {
+      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const userAgent = req.get('User-Agent') || '';
+      
+      await authService.logoutUser(req.session.userId, req.user.email, ipAddress, userAgent);
+    }
+
+    req.session.destroy((err: any) => {
+      if (err) {
+        console.error('Session destroy error:', err);
+        return res.status(500).json({ message: "Error al cerrar sesión" });
+      }
+      res.json({ message: "Sesión cerrada exitosamente" });
     });
   });
 
+  // Get current user (protected)
   app.get('/api/auth/user', requireAuth, (req: any, res) => {
-    res.json({ ...req.user, password: undefined });
+    res.json(req.user);
+  });
+
+  // Step 2: Configure business and libro (onboarding completion)
+  app.post('/api/auth/complete-onboarding', requireAuth, async (req: any, res) => {
+    try {
+      const user = req.user;
+      
+      // Ensure user is in onboarding step 1
+      if (user.onboardingCompleted || user.onboardingStep !== 1) {
+        return res.status(400).json({ message: "Onboarding ya completado o usuario en estado inválido" });
+      }
+
+      const { businessData, libroData } = req.body;
+      
+      // Validate business data
+      const validBusinessData = insertBusinessSchema.parse(businessData);
+      
+      // Validate libro configuration data
+      const validLibroData = insertLibroConfigurationSchema.parse({
+        ...libroData,
+        userId: user.id,
+      });
+
+      // Create business
+      const business = await storage.createBusiness(validBusinessData);
+      
+      // Update user with business ID and onboarding completion
+      await storage.updateUser(user.id, {
+        businessId: business.id,
+        onboardingStep: 2,
+        onboardingCompleted: true,
+      });
+
+      // Create libro configuration with business ID
+      const libroConfig = await storage.createLibroConfiguration({
+        ...validLibroData,
+        businessId: business.id,
+      });
+
+      res.json({
+        message: "Onboarding completado exitosamente",
+        business,
+        libroConfig,
+        redirectTo: '/dashboard'
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          message: "Datos inválidos", 
+          errors: error.errors 
+        });
+      }
+      console.error('Onboarding completion error:', error);
+      res.status(500).json({ message: "Error al completar el onboarding" });
+    }
   });
 
   // Dashboard routes

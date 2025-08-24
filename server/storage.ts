@@ -8,6 +8,9 @@ import {
   complianceTracking,
   dataProcessingActivities,
   notifications,
+  loginAttempts,
+  authAuditLog,
+  libroConfiguration,
   type User,
   type InsertUser,
   type Business,
@@ -25,6 +28,13 @@ import {
   type InsertDataProcessingActivity,
   type Notification,
   type InsertNotification,
+  type LoginAttempt,
+  type InsertLoginAttempt,
+  type AuthAuditLog,
+  type InsertAuthAuditLog,
+  type LibroConfiguration,
+  type InsertLibroConfiguration,
+  type UserRegistration,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, count, gte, lte, sql, or } from "drizzle-orm";
@@ -33,9 +43,27 @@ import bcrypt from "bcrypt";
 export interface IStorage {
   // User operations
   getUser(id: string): Promise<User | undefined>;
+  getUserById(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser & { password: string }): Promise<User>;
   updateUser(id: string, updates: Partial<InsertUser>): Promise<User>;
+  
+  // Auth security operations
+  incrementFailedLoginAttempts(userId: string): Promise<void>;
+  resetFailedLoginAttempts(userId: string): Promise<void>;
+  lockUserAccount(userId: string, lockUntil: Date): Promise<void>;
+  updateLastLogin(userId: string): Promise<void>;
+  setPasswordResetToken(email: string, token: string, expires: Date): Promise<void>;
+  getFailedLoginAttempts(email: string, ipAddress: string, since: Date): Promise<number>;
+  
+  // Auth audit logging
+  createAuthAuditLog(auditLog: InsertAuthAuditLog): Promise<AuthAuditLog>;
+  createLoginAttempt(loginAttempt: InsertLoginAttempt): Promise<LoginAttempt>;
+  
+  // Libro configuration for onboarding step 2
+  createLibroConfiguration(config: InsertLibroConfiguration): Promise<LibroConfiguration>;
+  getLibroConfiguration(businessId: string): Promise<LibroConfiguration | undefined>;
+  updateLibroConfiguration(id: string, updates: Partial<InsertLibroConfiguration>): Promise<LibroConfiguration>;
   
   // Business operations
   getBusiness(id: string): Promise<Business | undefined>;
@@ -156,6 +184,121 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.id, id))
       .returning();
     return user;
+  }
+
+  async getUserById(id: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  }
+
+  // Auth security operations
+  async incrementFailedLoginAttempts(userId: string): Promise<void> {
+    await db
+      .update(users)
+      .set({ 
+        failedLoginAttempts: sql`${users.failedLoginAttempts} + 1`,
+        updatedAt: new Date()
+      })
+      .where(eq(users.id, userId));
+  }
+
+  async resetFailedLoginAttempts(userId: string): Promise<void> {
+    await db
+      .update(users)
+      .set({ 
+        failedLoginAttempts: 0,
+        accountLockedUntil: null,
+        updatedAt: new Date()
+      })
+      .where(eq(users.id, userId));
+  }
+
+  async lockUserAccount(userId: string, lockUntil: Date): Promise<void> {
+    await db
+      .update(users)
+      .set({ 
+        accountLockedUntil: lockUntil,
+        updatedAt: new Date()
+      })
+      .where(eq(users.id, userId));
+  }
+
+  async updateLastLogin(userId: string): Promise<void> {
+    await db
+      .update(users)
+      .set({ 
+        lastLoginAt: new Date(),
+        updatedAt: new Date()
+      })
+      .where(eq(users.id, userId));
+  }
+
+  async setPasswordResetToken(email: string, token: string, expires: Date): Promise<void> {
+    await db
+      .update(users)
+      .set({ 
+        passwordResetToken: token,
+        passwordResetExpires: expires,
+        updatedAt: new Date()
+      })
+      .where(eq(users.email, email));
+  }
+
+  async getFailedLoginAttempts(email: string, ipAddress: string, since: Date): Promise<number> {
+    const result = await db
+      .select({ count: count() })
+      .from(loginAttempts)
+      .where(and(
+        eq(loginAttempts.email, email),
+        eq(loginAttempts.ipAddress, ipAddress),
+        eq(loginAttempts.success, false),
+        gte(loginAttempts.createdAt, since)
+      ));
+    
+    return result[0]?.count || 0;
+  }
+
+  // Auth audit logging
+  async createAuthAuditLog(auditLogData: InsertAuthAuditLog): Promise<AuthAuditLog> {
+    const [auditLog] = await db
+      .insert(authAuditLog)
+      .values(auditLogData)
+      .returning();
+    return auditLog;
+  }
+
+  async createLoginAttempt(loginAttemptData: InsertLoginAttempt): Promise<LoginAttempt> {
+    const [loginAttempt] = await db
+      .insert(loginAttempts)
+      .values(loginAttemptData)
+      .returning();
+    return loginAttempt;
+  }
+
+  // Libro configuration for onboarding step 2
+  async createLibroConfiguration(configData: InsertLibroConfiguration): Promise<LibroConfiguration> {
+    const [config] = await db
+      .insert(libroConfiguration)
+      .values(configData)
+      .returning();
+    return config;
+  }
+
+  async getLibroConfiguration(businessId: string): Promise<LibroConfiguration | undefined> {
+    const [config] = await db
+      .select()
+      .from(libroConfiguration)
+      .where(eq(libroConfiguration.businessId, businessId));
+    return config;
+  }
+
+  async updateLibroConfiguration(id: string, updates: Partial<InsertLibroConfiguration>): Promise<LibroConfiguration> {
+    const [config] = await db
+      .update(libroConfiguration)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(libroConfiguration.id, id))
+      .returning();
+    return config;
   }
 
   async getBusiness(id: string): Promise<Business | undefined> {
@@ -331,8 +474,10 @@ export class DatabaseStorage implements IStorage {
           eq(complaints.isOverdue, true),
           and(
             lte(complaints.dueDate, new Date()),
-            eq(complaints.status, 'new'),
-            eq(complaints.status, 'in_progress')
+            or(
+              eq(complaints.status, 'new'),
+              eq(complaints.status, 'in_progress')
+            )
           )
         )
       ))

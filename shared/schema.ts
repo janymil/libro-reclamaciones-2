@@ -16,19 +16,35 @@ import {
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// Users table for business users
+// Users table for business users with enhanced security
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   email: varchar("email", { length: 255 }).notNull().unique(),
-  password: text("password").notNull(),
+  password: text("password").notNull(), // bcrypt hashed
   firstName: varchar("first_name", { length: 100 }).notNull(),
   lastName: varchar("last_name", { length: 100 }).notNull(),
-  role: varchar("role", { length: 50 }).notNull().default("user"), // admin, user, viewer
-  businessId: uuid("business_id").notNull(),
+  role: varchar("role", { length: 50 }).notNull().default("admin"), // admin (business owner), user, viewer
+  businessId: uuid("business_id"), // nullable until business is created
   isActive: boolean("is_active").notNull().default(true),
+  isEmailVerified: boolean("is_email_verified").notNull().default(false),
+  
+  // Security fields
+  failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
+  accountLockedUntil: timestamp("account_locked_until"),
+  lastLoginAt: timestamp("last_login_at"),
+  passwordResetToken: varchar("password_reset_token", { length: 255 }),
+  passwordResetExpires: timestamp("password_reset_expires"),
+  
+  // Onboarding flow
+  onboardingStep: integer("onboarding_step").notNull().default(1), // 1: user created, 2: business/libro configured
+  onboardingCompleted: boolean("onboarding_completed").notNull().default(false),
+  
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("idx_users_email").on(table.email),
+  index("idx_users_business_id").on(table.businessId),
+]);
 
 // Businesses/Companies table
 export const businesses = pgTable("businesses", {
@@ -223,6 +239,82 @@ export const notifications = pgTable("notifications", {
   index("idx_notifications_user_id").on(table.userId),
 ]);
 
+// Sessions table for secure session storage
+export const sessions = pgTable("sessions", {
+  sid: varchar("sid").primaryKey(),
+  sess: jsonb("sess").notNull(),
+  expire: timestamp("expire").notNull(),
+}, (table) => [
+  index("idx_sessions_expire").on(table.expire),
+]);
+
+// Login attempts tracking for security
+export const loginAttempts = pgTable("login_attempts", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: varchar("email", { length: 255 }).notNull(),
+  ipAddress: varchar("ip_address", { length: 45 }).notNull(),
+  userAgent: text("user_agent"),
+  success: boolean("success").notNull(),
+  failureReason: varchar("failure_reason", { length: 100 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_login_attempts_email").on(table.email),
+  index("idx_login_attempts_ip").on(table.ipAddress),
+  index("idx_login_attempts_created").on(table.createdAt),
+]);
+
+// Authentication audit log for security monitoring
+export const authAuditLog = pgTable("auth_audit_log", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id"),
+  action: varchar("action", { length: 100 }).notNull(), // login, logout, register, password_reset, etc.
+  email: varchar("email", { length: 255 }).notNull(),
+  ipAddress: varchar("ip_address", { length: 45 }).notNull(),
+  userAgent: text("user_agent"),
+  success: boolean("success").notNull(),
+  failureReason: varchar("failure_reason", { length: 200 }),
+  metadata: jsonb("metadata"), // Additional context
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_auth_audit_user_id").on(table.userId),
+  index("idx_auth_audit_email").on(table.email),
+  index("idx_auth_audit_action").on(table.action),
+  index("idx_auth_audit_created").on(table.createdAt),
+]);
+
+// Libro configuration for step 2 of onboarding
+export const libroConfiguration = pgTable("libro_configuration", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessId: uuid("business_id").notNull().unique(),
+  userId: uuid("user_id").notNull(), // Who configured it
+  
+  // Basic configuration from screenshot
+  libroName: text("libro_name").notNull(),
+  urlSlug: varchar("url_slug", { length: 100 }).notNull().unique(), // for librovirtual.pe/company-slug
+  businessType: varchar("business_type", { length: 50 }).notNull(), // tienda_virtual, local_fisico
+  
+  // Contact info
+  notificationEmail: varchar("notification_email", { length: 255 }).notNull(),
+  whatsappNumber: varchar("whatsapp_number", { length: 20 }),
+  websiteUrl: varchar("website_url", { length: 255 }),
+  
+  // Company logo
+  logoUrl: varchar("logo_url", { length: 500 }),
+  logoFileName: varchar("logo_file_name", { length: 255 }),
+  logoFileSize: integer("logo_file_size"),
+  logoMimeType: varchar("logo_mime_type", { length: 100 }),
+  
+  // Configuration status
+  isActive: boolean("is_active").notNull().default(true),
+  configurationCompleted: boolean("configuration_completed").notNull().default(true),
+  
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_libro_config_business_id").on(table.businessId),
+  index("idx_libro_config_url_slug").on(table.urlSlug),
+]);
+
 // Relations
 export const usersRelations = relations(users, ({ one }) => ({
   business: one(businesses, {
@@ -308,6 +400,24 @@ export const notificationsRelations = relations(notifications, ({ one }) => ({
   }),
 }));
 
+export const libroConfigurationRelations = relations(libroConfiguration, ({ one }) => ({
+  business: one(businesses, {
+    fields: [libroConfiguration.businessId],
+    references: [businesses.id],
+  }),
+  user: one(users, {
+    fields: [libroConfiguration.userId],
+    references: [users.id],
+  }),
+}));
+
+export const authAuditLogRelations = relations(authAuditLog, ({ one }) => ({
+  user: one(users, {
+    fields: [authAuditLog.userId],
+    references: [users.id],
+  }),
+}));
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -356,6 +466,34 @@ export const insertNotificationSchema = createInsertSchema(notifications).omit({
   createdAt: true,
 });
 
+export const insertLoginAttemptSchema = createInsertSchema(loginAttempts).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertAuthAuditLogSchema = createInsertSchema(authAuditLog).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertLibroConfigurationSchema = createInsertSchema(libroConfiguration).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// Auth-specific schemas for the 2-step onboarding
+export const userRegistrationSchema = z.object({
+  firstName: z.string().min(2, "Nombre debe tener al menos 2 caracteres"),
+  lastName: z.string().min(2, "Apellido debe tener al menos 2 caracteres"),
+  email: z.string().email("Email inválido"),
+});
+
+export const loginSchema = z.object({
+  email: z.string().email("Email inválido"),
+  password: z.string().min(1, "Contraseña requerida"),
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -382,3 +520,15 @@ export type InsertDataProcessingActivity = z.infer<typeof insertDataProcessingAc
 
 export type Notification = typeof notifications.$inferSelect;
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+
+export type LoginAttempt = typeof loginAttempts.$inferSelect;
+export type InsertLoginAttempt = z.infer<typeof insertLoginAttemptSchema>;
+
+export type AuthAuditLog = typeof authAuditLog.$inferSelect;
+export type InsertAuthAuditLog = z.infer<typeof insertAuthAuditLogSchema>;
+
+export type LibroConfiguration = typeof libroConfiguration.$inferSelect;
+export type InsertLibroConfiguration = z.infer<typeof insertLibroConfigurationSchema>;
+
+export type UserRegistration = z.infer<typeof userRegistrationSchema>;
+export type LoginData = z.infer<typeof loginSchema>;

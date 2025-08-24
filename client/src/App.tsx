@@ -15,12 +15,16 @@ import Profile from "@/pages/profile";
 import History from "@/pages/history";
 import PublicPortal from "@/pages/public-portal";
 import Compliance from "@/pages/compliance";
+import AuthPage from "@/pages/auth-page";
+import OnboardingPage from "@/pages/onboarding-page";
 import NotFound from "@/pages/not-found";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Landing} />
+      <Route path="/auth" component={AuthPage} />
+      <Route path="/onboarding" component={OnboardingPage} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/complaints" component={Complaints} />
       <Route path="/reports" component={Reports} />
