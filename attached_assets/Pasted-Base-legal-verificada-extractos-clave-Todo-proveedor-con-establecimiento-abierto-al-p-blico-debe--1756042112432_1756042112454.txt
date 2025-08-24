@@ -1,0 +1,218 @@
+Base legal verificada (extractos clave)
+
+Todo proveedor con establecimiento abierto al público debe contar con Libro de Reclamaciones físico o virtual. Si vende por Internet, además debe implementar un Libro virtual accesible desde ese mismo medio. Definiciones oficiales de “reclamo” y “queja”. Requisitos del “Aviso del Libro de Reclamaciones”. 
+inei.gob.pe
+
+Las Hojas (físicas o virtuales) deben contener, como mínimo: denominación, numeración correlativa y código de identificación, fecha, nombre y dirección del proveedor, datos del consumidor (nombre, domicilio, DNI/CE, teléfono y correo), datos del padre/representante si es menor de edad, identificación del producto/servicio, detalle de la reclamación, espacio para acciones del proveedor y “firma” (en virtual: mecanismo que la reemplace). 
+inei.gob.pe
+
+Copia al consumidor: el Libro virtual debe permitir imprimir gratis la constancia y, si se requiere, enviarla por correo electrónico. 
+inei.gob.pe
+
+Plazo de respuesta: por Ley N.° 31435 (modifica arts. 24 y 152 del Código), los proveedores deben atender y responder reclamos y quejas en máximo 15 días hábiles, improrrogables (antes eran 30 días calendario con prórroga). El D.S. N.° 101‑2022‑PCM adecúa el Reglamento y actualiza el Anexo 1. 
+leyes.congreso.gob.pe
+prcp.com.pe
+Peruweek.pe
+La Cámara
+
+Si el consumidor marcó mal “queja/reclamo” pero del detalle se desprende que corresponde el otro, el proveedor debe tramitarlo conforme corresponda; la respuesta debe ser por escrito (carta y/o email, según lo solicitado). 
+prcp.com.pe
+
+Conservación: el proveedor debe conservar las Hojas (físicas o virtuales) 2 años desde el registro. INDECOPI puede requerir copias en cualquier momento: plazo del requerimiento no menor a 3 días hábiles o entrega inmediata en verificación in situ. 
+inei.gob.pe
+
+Varios locales: un Libro por cada establecimiento; si tiene varios Libros físicos, debe usar un código de identificación para consolidar un registro único a nivel nacional. 
+inei.gob.pe
+
+Aviso obligatorio (“Anexo II”): tamaño mínimo A4; la frase “Libro de Reclamaciones” con letras mínimas de 1×1 cm; resto del texto mínimo 0.5×0.5 cm; incluir en portales web un aviso visible que enlace al Libro virtual (“Anexo III”). El aviso estandarizado incluye la línea de ayuda de INDECOPI (libroreclamaciones@indecopi.gob.pe
+). 
+Ministerio de Justicia del Perú
+Sunat
+
+Sectores regulados/supervisados (SBS y servicios públicos regulados): sus sistemas de quejas/reclamos pueden considerarse implementación del Libro si cumplen con dejar constancia, regular plazos y permitir copia/constancia; se rigen por sus propias normas sectoriales. 
+inei.gob.pe
+
+Protección de datos personales: la app trata datos personales, por lo que aplica la Ley N.° 29733 y su nuevo Reglamento (D.S. N.° 016‑2024‑JUS, que derogó el D.S. 003‑2013‑JUS) — inscripción obligatoria del banco de datos ante el RNPD, nuevas obligaciones y simplificación de trámites. 
+leyes.congreso.gob.pe
+Gob Perú
++1
+Sunat
+
+MEGA‑PROMPT (para que un agente de IA construya la app)
+
+Rol del agente: Arquitecto y desarrollador senior. Construye una aplicación web SaaS multi‑empresa (multi‑tenant) 100 % en español de Perú para gestionar el Libro de Reclamaciones cumpliendo estrictamente la normativa peruana vigente.
+
+Base legal a cumplir (no inventar ni omitir):
+
+Código de Protección y Defensa del Consumidor, Ley N.° 29571, arts. 24 y 152, modificados por Ley N.° 31435 (22‑03‑2022): respuesta obligatoria a reclamos y quejas en 15 días hábiles improrrogables.
+
+Reglamento del Libro de Reclamaciones, D.S. N.° 011‑2011‑PCM (y sus modificatorias D.S. N.° 006‑2014‑PCM y D.S. N.° 101‑2022‑PCM: actualiza plazos, formato Anexo 1 y criterios).
+
+Protección de datos personales: Ley N.° 29733 y D.S. N.° 016‑2024‑JUS (nuevo Reglamento): inscripción RNPD, políticas de privacidad, medidas de seguridad, derechos ARCO, eventuales obligaciones de Oficial de Datos Personales según supuestos del nuevo Reglamento.
+
+Usa estos textos como fuente de requisitos para las funciones y validaciones. Implementa trazabilidad artículo‑a‑función en la documentación.
+
+1) Alcance y público
+
+App para proveedores con uno o múltiples establecimientos en Perú (RUC, razón social, direcciones).
+
+Debe cubrir Libro físico (gestión y numeración) y Libro virtual (portal público para consumidores) y el Aviso obligatorio en locales y en web.
+
+2) Módulos obligatorios
+A. Portal público (Libro virtual)
+
+Página en español con lenguaje claro, accesible y mobile‑first.
+
+Formulario Hoja de Reclamación con todos los campos mínimos obligatorios del Anexo 1 (valida obligatoriedad):
+
+Denominación “Hoja de Reclamación”.
+
+Numeración correlativa y código de identificación únicos (por establecimiento; ver módulo de consolidación).
+
+Fecha de presentación (auto‑timestamp con zona horaria PE).
+
+Proveedor: nombre comercial/razón social y dirección del establecimiento.
+
+Consumidor: nombres y apellidos, domicilio, DNI/CE/pasaporte, teléfono y correo electrónico.
+
+Padre/madre/representante si es menor de edad (datos completos y documento).
+
+Identificación del producto/servicio (nombre, nro. de pedido/boleta, monto y fecha — “monto” es opcional pero recomendable como campo no obligatorio).
+
+Detalle de la reclamación (textarea).
+
+Tipo: selector Reclamo | Queja (con ayuda contextual que explique la diferencia).
+
+Acciones del proveedor (campo reservado para uso interno/constancia).
+
+Firma del consumidor: en virtual, reemplazar por mecanismo equivalente (checkbox de conformidad + OTP por email/SMS y/o firma trazable).
+
+Constancia al consumidor: al enviar, genera PDF descargable e envío por email con código y numeración de la Hoja.
+
+Accesibilidad y asistencia: si el consumidor está en tienda física, habilitar kiosco/QR con ayuda guiada.
+
+Nota legal visible: resumen en lenguaje claro de que la presentación no limita otras vías ni es condición previa para denunciar (art. 13), y recordatorio del plazo de 15 días hábiles para la respuesta.
+
+Adjuntos: permitir subir evidencia (comprobantes, fotos, etc.).
+
+Política de privacidad y consentimiento explícito conforme Ley 29733 + Reglamento 2024; link visible.
+
+B. Consola del proveedor (Back‑office)
+
+Dashboard con KPIs: volumen por local, SLA (D+15 hábiles), tasas de vencimiento, reclamo vs queja, categorías, severidad, NPS posterior.
+
+Gestor de establecimientos: alta/baja/edición; un Libro por local; numeración correlativa por Libro; código de identificación por proveedor; registro consolidado nacional (art. 8).
+
+Gestor de Hojas:
+
+Bandejas: Nuevas, En proceso, Respondidas, Vencidas.
+
+Cómputo automático de días hábiles (Perú) y fecha límite D+15; sin prórroga.
+
+Alertas (email/WhatsApp) antes del vencimiento (D+10, D+14, D+15).
+
+Clasificador IA: sugiere si es Reclamo/Queja y corrige si el usuario marcó incorrecto; autocompleta etiquetas (categoría, producto, tienda, severidad).
+
+Plantillas de respuesta (redacción asistida por IA, tono claro y respetuoso) y envío por escrito vía email o para carta (PDF) según haya elegido el consumidor.
+
+Bitácora/auditoría: cambios, responsables, marcas de tiempo, canal de respuesta, evidencia enviada.
+
+Campos del proveedor – “Acciones adoptadas” con estatus y compromisos.
+
+Exportación y remisión a INDECOPI:
+
+Exportar copias (PDF/CSV) por rango/establecimiento/tipo, con numeración y código.
+
+Paquete de remisión: generar expediente digital listo para entrega cuando INDECOPI lo requiera (cumplir con plazos: ≥3 días hábiles o inmediato en verificación).
+
+Conservación y borrado: regla de retención 2 años desde el registro; al vencer, proceso de pseudonimización/archivado y borrado seguro.
+
+Aviso obligatorio:
+
+Generar PDF A4 del Aviso del Libro (Anexo II) con tipografías/medidas mínimas (1×1 cm y 0.5×0.5 cm), espacio para indicar “físico” o “virtual” y línea de ayuda de INDECOPI.
+
+Widget/badge para home del sitio del proveedor que enlace al Libro virtual (formato Anexo III); opción de QR.
+
+Regímenes especiales: bandera para proveedores SBS/servicios públicos regulados que usen su propio sistema de reclamos; en ese caso, mostrar disclaimer y evidenciar que su sistema deja constancia, regula plazos y emite copia.
+
+C. Cumplimiento de Protección de Datos Personales (Ley 29733 + D.S. 016‑2024‑JUS)
+
+Registro RNPD: asistente para que el proveedor inscriba el banco de datos de “Libro de Reclamaciones” (campos mínimos, finalidad, medidas de seguridad, contacto).
+
+Derechos ARCO: módulo para gestionar acceso/rectificación/cancelación/oposición, con plazos y evidencia.
+
+Política de privacidad editable + consentimiento granular en el formulario.
+
+Medidas de seguridad: cifrado en tránsito y reposo, control de accesos por rol, registros de auditoría, backup y recuperación.
+
+Oficial de Datos Personales (ODP): campo de contacto y check para organizaciones alcanzadas por la obligación del nuevo Reglamento; documentación y trazabilidad.
+
+Notificación de incidentes: plantilla y flujo para reportar a ANPD y a titulares cuando corresponda (con campos mínimos exigidos por el nuevo Reglamento).
+
+3) IA y automatización (valor agregado)
+
+Clasificación y priorización (NLP): detectar categoría, severidad, riesgo regulatorio, posibles “cláusulas abusivas”, y sugerir acciones.
+
+Asistente de respuesta: redacta borradores conformes a ley, sin admitir responsabilidad automáticamente, citando soluciones, plazos y próximos pasos.
+
+Resumen ejecutivo por caso y panel de reincidencias por producto/tienda.
+
+Detección de vencimientos y escalamiento automático (correo a responsables, alertas al gerente).
+
+Reportes: mensual/trimestral con métricas de SLA y hallazgos para mejora del servicio.
+
+4) Requisitos técnicos y de producto
+
+Multi‑tenant con aislamiento por proveedor y roles (Administrador, Supervisor, Agente, Lector legal).
+
+Trazabilidad legal: cada pantalla/campo enlazado en la documentación al artículo/Anexo correspondiente.
+
+Pruebas: unitarias/funcionales (presentación, cómputo de días hábiles, generación de constancias, exportación a INDECOPI, retención 2 años, ARCO).
+
+Internacionalización fija en español (es‑PE); formatos de fecha/hora de Perú; zona horaria America/Lima.
+
+Accesibilidad WCAG AA; diseño responsive.
+
+Seguridad: OWASP Top‑10, rate‑limit en portal público, CAPTCHA opcional, logs inmutables.
+
+Integraciones opcionales: email transaccional (DKIM/SPF), WhatsApp Business/API para recordatorios internos (no para responder formalmente al consumidor).
+
+5) Contenidos y textos normativos (plantillas)
+
+Hoja de Reclamación (Anexo 1 actualizado 2022) en PDF y HTML.
+
+Aviso (Anexo II y Anexo III) con medidas mínimas y textos normados.
+
+Constancia al consumidor con código/numeración, fecha/hora, y resumen del art. 13 (no limita otras vías).
+
+Respuesta escrita al consumidor (carta/email), con sello temporal, firma digital y acuse de recibo.
+
+6) Entregables
+
+Código fuente y documentación.
+
+Manual de configuración por proveedor (RUC, locales, correo de respuestas, plantillas).
+
+Checklist de conformidad legal mapeado a cada artículo/Anexo.
+
+Datos de prueba y scripts de migración.
+
+NOTAS PARA EL AGENTE
+
+Validar todo contra las fuentes legales arriba citadas; no suponer reglas no contempladas.
+
+El SLA legal es D+15 días hábiles sin prórroga para reclamos y quejas.
+
+Implementar numeración correlativa y código de identificación también en el Libro virtual y en exportaciones.
+
+Mantener historial 2 años y funcionalidades de remisión a INDECOPI con filtros y sellos de tiempo.
+
+Fuentes oficiales y técnicas (para consulta del equipo): D.S. 011‑2011‑PCM y artículos/Anexos (definiciones, campos, conservación, remisión), D.S. 006‑2014‑PCM (avisos A4/medidas y aviso web), D.S. 101‑2022‑PCM (adecuación a 15 días hábiles y Anexo 1 actualizado), Ley 31435 (15 días hábiles improrrogables y respuesta también a quejas), Ley 29733 + D.S. 016‑2024‑JUS (protección de datos, RNPD y nuevas obligaciones). 
+inei.gob.pe
+Ministerio de Justicia del Perú
+Sunat
++1
+prcp.com.pe
+leyes.congreso.gob.pe
+leyes.congreso.gob.pe
+Gob Perú
