@@ -166,7 +166,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createUser(userData: InsertUser & { password: string }): Promise<User> {
-    const hashedPassword = await bcrypt.hash(userData.password, 10);
+    const hashedPassword = await bcrypt.hash(userData.password, 14); // Bank-level security (14+ rounds)
     const [user] = await db
       .insert(users)
       .values({
