@@ -21,7 +21,6 @@ interface BusinessData {
   distrito: string;
   provincia: string;
   departamento: string;
-  website?: string;
 }
 
 interface LibroData {
@@ -62,8 +61,7 @@ export default function OnboardingPage() {
     address: '',
     distrito: '',
     provincia: '',
-    departamento: '',
-    website: ''
+    departamento: ''
   });
 
   // Libro configuration form state
@@ -412,18 +410,6 @@ export default function OnboardingPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="website">Sitio Web (opcional)</Label>
-                    <Input
-                      id="website"
-                      data-testid="input-website"
-                      type="url"
-                      value={businessForm.website}
-                      onChange={(e) => setBusinessForm({...businessForm, website: e.target.value})}
-                      placeholder="https://miempresa.com"
-                    />
                   </div>
 
                   <Button 
