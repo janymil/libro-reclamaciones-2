@@ -79,10 +79,10 @@ export default function OnboardingPage() {
 
     setIsLoadingRUC(true);
     try {
-      const response = await fetch(`https://sunat-api.vpscenter.us/?ruc=${ruc}`);
+      const response = await fetch(`/api/lookup-ruc/${ruc}`);
       const data = await response.json();
       
-      if (data && data.razonSocial) {
+      if (response.ok && data && data.razonSocial) {
         setBusinessForm(prev => ({
           ...prev,
           businessName: data.razonSocial
@@ -95,7 +95,7 @@ export default function OnboardingPage() {
       } else {
         toast({
           title: "RUC no encontrado",
-          description: "No se pudo encontrar información para este RUC",
+          description: data.message || "No se pudo encontrar información para este RUC",
           variant: "destructive",
         });
       }
