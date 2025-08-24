@@ -82,14 +82,16 @@ export default function OnboardingPage() {
       const response = await fetch(`/api/lookup-ruc/${ruc}`);
       const data = await response.json();
       
-      if (response.ok && data && data.razonSocial) {
+      console.log('RUC lookup response:', data); // Debug log
+      
+      if (response.ok && data && data.razon_social) {
         setBusinessForm(prev => ({
           ...prev,
-          businessName: data.razonSocial
+          businessName: data.razon_social
         }));
         toast({
           title: "RUC encontrado",
-          description: `Razón social: ${data.razonSocial}`,
+          description: `Razón social: ${data.razon_social}`,
           variant: "default",
         });
       } else {
