@@ -33,7 +33,6 @@ export default function Landing() {
   const [isVisible, setIsVisible] = useState(false);
   const [hoveredFeature, setHoveredFeature] = useState<number | null>(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
-  const [currentTestimonial, setCurrentTestimonial] = useState(0);
   const heroRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -46,75 +45,43 @@ export default function Landing() {
     
     window.addEventListener('mousemove', handleMouseMove);
     
-    // Auto-rotate testimonials
-    const testimonialInterval = setInterval(() => {
-      setCurrentTestimonial((prev) => (prev + 1) % testimonials.length);
-    }, 5000);
 
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
-      clearInterval(testimonialInterval);
     };
   }, []);
 
   const features = [
     {
       icon: Brain,
-      title: "IA Avanzada",
-      description: "Clasificación automática con 95% de precisión y respuestas sugeridas que cumplen normativa peruana",
+      title: "Asistencia IA",
+      description: "Herramientas de clasificación automática y sugerencias de respuesta para agilizar el proceso",
       color: "from-purple-500 to-pink-500",
-      stats: "95% precisión",
-      demo: "🤖 Detecta automáticamente: Reclamo por producto defectuoso → Categoría: Calidad → Prioridad: Alta"
+      stats: "Automático"
     },
     {
       icon: Shield,
       title: "Cumplimiento Legal",
-      description: "100% conforme con DS 011-2011-PCM, DS 101-2022-PCM y Ley 29733 de Protección de Datos",
+      description: "Diseñado para cumplir con DS 011-2011-PCM, DS 101-2022-PCM y Ley 29733 de Protección de Datos",
       color: "from-green-500 to-emerald-500",
-      stats: "100% legal",
-      demo: "✅ Validación automática: Campos obligatorios → Plazos legales → Formatos oficiales"
+      stats: "Normativo"
     },
     {
       icon: Clock,
       title: "Gestión de Plazos",
-      description: "Cálculo automático de 15 días hábiles con alertas y seguimiento de vencimientos",
+      description: "Cálculo automático de 15 días hábiles según normativa peruana con alertas preventivas",
       color: "from-blue-500 to-cyan-500",
-      stats: "15 días",
-      demo: "⏰ Reclamo recibido hoy → Vence: 23 Enero 2024 → Alerta: 3 días antes"
+      stats: "15 días"
     },
     {
       icon: BarChart3,
-      title: "Analytics Avanzado",
-      description: "Dashboard ejecutivo con métricas de cumplimiento, tendencias y reportes automáticos",
+      title: "Reportes",
+      description: "Dashboard con métricas de seguimiento y reportes para análisis de reclamaciones",
       color: "from-orange-500 to-red-500",
-      stats: "Tiempo real",
-      demo: "📊 Este mes: 156 reclamos → 94% resueltos → Tiempo promedio: 8 días"
+      stats: "Dashboard"
     }
   ];
 
-  const testimonials = [
-    {
-      name: "Carlos Mendoza",
-      position: "Gerente Legal, Saga Falabella",
-      content: "LibroVirtual.pe nos permitió digitalizar completamente nuestro proceso de reclamaciones. La IA es impresionante.",
-      rating: 5,
-      company: "Retail"
-    },
-    {
-      name: "Ana García",
-      position: "Directora de Cumplimiento, Ripley",
-      content: "El mejor sistema que hemos implementado. Cumplimiento legal al 100% y reportes automáticos perfectos.",
-      rating: 5,
-      company: "E-commerce"
-    },
-    {
-      name: "Miguel Torres",
-      position: "CEO, TiendaOnline SAC",
-      content: "Implementación en 24 horas. Ahora manejamos 300+ reclamaciones mensuales sin problemas.",
-      rating: 5,
-      company: "E-commerce"
-    }
-  ];
 
   const plans = [
     {
@@ -231,7 +198,7 @@ export default function Landing() {
             <div className={`transition-all duration-1000 ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
               <Badge className="mb-6 bg-gradient-to-r from-blue-100 to-purple-100 text-blue-700 border-blue-200">
                 <Sparkles className="h-4 w-4 mr-2" />
-                Plataforma #1 en Perú para Libros de Reclamaciones
+                Plataforma para Libros de Reclamaciones
               </Badge>
               
               <h1 className="text-5xl md:text-8xl font-bold mb-6 leading-tight">
@@ -250,65 +217,26 @@ export default function Landing() {
               </h1>
               
               <p className="text-xl md:text-2xl text-gray-600 mb-8 max-w-4xl mx-auto leading-relaxed">
-                La única plataforma que combina <strong>Inteligencia Artificial</strong> con 
-                <strong> cumplimiento legal 100%</strong> para empresas de e-commerce y retail. 
-                Automatiza, analiza y optimiza tus reclamaciones.
+                Plataforma digital para gestionar libros de reclamaciones con 
+                <strong> cumplimiento legal</strong> de las normas peruanas. 
+                Automatiza procesos y facilita el seguimiento de reclamaciones.
               </p>
 
               <div className="flex flex-col sm:flex-row items-center justify-center space-y-4 sm:space-y-0 sm:space-x-6 mb-12">
-                <Link href="/demo">
+                <Link href="/dashboard">
                   <Button size="lg" className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-lg px-8 py-4 h-auto">
                     <PlayCircle className="h-5 w-5 mr-2" />
-                    Ver Demo Interactivo
+                    Probar Plataforma
                   </Button>
                 </Link>
-                <Link href="/contact">
+                <Link href="/r/demo">
                   <Button variant="outline" size="lg" className="text-lg px-8 py-4 h-auto border-2">
-                    Hablar con Experto
+                    Portal Público Demo
                     <ArrowRight className="h-5 w-5 ml-2" />
                   </Button>
                 </Link>
               </div>
 
-              {/* Interactive Stats */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-8 max-w-4xl mx-auto">
-                <div className="text-center group cursor-pointer">
-                  <div className="text-3xl md:text-4xl font-bold text-blue-600 mb-2 group-hover:scale-110 transition-transform duration-300">
-                    500+
-                  </div>
-                  <div className="text-gray-600 group-hover:text-blue-600 transition-colors">Empresas Activas</div>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2 overflow-hidden">
-                    <div className="bg-gradient-to-r from-blue-500 to-blue-600 h-2 rounded-full group-hover:animate-pulse" style={{width: '85%'}}></div>
-                  </div>
-                </div>
-                <div className="text-center group cursor-pointer">
-                  <div className="text-3xl md:text-4xl font-bold text-purple-600 mb-2 group-hover:scale-110 transition-transform duration-300">
-                    99.8%
-                  </div>
-                  <div className="text-gray-600 group-hover:text-purple-600 transition-colors">Uptime</div>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2 overflow-hidden">
-                    <div className="bg-gradient-to-r from-purple-500 to-purple-600 h-2 rounded-full group-hover:animate-pulse" style={{width: '99.8%'}}></div>
-                  </div>
-                </div>
-                <div className="text-center group cursor-pointer">
-                  <div className="text-3xl md:text-4xl font-bold text-green-600 mb-2 group-hover:scale-110 transition-transform duration-300">
-                    100K+
-                  </div>
-                  <div className="text-gray-600 group-hover:text-green-600 transition-colors">Reclamaciones</div>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2 overflow-hidden">
-                    <div className="bg-gradient-to-r from-green-500 to-green-600 h-2 rounded-full group-hover:animate-pulse" style={{width: '100%'}}></div>
-                  </div>
-                </div>
-                <div className="text-center group cursor-pointer">
-                  <div className="text-3xl md:text-4xl font-bold text-orange-600 mb-2 group-hover:scale-110 transition-transform duration-300">
-                    24h
-                  </div>
-                  <div className="text-gray-600 group-hover:text-orange-600 transition-colors">Implementación</div>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2 overflow-hidden">
-                    <div className="bg-gradient-to-r from-orange-500 to-orange-600 h-2 rounded-full group-hover:animate-pulse" style={{width: '95%'}}></div>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -319,15 +247,15 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-4xl md:text-5xl font-bold mb-6 text-gray-900">
-              Tecnología que Revoluciona
+              Características
               <br />
               <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                el Cumplimiento Legal
+                de la Plataforma
               </span>
             </h2>
             <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-              Más que un software: una plataforma inteligente que aprende, 
-              automatiza y optimiza cada aspecto de tu gestión de reclamaciones.
+              Herramientas diseñadas para facilitar la gestión de reclamaciones 
+              y el cumplimiento de las normas peruanas.
             </p>
           </div>
 
@@ -364,14 +292,6 @@ export default function Landing() {
                         {feature.description}
                       </p>
                       
-                      {/* Interactive Demo Preview */}
-                      <div className={`transition-all duration-500 ${hoveredFeature === index ? 'opacity-100 max-h-20' : 'opacity-0 max-h-0'} overflow-hidden`}>
-                        <div className="bg-gray-50 rounded-lg p-3 border-l-4 border-gradient-to-r from-blue-500 to-purple-500">
-                          <p className="text-sm text-gray-700 font-mono">
-                            {feature.demo}
-                          </p>
-                        </div>
-                      </div>
                     </div>
                   </div>
                 </CardContent>
@@ -384,10 +304,10 @@ export default function Landing() {
             <Card className="bg-gradient-to-r from-green-500 to-emerald-500 border-0 text-white">
               <CardContent className="p-8 text-center">
                 <Award className="h-16 w-16 mx-auto mb-6 text-white" />
-                <h3 className="text-3xl font-bold mb-4">Cumplimiento Legal Garantizado</h3>
+                <h3 className="text-3xl font-bold mb-4">Marco Legal Peruano</h3>
                 <p className="text-xl text-green-100 mb-6 max-w-4xl mx-auto">
-                  Certificado por especialistas legales peruanos. Cumple al 100% con DS 011-2011-PCM, 
-                  DS 101-2022-PCM y Ley 29733. Auditorías automáticas y reportes para INDECOPI.
+                  Desarrollado siguiendo los requerimientos de las normas peruanas vigentes para 
+                  la gestión de libros de reclamaciones y protección de datos personales.
                 </p>
                 <div className="flex flex-wrap justify-center gap-4">
                   <Badge className="bg-white text-green-600 text-sm px-4 py-2">DS 011-2011-PCM</Badge>
@@ -401,73 +321,6 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Testimonials */}
-      <section id="testimonials" className="py-20 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl md:text-5xl font-bold mb-6 text-gray-900">
-              Líderes del Retail Confían en Nosotros
-            </h2>
-            <p className="text-xl text-gray-600">
-              Más de 500 empresas ya revolucionaron su gestión de reclamaciones
-            </p>
-          </div>
-
-          {/* Interactive Testimonials Carousel */}
-          <div className="relative max-w-4xl mx-auto">
-            <div className="overflow-hidden rounded-2xl">
-              <div 
-                className="flex transition-transform duration-700 ease-in-out"
-                style={{ transform: `translateX(-${currentTestimonial * 100}%)` }}
-              >
-                {testimonials.map((testimonial, index) => (
-                  <div key={index} className="w-full flex-shrink-0">
-                    <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-2xl">
-                      <CardContent className="p-12 text-center">
-                        <div className="flex justify-center mb-6">
-                          {[...Array(testimonial.rating)].map((_, i) => (
-                            <Star key={i} className="h-6 w-6 text-yellow-400 fill-current mr-1" />
-                          ))}
-                        </div>
-                        <blockquote className="text-2xl text-gray-700 mb-8 italic leading-relaxed">
-                          "{testimonial.content}"
-                        </blockquote>
-                        <div className="flex items-center justify-center space-x-4">
-                          <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-xl">
-                            {testimonial.name.split(' ').map(n => n[0]).join('')}
-                          </div>
-                          <div className="text-left">
-                            <div className="font-bold text-gray-900 text-lg">{testimonial.name}</div>
-                            <div className="text-gray-600">{testimonial.position}</div>
-                            <Badge className="mt-2 bg-gradient-to-r from-blue-100 to-purple-100 text-blue-700">
-                              {testimonial.company}
-                            </Badge>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </div>
-                ))}
-              </div>
-            </div>
-            
-            {/* Testimonial Navigation Dots */}
-            <div className="flex justify-center mt-8 space-x-3">
-              {testimonials.map((_, index) => (
-                <button
-                  key={index}
-                  onClick={() => setCurrentTestimonial(index)}
-                  className={`w-3 h-3 rounded-full transition-all duration-300 ${
-                    index === currentTestimonial 
-                      ? 'bg-gradient-to-r from-blue-500 to-purple-500 scale-125' 
-                      : 'bg-gray-300 hover:bg-gray-400'
-                  }`}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
 
       {/* Pricing */}
       <section id="pricing" className="py-20 px-4 sm:px-6 lg:px-8 bg-gray-50">
@@ -533,14 +386,8 @@ export default function Landing() {
 
           <div className="text-center mt-12">
             <p className="text-gray-600 mb-4">
-              ¿Necesitas más de 1,000 reclamaciones? ¿Múltiples marcas?
+              Precios informativos para futura versión comercial
             </p>
-            <Link href="/contact">
-              <Button variant="outline" size="lg">
-                Cotización Personalizada
-                <ArrowRight className="h-5 w-5 ml-2" />
-              </Button>
-            </Link>
           </div>
         </div>
       </section>
@@ -549,23 +396,23 @@ export default function Landing() {
       <section className="py-20 px-4 sm:px-6 lg:px-8 bg-gradient-to-r from-blue-600 to-purple-600 text-white">
         <div className="max-w-4xl mx-auto text-center">
           <h2 className="text-4xl md:text-5xl font-bold mb-6">
-            ¿Listo para Revolucionar tu Cumplimiento Legal?
+            Prueba la Plataforma
           </h2>
           <p className="text-xl text-blue-100 mb-8">
-            Únete a más de 500 empresas que ya transformaron su gestión de reclamaciones. 
-            Implementación en 24 horas, soporte dedicado incluido.
+            Explora las funcionalidades de gestión de libros de reclamaciones 
+            desarrolladas para el marco legal peruano.
           </p>
           
           <div className="flex flex-col sm:flex-row items-center justify-center space-y-4 sm:space-y-0 sm:space-x-6">
-            <Link href="/demo">
+            <Link href="/dashboard">
               <Button size="lg" className="bg-white text-blue-600 hover:bg-gray-100 text-lg px-8 py-4 h-auto">
                 <PlayCircle className="h-5 w-5 mr-2" />
-                Demo Gratis (5 minutos)
+                Acceder al Sistema
               </Button>
             </Link>
-            <Link href="/contact">
+            <Link href="/r/demo">
               <Button variant="outline" size="lg" className="border-white text-white hover:bg-white hover:text-blue-600 text-lg px-8 py-4 h-auto">
-                Hablar con Especialista
+                Portal Público
                 <ArrowRight className="h-5 w-5 ml-2" />
               </Button>
             </Link>
@@ -574,15 +421,15 @@ export default function Landing() {
           <div className="mt-12 flex items-center justify-center space-x-8 text-blue-200">
             <div className="flex items-center space-x-2">
               <Shield className="h-5 w-5" />
-              <span>100% Seguro</span>
+              <span>Desarrollo</span>
             </div>
             <div className="flex items-center space-x-2">
               <Clock className="h-5 w-5" />
-              <span>24h Setup</span>
+              <span>Demo</span>
             </div>
             <div className="flex items-center space-x-2">
               <Users className="h-5 w-5" />
-              <span>Soporte 24/7</span>
+              <span>Prueba</span>
             </div>
           </div>
         </div>
@@ -600,44 +447,39 @@ export default function Landing() {
                 <span className="text-xl font-bold">LibroVirtual.pe</span>
               </div>
               <p className="text-gray-400 leading-relaxed">
-                La plataforma líder en Perú para la gestión inteligente de libros de reclamaciones. 
-                Cumplimiento legal garantizado con tecnología de vanguardia.
+                Plataforma en desarrollo para la gestión digital de libros de reclamaciones 
+                siguiendo el marco normativo peruano.
               </p>
             </div>
             
             <div>
-              <h3 className="font-semibold mb-4">Producto</h3>
+              <h3 className="font-semibold mb-4">Sistema</h3>
               <ul className="space-y-2 text-gray-400">
                 <li><a href="#features" className="hover:text-white transition-colors">Características</a></li>
-                <li><a href="#pricing" className="hover:text-white transition-colors">Precios</a></li>
-                <li><a href="/demo" className="hover:text-white transition-colors">Demo</a></li>
-                <li><a href="/integrations" className="hover:text-white transition-colors">Integraciones</a></li>
+                <li><a href="/dashboard" className="hover:text-white transition-colors">Dashboard</a></li>
+                <li><a href="/r/demo" className="hover:text-white transition-colors">Portal Público</a></li>
               </ul>
             </div>
             
             <div>
-              <h3 className="font-semibold mb-4">Empresa</h3>
+              <h3 className="font-semibold mb-4">Desarrollo</h3>
               <ul className="space-y-2 text-gray-400">
-                <li><a href="/about" className="hover:text-white transition-colors">Acerca de</a></li>
-                <li><a href="/contact" className="hover:text-white transition-colors">Contacto</a></li>
-                <li><a href="/careers" className="hover:text-white transition-colors">Trabajar con nosotros</a></li>
-                <li><a href="/press" className="hover:text-white transition-colors">Prensa</a></li>
+                <li><span className="text-gray-500">Versión Demo</span></li>
+                <li><span className="text-gray-500">En Desarrollo</span></li>
               </ul>
             </div>
             
             <div>
               <h3 className="font-semibold mb-4">Legal</h3>
               <ul className="space-y-2 text-gray-400">
-                <li><a href="/privacy" className="hover:text-white transition-colors">Privacidad</a></li>
-                <li><a href="/terms" className="hover:text-white transition-colors">Términos</a></li>
-                <li><a href="/compliance" className="hover:text-white transition-colors">Cumplimiento</a></li>
-                <li><a href="/security" className="hover:text-white transition-colors">Seguridad</a></li>
+                <li><span className="text-gray-500">Marco Normativo</span></li>
+                <li><span className="text-gray-500">Peruano</span></li>
               </ul>
             </div>
           </div>
           
           <div className="border-t border-gray-800 mt-12 pt-8 text-center text-gray-400">
-            <p>&copy; 2024 LibroVirtual.pe. Todos los derechos reservados. Hecho con ❤️ en Perú.</p>
+            <p>&copy; 2024 LibroVirtual.pe. Sistema en desarrollo.</p>
           </div>
         </div>
       </footer>

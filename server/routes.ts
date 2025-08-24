@@ -81,13 +81,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Reports routes
   app.get('/api/reports/stats', requireAuth, async (req: any, res) => {
     try {
-      const stats = {
-        totalComplaints: 156,
-        complaintsGrowth: 12,
-        averageResponseTime: 8,
-        resolutionRate: 94,
-        complianceRate: 100
-      };
+      const stats = await storage.getReportStats(req.user.businessId);
       res.json(stats);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch report stats" });
@@ -96,11 +90,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/reports/monthly', requireAuth, async (req: any, res) => {
     try {
-      const reports = [
-        { month: "Diciembre 2024", complaints: 45, status: "completed" },
-        { month: "Noviembre 2024", complaints: 38, status: "completed" },
-        { month: "Octubre 2024", complaints: 52, status: "completed" }
-      ];
+      const reports = await storage.getMonthlyReports(req.user.businessId);
       res.json(reports);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch monthly reports" });
@@ -110,26 +100,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Businesses routes
   app.get('/api/businesses', requireAuth, async (req: any, res) => {
     try {
-      const businesses = [
-        {
-          id: "1",
-          name: "SuperMercado Central SAC",
-          ruc: "20123456789",
-          address: "Av. Principal 123, Lima",
-          legalRepresentative: "Juan Pérez García",
-          subscriptionStatus: "active",
-          establishmentCount: 3
-        },
-        {
-          id: "2", 
-          name: "Farmacia San Juan EIRL",
-          ruc: "20987654321",
-          address: "Jr. San Martín 456, Callao",
-          legalRepresentative: "María González López",
-          subscriptionStatus: "active",
-          establishmentCount: 1
-        }
-      ];
+      const businesses = await storage.getAllBusinesses();
       res.json(businesses);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch businesses" });
@@ -139,12 +110,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/businesses', requireAuth, async (req: any, res) => {
     try {
       const businessData = req.body;
-      const business = {
-        id: Date.now().toString(),
-        ...businessData,
-        establishmentCount: 0,
-        createdAt: new Date()
-      };
+      const business = await storage.createBusiness(businessData);
       res.json(business);
     } catch (error) {
       res.status(500).json({ message: "Failed to create business" });
@@ -154,27 +120,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Books routes
   app.get('/api/books', requireAuth, async (req: any, res) => {
     try {
-      const books = [
-        {
-          id: "1",
-          bookType: "reclamos",
-          establishmentName: "Sucursal Central",
-          establishmentId: "est1",
-          createdAt: new Date("2024-01-15"),
-          entriesCount: 45,
-          isActive: true,
-          description: "Libro oficial de reclamaciones"
-        },
-        {
-          id: "2", 
-          bookType: "sugerencias",
-          establishmentName: "Sucursal Norte",
-          establishmentId: "est2",
-          createdAt: new Date("2024-02-01"),
-          entriesCount: 23,
-          isActive: true
-        }
-      ];
+      const books = await storage.getBooks(req.user.businessId);
       res.json(books);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch books" });
@@ -184,13 +130,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/books', requireAuth, async (req: any, res) => {
     try {
       const bookData = req.body;
-      const book = {
-        id: Date.now().toString(),
-        ...bookData,
-        entriesCount: 0,
-        isActive: true,
-        createdAt: new Date()
-      };
+      const book = await storage.createBook(bookData);
       res.json(book);
     } catch (error) {
       res.status(500).json({ message: "Failed to create book" });
@@ -209,26 +149,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Users routes
   app.get('/api/users', requireAuth, async (req: any, res) => {
     try {
-      const users = [
-        {
-          id: "1",
-          username: "admin",
-          email: "admin@empresa.com",
-          role: "admin",
-          businessName: "SuperMercado Central SAC",
-          isActive: true,
-          createdAt: new Date("2024-01-01")
-        },
-        {
-          id: "2",
-          username: "operador1", 
-          email: "operador@empresa.com",
-          role: "user",
-          businessName: "SuperMercado Central SAC",
-          isActive: true,
-          createdAt: new Date("2024-01-15")
-        }
-      ];
+      const users = await storage.getAllUsers();
       res.json(users);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch users" });
@@ -238,13 +159,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/users', requireAuth, async (req: any, res) => {
     try {
       const userData = req.body;
-      const user = {
-        id: Date.now().toString(),
-        ...userData,
-        isActive: true,
-        createdAt: new Date()
-      };
-      delete user.password; // Don't return password
+      const user = await storage.createUser(userData);
       res.json(user);
     } catch (error) {
       res.status(500).json({ message: "Failed to create user" });
@@ -253,8 +168,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/users/:id/status', requireAuth, async (req: any, res) => {
     try {
+      const userId = req.params.id;
       const { isActive } = req.body;
-      res.json({ id: req.params.id, isActive, message: "Status updated" });
+      const user = await storage.updateUserStatus(userId, isActive);
+      res.json(user);
     } catch (error) {
       res.status(500).json({ message: "Failed to update user status" });
     }
@@ -263,7 +180,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/users/profile', requireAuth, async (req: any, res) => {
     try {
       const profileData = req.body;
-      res.json({ ...req.user, ...profileData, password: undefined });
+      const user = await storage.updateUserProfile(req.user.id, profileData);
+      res.json(user);
     } catch (error) {
       res.status(500).json({ message: "Failed to update profile" });
     }
@@ -271,6 +189,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/users/change-password', requireAuth, async (req: any, res) => {
     try {
+      const { currentPassword, newPassword } = req.body;
+      await storage.changeUserPassword(req.user.id, currentPassword, newPassword);
       res.json({ message: "Password changed successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to change password" });
@@ -279,12 +199,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/users/stats', requireAuth, async (req: any, res) => {
     try {
-      const stats = {
-        totalLogins: 143,
-        actionsPerformed: 892,
-        lastLogin: new Date("2024-01-20"),
-        complaintsManaged: 67
-      };
+      const stats = await storage.getUserStats(req.user.id);
       res.json(stats);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch user stats" });
@@ -294,22 +209,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // History routes
   app.get('/api/history/activity', requireAuth, async (req: any, res) => {
     try {
-      const activity = [
-        {
-          id: "1",
-          description: "Reclamación creada por cliente",
-          action: "create",
-          username: "operador1",
-          createdAt: new Date("2024-01-20T10:30:00")
-        },
-        {
-          id: "2",
-          description: "Perfil de usuario actualizado",
-          action: "update", 
-          username: "admin",
-          createdAt: new Date("2024-01-20T09:15:00")
-        }
-      ];
+      const { filterType, dateRange, searchTerm } = req.query;
+      const activity = await storage.getActivityHistory(req.user.businessId, {
+        filterType: filterType as string,
+        dateRange: parseInt(dateRange as string) || 30,
+        searchTerm: searchTerm as string,
+      });
       res.json(activity);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch activity history" });
@@ -318,18 +223,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/history/audit', requireAuth, async (req: any, res) => {
     try {
-      const auditLogs = [
-        {
-          id: "1",
-          tableName: "complaints",
-          operation: "UPDATE",
-          recordId: "comp123",
-          username: "operador1",
-          timestamp: new Date("2024-01-20T10:30:00"),
-          oldValues: { status: "new" },
-          newValues: { status: "in_progress" }
-        }
-      ];
+      const { filterType, dateRange } = req.query;
+      const auditLogs = await storage.getAuditLogs(req.user.businessId, {
+        filterType: filterType as string,
+        dateRange: parseInt(dateRange as string) || 30,
+      });
       res.json(auditLogs);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch audit logs" });
@@ -338,16 +236,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/history/system-changes', requireAuth, async (req: any, res) => {
     try {
-      const systemChanges = [
-        {
-          id: "1",
-          title: "Actualización del sistema",
-          type: "update",
-          description: "Mejoras en el sistema de notificaciones",
-          version: "1.2.3",
-          timestamp: new Date("2024-01-15T00:00:00")
-        }
-      ];
+      const { dateRange } = req.query;
+      const systemChanges = await storage.getSystemChanges({
+        dateRange: parseInt(dateRange as string) || 30,
+      });
       res.json(systemChanges);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch system changes" });
