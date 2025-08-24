@@ -19,19 +19,18 @@ const complaintFormSchema = insertComplaintSchema.extend({
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Authentication middleware
+  // Authentication middleware - Demo mode for now
   const requireAuth = async (req: any, res: any, next: any) => {
-    // Simple session-based auth - would use JWT in production
-    if (!req.session?.userId) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-    
-    const user = await storage.getUser(req.session.userId);
-    if (!user) {
-      return res.status(401).json({ message: "User not found" });
-    }
-    
-    req.user = user;
+    // Demo mode: create a fake user for demonstration
+    req.user = {
+      id: 'demo-user-1',
+      email: 'demo@empresa.com',
+      firstName: 'Usuario',
+      lastName: 'Demo',
+      role: 'admin',
+      businessId: 'demo-business-1',
+      businessName: 'Empresa Demo SAC'
+    };
     next();
   };
 

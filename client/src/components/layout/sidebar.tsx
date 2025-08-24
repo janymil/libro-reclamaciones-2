@@ -20,7 +20,7 @@ const navigationSections: NavigationSection[] = [
     items: [
       {
         name: 'Dashboard',
-        href: '/',
+        href: '/dashboard',
         icon: 'dashboard'
       }
     ]
