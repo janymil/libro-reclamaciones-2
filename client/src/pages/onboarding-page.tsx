@@ -254,9 +254,6 @@ export default function OnboardingPage() {
                           </div>
                         )}
                       </div>
-                      <p className="text-sm text-gray-600">
-                        La razón social se completará automáticamente
-                      </p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="businessName">Razón Social *</Label>
