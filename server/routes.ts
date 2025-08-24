@@ -33,6 +33,9 @@ const complaintFormSchema = insertComplaintSchema.extend({
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Trust proxy for rate limiting to work correctly in production
+  app.set('trust proxy', 1);
+  
   // Security middleware with relaxed CSP for development
   app.use(helmet({
     contentSecurityPolicy: process.env.NODE_ENV === 'production' ? {
