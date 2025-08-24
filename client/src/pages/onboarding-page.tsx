@@ -10,6 +10,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { Loader2, Building2, Book, Upload, ExternalLink, Search } from "lucide-react";
+import { departments, getProvinces, getDistricts } from '@/data/peru-locations';
 
 interface BusinessData {
   ruc: string;
@@ -38,6 +39,10 @@ export default function OnboardingPage() {
   const { toast } = useToast();
   const { user, isAuthenticated } = useAuth();
   const [isLoadingRUC, setIsLoadingRUC] = useState(false);
+  
+  // Location cascading state
+  const [availableProvinces, setAvailableProvinces] = useState<string[]>([]);
+  const [availableDistricts, setAvailableDistricts] = useState<string[]>([]);
 
   // Redirect if not authenticated or onboarding already completed
   useEffect(() => {
@@ -82,13 +87,28 @@ export default function OnboardingPage() {
       const response = await fetch(`/api/lookup-ruc/${ruc}`);
       const data = await response.json();
       
-      console.log('RUC lookup response:', data); // Debug log
       
       if (response.ok && data && data.razon_social) {
+        // Update business form with RUC data
         setBusinessForm(prev => ({
           ...prev,
-          businessName: data.razon_social
+          businessName: data.razon_social,
+          departamento: data.departamento || prev.departamento,
+          provincia: data.provincia || prev.provincia,
+          distrito: data.distrito || prev.distrito
         }));
+
+        // Update cascading location dropdowns if location data is available
+        if (data.departamento) {
+          const provinces = getProvinces(data.departamento);
+          setAvailableProvinces(provinces);
+          
+          if (data.provincia && provinces.includes(data.provincia)) {
+            const districts = getDistricts(data.departamento, data.provincia);
+            setAvailableDistricts(districts);
+          }
+        }
+
         toast({
           title: "RUC encontrado",
           description: `Razón social: ${data.razon_social}`,
@@ -144,6 +164,34 @@ export default function OnboardingPage() {
       });
     }
   });
+
+  // Handle location changes
+  const handleDepartmentChange = (department: string) => {
+    setBusinessForm(prev => ({
+      ...prev,
+      departamento: department,
+      provincia: '',
+      distrito: ''
+    }));
+    setAvailableProvinces(getProvinces(department));
+    setAvailableDistricts([]);
+  };
+
+  const handleProvinceChange = (province: string) => {
+    setBusinessForm(prev => ({
+      ...prev,
+      provincia: province,
+      distrito: ''
+    }));
+    setAvailableDistricts(getDistricts(businessForm.departamento, province));
+  };
+
+  const handleDistrictChange = (district: string) => {
+    setBusinessForm(prev => ({
+      ...prev,
+      distrito: district
+    }));
+  };
 
   const handleBusinessNext = (e: React.FormEvent) => {
     e.preventDefault();
@@ -310,40 +358,59 @@ export default function OnboardingPage() {
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="distrito">Distrito *</Label>
-                      <Input
-                        id="distrito"
-                        data-testid="input-distrito"
-                        type="text"
-                        value={businessForm.distrito}
-                        onChange={(e) => setBusinessForm({...businessForm, distrito: e.target.value})}
-                        required
-                        placeholder="San Borja"
-                      />
+                      <Label htmlFor="departamento">Departamento *</Label>
+                      <Select value={businessForm.departamento} onValueChange={handleDepartmentChange} required>
+                        <SelectTrigger data-testid="select-departamento">
+                          <SelectValue placeholder="Seleccionar departamento" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {departments.map((dept) => (
+                            <SelectItem key={dept} value={dept}>
+                              {dept}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="provincia">Provincia *</Label>
-                      <Input
-                        id="provincia"
-                        data-testid="input-provincia"
-                        type="text"
-                        value={businessForm.provincia}
-                        onChange={(e) => setBusinessForm({...businessForm, provincia: e.target.value})}
+                      <Select 
+                        value={businessForm.provincia} 
+                        onValueChange={handleProvinceChange} 
+                        disabled={!businessForm.departamento}
                         required
-                        placeholder="Lima"
-                      />
+                      >
+                        <SelectTrigger data-testid="select-provincia">
+                          <SelectValue placeholder="Seleccionar provincia" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableProvinces.map((prov) => (
+                            <SelectItem key={prov} value={prov}>
+                              {prov}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="departamento">Departamento *</Label>
-                      <Input
-                        id="departamento"
-                        data-testid="input-departamento"
-                        type="text"
-                        value={businessForm.departamento}
-                        onChange={(e) => setBusinessForm({...businessForm, departamento: e.target.value})}
+                      <Label htmlFor="distrito">Distrito *</Label>
+                      <Select 
+                        value={businessForm.distrito} 
+                        onValueChange={handleDistrictChange} 
+                        disabled={!businessForm.provincia}
                         required
-                        placeholder="Lima"
-                      />
+                      >
+                        <SelectTrigger data-testid="select-distrito">
+                          <SelectValue placeholder="Seleccionar distrito" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableDistricts.map((dist) => (
+                            <SelectItem key={dist} value={dist}>
+                              {dist}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
 
