@@ -21,7 +21,11 @@ interface LoginData {
 }
 
 export default function AuthPage() {
-  const [mode, setMode] = useState<AuthMode>('login');
+  // Check URL parameters to determine initial mode
+  const urlParams = new URLSearchParams(window.location.search);
+  const initialMode = urlParams.get('mode') === 'register' ? 'register' : 'login';
+  
+  const [mode, setMode] = useState<AuthMode>(initialMode);
   const [, setLocation] = useLocation();
   const { user, isAuthenticated, loginMutation, registerMutation } = useAuth();
 
