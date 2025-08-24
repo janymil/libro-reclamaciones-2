@@ -86,14 +86,14 @@ export default function Landing() {
   const plans = [
     {
       name: "Starter",
-      price: "S/ 299",
-      period: "/mes",
-      description: "Perfecto para pequeñas empresas",
+      price: "Gratis",
+      period: "",
+      description: "Plan gratuito para comenzar",
       features: [
-        "Hasta 100 reclamaciones/mes",
-        "1 establecimiento",
-        "IA básica de clasificación", 
-        "Reportes estándar",
+        "Hasta 10 reclamaciones",
+        "1 usuario",
+        "1 empresa",
+        "Funciones básicas",
         "Soporte por email"
       ],
       popular: false,
@@ -101,16 +101,16 @@ export default function Landing() {
     },
     {
       name: "Business",
-      price: "S/ 899",
+      price: "S/ 9.90",
       period: "/mes",
       description: "Ideal para empresas en crecimiento",
       features: [
-        "Hasta 1,000 reclamaciones/mes",
-        "Establecimientos ilimitados",
-        "IA avanzada + respuestas sugeridas",
-        "Analytics completo",
-        "API y integraciones",
-        "Soporte prioritario 24/7"
+        "Reclamaciones ilimitadas",
+        "Usuarios ilimitados",
+        "Múltiples establecimientos",
+        "Reportes completos",
+        "Soporte prioritario",
+        "S/ 99 al año (2 meses gratis)"
       ],
       popular: true,
       color: "border-blue-500 ring-2 ring-blue-200"
@@ -121,11 +121,11 @@ export default function Landing() {
       period: "",
       description: "Solución completa para corporaciones",
       features: [
-        "Reclamaciones ilimitadas",
+        "Todo del plan Business",
         "Multi-empresa y multi-marca",
-        "IA personalizada por industria",
-        "Auditoría y compliance avanzado",
-        "Integraciones empresariales (SAP, Oracle)",
+        "Integraciones avanzadas",
+        "Auditoría y compliance",
+        "API personalizada",
         "Gerente de cuenta dedicado"
       ],
       popular: false,
@@ -386,7 +386,10 @@ export default function Landing() {
 
           <div className="text-center mt-12">
             <p className="text-gray-600 mb-4">
-              Precios informativos para futura versión comercial
+              Comienza gratis, crece con tu negocio
+            </p>
+            <p className="text-sm text-gray-500">
+              Plan Business: Ahorra 20% pagando anualmente (S/ 99/año vs S/ 118.80/año mensual)
             </p>
           </div>
         </div>
