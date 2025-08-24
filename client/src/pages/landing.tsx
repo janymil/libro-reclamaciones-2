@@ -412,15 +412,15 @@ export default function Landing() {
           <div className="mt-12 flex items-center justify-center space-x-8 text-blue-200">
             <div className="flex items-center space-x-2">
               <Shield className="h-5 w-5" />
-              <span>Desarrollo</span>
+              <span>Seguro</span>
             </div>
             <div className="flex items-center space-x-2">
               <Clock className="h-5 w-5" />
-              <span>En Desarrollo</span>
+              <span>Rápido</span>
             </div>
             <div className="flex items-center space-x-2">
               <Users className="h-5 w-5" />
-              <span>Prueba</span>
+              <span>Fácil</span>
             </div>
           </div>
         </div>
