@@ -154,9 +154,9 @@ export default function Landing() {
               <Link href="/login">
                 <Button variant="outline" className="mr-2">Iniciar Sesión</Button>
               </Link>
-              <Link href="/demo">
+              <Link href="/dashboard">
                 <Button className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
-                  Demo Gratis
+                  Empezar
                 </Button>
               </Link>
             </div>
@@ -416,7 +416,7 @@ export default function Landing() {
             </div>
             <div className="flex items-center space-x-2">
               <Clock className="h-5 w-5" />
-              <span>Demo</span>
+              <span>En Desarrollo</span>
             </div>
             <div className="flex items-center space-x-2">
               <Users className="h-5 w-5" />
@@ -454,7 +454,7 @@ export default function Landing() {
             <div>
               <h3 className="font-semibold mb-4">Desarrollo</h3>
               <ul className="space-y-2 text-gray-400">
-                <li><span className="text-gray-500">Versión Demo</span></li>
+                <li><span className="text-gray-500">Beta</span></li>
                 <li><span className="text-gray-500">En Desarrollo</span></li>
               </ul>
             </div>
