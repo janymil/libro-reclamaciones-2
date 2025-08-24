@@ -132,7 +132,7 @@ class PDFService {
         doc.moveDown();
 
         doc.fontSize(12).font('Helvetica-Bold');
-        doc.text(`librovirtual.pe/r/${business.ruc}`, { align: 'center' });
+        doc.text(`librovirtual.pe/${business.ruc}`, { align: 'center' });
         doc.moveDown(2);
 
         doc.fontSize(14).font('Helvetica');

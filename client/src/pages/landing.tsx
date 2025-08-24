@@ -229,7 +229,7 @@ export default function Landing() {
                     Probar Plataforma
                   </Button>
                 </Link>
-                <Link href="/r/demo">
+                <Link href="/demo">
                   <Button variant="outline" size="lg" className="text-lg px-8 py-4 h-auto border-2">
                     Portal Público Demo
                     <ArrowRight className="h-5 w-5 ml-2" />
@@ -413,7 +413,7 @@ export default function Landing() {
                 Acceder al Sistema
               </Button>
             </Link>
-            <Link href="/r/demo">
+            <Link href="/demo">
               <Button variant="outline" size="lg" className="border-white text-white hover:bg-white hover:text-blue-600 text-lg px-8 py-4 h-auto">
                 Portal Público
                 <ArrowRight className="h-5 w-5 ml-2" />
@@ -460,7 +460,7 @@ export default function Landing() {
               <ul className="space-y-2 text-gray-400">
                 <li><a href="#features" className="hover:text-white transition-colors">Características</a></li>
                 <li><a href="/dashboard" className="hover:text-white transition-colors">Dashboard</a></li>
-                <li><a href="/r/demo" className="hover:text-white transition-colors">Portal Público</a></li>
+                <li><a href="/demo" className="hover:text-white transition-colors">Portal Público</a></li>
               </ul>
             </div>
             

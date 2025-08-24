@@ -553,9 +553,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Public business info (for complaint form)
-  app.get('/api/public/business/:ruc', async (req, res) => {
+  app.get('/api/public/business/:businessId', async (req, res) => {
     try {
-      const business = await storage.getBusinessByRuc(req.params.ruc);
+      const business = await storage.getBusinessById(req.params.businessId);
       
       if (!business) {
         return res.status(404).json({ message: "Business not found" });
