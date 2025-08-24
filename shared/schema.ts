@@ -35,6 +35,10 @@ export const users = pgTable("users", {
   passwordResetToken: varchar("password_reset_token", { length: 255 }),
   passwordResetExpires: timestamp("password_reset_expires"),
   
+  // Email verification
+  emailVerificationToken: varchar("email_verification_token", { length: 255 }),
+  emailVerificationExpires: timestamp("email_verification_expires"),
+  
   // Onboarding flow
   onboardingStep: integer("onboarding_step").notNull().default(1), // 1: user created, 2: business/libro configured
   onboardingCompleted: boolean("onboarding_completed").notNull().default(false),
