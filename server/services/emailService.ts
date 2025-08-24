@@ -8,24 +8,32 @@ interface EmailConfig {
     user: string;
     pass: string;
   };
+  tls?: {
+    rejectUnauthorized: boolean;
+  };
 }
 
 export class EmailService {
   private transporter: nodemailer.Transporter;
 
   constructor() {
-    // Initialize with environment variables
+    // SMTP configuration using provided Hostinger credentials
     const emailConfig: EmailConfig = {
-      host: process.env.SMTP_HOST || 'localhost',
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: process.env.SMTP_SECURE === 'true',
+      host: process.env.SMTP_HOST || 'smtp.hostinger.com',
+      port: parseInt(process.env.SMTP_PORT || '465'),
+      secure: parseInt(process.env.SMTP_PORT || '465') === 465, // true for 465, false for other ports
       auth: {
         user: process.env.SMTP_USER || '',
-        pass: process.env.SMTP_PASS || ''
+        pass: process.env.SMTP_PASSWORD || ''
       }
     };
 
-    this.transporter = nodemailer.createTransport(emailConfig);
+    this.transporter = nodemailer.createTransport({
+      ...emailConfig,
+      tls: {
+        rejectUnauthorized: false // Allow self-signed certificates if needed
+      }
+    });
   }
 
   /**
@@ -33,7 +41,7 @@ export class EmailService {
    */
   async sendWelcomePassword(email: string, firstName: string, password: string): Promise<void> {
     const mailOptions = {
-      from: `"LibroVirtual.pe" <${process.env.SMTP_FROM || 'noreply@librovirtual.pe'}>`,
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to: email,
       subject: '¡Bienvenido a LibroVirtual.pe! - Tu contraseña de acceso',
       html: `
