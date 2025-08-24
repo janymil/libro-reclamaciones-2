@@ -1,11 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useToast } from "@/hooks/use-toast";
-import { useMutation } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { Loader2, Mail, Lock, UserPlus, LogIn, Shield } from "lucide-react";
 
@@ -25,7 +23,7 @@ interface LoginData {
 export default function AuthPage() {
   const [mode, setMode] = useState<AuthMode>('login');
   const [, setLocation] = useLocation();
-  const { toast } = useToast();
+  const { user, isAuthenticated, loginMutation, registerMutation } = useAuth();
 
   // Registration form state
   const [registerForm, setRegisterForm] = useState<RegisterData>({
@@ -40,64 +38,33 @@ export default function AuthPage() {
     password: ''
   });
 
-  // Registration mutation (Step 1 of onboarding)
-  const registerMutation = useMutation({
-    mutationFn: async (data: RegisterData) => {
-      const response = await apiRequest('POST', '/api/auth/register', data);
-      return response.json();
-    },
-    onSuccess: (data) => {
-      toast({
-        title: "¡Cuenta creada exitosamente!",
-        description: data.message,
-      });
-      setMode('email-sent');
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Error al crear cuenta",
-        description: error.message,
-        variant: "destructive",
-      });
-    }
-  });
-
-  // Login mutation
-  const loginMutation = useMutation({
-    mutationFn: async (data: LoginData) => {
-      const response = await apiRequest('POST', '/api/auth/login', data);
-      return response.json();
-    },
-    onSuccess: (data) => {
-      toast({
-        title: "¡Inicio de sesión exitoso!",
-        description: "Bienvenido a LibroVirtual.pe",
-      });
-      
-      // Check onboarding status
-      if (!data.user.onboardingCompleted) {
+  // Redirect authenticated users
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      if (!user.onboardingCompleted) {
         setLocation('/onboarding');
       } else {
         setLocation('/dashboard');
       }
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Error al iniciar sesión",
-        description: error.message,
-        variant: "destructive",
-      });
     }
-  });
+  }, [isAuthenticated, user, setLocation]);
 
   const handleRegister = (e: React.FormEvent) => {
     e.preventDefault();
-    registerMutation.mutate(registerForm);
+    registerMutation.mutate(registerForm, {
+      onSuccess: () => {
+        setMode('email-sent');
+      }
+    });
   };
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    loginMutation.mutate(loginForm);
+    loginMutation.mutate(loginForm, {
+      onSuccess: (data) => {
+        // Redirection is handled in useEffect above
+      }
+    });
   };
 
   return (

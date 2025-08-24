@@ -151,10 +151,10 @@ export default function Landing() {
               <a href="#features" className="text-gray-600 hover:text-blue-600 transition-colors">Características</a>
               <a href="#pricing" className="text-gray-600 hover:text-blue-600 transition-colors">Precios</a>
               <a href="#testimonials" className="text-gray-600 hover:text-blue-600 transition-colors">Testimonios</a>
-              <Link href="/login">
+              <Link href="/auth">
                 <Button variant="outline" className="mr-2">Iniciar Sesión</Button>
               </Link>
-              <Link href="/dashboard">
+              <Link href="/auth">
                 <Button className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
                   Empezar
                 </Button>
@@ -223,7 +223,7 @@ export default function Landing() {
               </p>
 
               <div className="flex justify-center mb-12">
-                <Link href="/dashboard">
+                <Link href="/auth">
                   <Button size="lg" className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-lg px-8 py-4 h-auto">
                     <PlayCircle className="h-5 w-5 mr-2" />
                     Probar Plataforma
@@ -401,7 +401,7 @@ export default function Landing() {
           </p>
           
           <div className="flex flex-col sm:flex-row items-center justify-center space-y-4 sm:space-y-0 sm:space-x-6">
-            <Link href="/dashboard">
+            <Link href="/auth">
               <Button size="lg" className="bg-white text-blue-600 hover:bg-gray-100 text-lg px-8 py-4 h-auto">
                 <PlayCircle className="h-5 w-5 mr-2" />
                 Acceder al Sistema

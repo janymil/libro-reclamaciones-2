@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { Loader2, Building2, Book, Upload, ExternalLink } from "lucide-react";
 
@@ -33,6 +34,16 @@ export default function OnboardingPage() {
   const [step, setStep] = useState(1);
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { user, isAuthenticated } = useAuth();
+
+  // Redirect if not authenticated or onboarding already completed
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setLocation('/auth');
+    } else if (user?.onboardingCompleted) {
+      setLocation('/dashboard');
+    }
+  }, [isAuthenticated, user, setLocation]);
 
   // Business form state
   const [businessForm, setBusinessForm] = useState<BusinessData>({
