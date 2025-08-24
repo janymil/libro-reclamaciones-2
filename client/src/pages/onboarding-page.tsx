@@ -9,7 +9,7 @@ import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
-import { Loader2, Building2, Book, Upload, ExternalLink } from "lucide-react";
+import { Loader2, Building2, Book, Upload, ExternalLink, Search } from "lucide-react";
 
 interface BusinessData {
   ruc: string;
@@ -37,6 +37,7 @@ export default function OnboardingPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user, isAuthenticated } = useAuth();
+  const [isLoadingRUC, setIsLoadingRUC] = useState(false);
 
   // Redirect if not authenticated or onboarding already completed
   useEffect(() => {
@@ -69,6 +70,56 @@ export default function OnboardingPage() {
     whatsappNumber: '',
     websiteUrl: ''
   });
+
+  // RUC lookup function
+  const lookupRUC = async (ruc: string) => {
+    if (ruc.length !== 11 || !/^\d+$/.test(ruc)) {
+      return;
+    }
+
+    setIsLoadingRUC(true);
+    try {
+      const response = await fetch(`https://sunat-api.vpscenter.us/?ruc=${ruc}`);
+      const data = await response.json();
+      
+      if (data && data.razonSocial) {
+        setBusinessForm(prev => ({
+          ...prev,
+          businessName: data.razonSocial
+        }));
+        toast({
+          title: "RUC encontrado",
+          description: `Razón social: ${data.razonSocial}`,
+          variant: "default",
+        });
+      } else {
+        toast({
+          title: "RUC no encontrado",
+          description: "No se pudo encontrar información para este RUC",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error looking up RUC:', error);
+      toast({
+        title: "Error",
+        description: "No se pudo consultar el RUC. Ingrésalo manualmente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingRUC(false);
+    }
+  };
+
+  // Handle RUC input change with automatic lookup
+  const handleRUCChange = (value: string) => {
+    setBusinessForm(prev => ({ ...prev, ruc: value }));
+    
+    // Automatic lookup when RUC is complete
+    if (value.length === 11 && /^\d+$/.test(value)) {
+      lookupRUC(value);
+    }
+  };
 
   // Complete onboarding mutation
   const onboardingMutation = useMutation({
@@ -183,16 +234,27 @@ export default function OnboardingPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="ruc">RUC *</Label>
-                      <Input
-                        id="ruc"
-                        data-testid="input-ruc"
-                        type="text"
-                        value={businessForm.ruc}
-                        onChange={(e) => setBusinessForm({...businessForm, ruc: e.target.value})}
-                        required
-                        placeholder="20123456789"
-                        maxLength={11}
-                      />
+                      <div className="relative">
+                        <Input
+                          id="ruc"
+                          data-testid="input-ruc"
+                          type="text"
+                          value={businessForm.ruc}
+                          onChange={(e) => handleRUCChange(e.target.value)}
+                          required
+                          placeholder="20123456789"
+                          maxLength={11}
+                          className={isLoadingRUC ? "pr-10" : ""}
+                        />
+                        {isLoadingRUC && (
+                          <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                            <Search className="h-4 w-4 animate-spin text-blue-600" />
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-600">
+                        La razón social se completará automáticamente
+                      </p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="businessName">Razón Social *</Label>
@@ -204,6 +266,7 @@ export default function OnboardingPage() {
                         onChange={(e) => setBusinessForm({...businessForm, businessName: e.target.value})}
                         required
                         placeholder="Mi Empresa S.A.C."
+                        disabled={isLoadingRUC}
                       />
                     </div>
                   </div>
