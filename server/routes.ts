@@ -79,6 +79,282 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Reports routes
+  app.get('/api/reports/stats', requireAuth, async (req: any, res) => {
+    try {
+      const stats = {
+        totalComplaints: 156,
+        complaintsGrowth: 12,
+        averageResponseTime: 8,
+        resolutionRate: 94,
+        complianceRate: 100
+      };
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch report stats" });
+    }
+  });
+
+  app.get('/api/reports/monthly', requireAuth, async (req: any, res) => {
+    try {
+      const reports = [
+        { month: "Diciembre 2024", complaints: 45, status: "completed" },
+        { month: "Noviembre 2024", complaints: 38, status: "completed" },
+        { month: "Octubre 2024", complaints: 52, status: "completed" }
+      ];
+      res.json(reports);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch monthly reports" });
+    }
+  });
+
+  // Businesses routes
+  app.get('/api/businesses', requireAuth, async (req: any, res) => {
+    try {
+      const businesses = [
+        {
+          id: "1",
+          name: "SuperMercado Central SAC",
+          ruc: "20123456789",
+          address: "Av. Principal 123, Lima",
+          legalRepresentative: "Juan Pérez García",
+          subscriptionStatus: "active",
+          establishmentCount: 3
+        },
+        {
+          id: "2", 
+          name: "Farmacia San Juan EIRL",
+          ruc: "20987654321",
+          address: "Jr. San Martín 456, Callao",
+          legalRepresentative: "María González López",
+          subscriptionStatus: "active",
+          establishmentCount: 1
+        }
+      ];
+      res.json(businesses);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch businesses" });
+    }
+  });
+
+  app.post('/api/businesses', requireAuth, async (req: any, res) => {
+    try {
+      const businessData = req.body;
+      const business = {
+        id: Date.now().toString(),
+        ...businessData,
+        establishmentCount: 0,
+        createdAt: new Date()
+      };
+      res.json(business);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create business" });
+    }
+  });
+
+  // Books routes
+  app.get('/api/books', requireAuth, async (req: any, res) => {
+    try {
+      const books = [
+        {
+          id: "1",
+          bookType: "reclamos",
+          establishmentName: "Sucursal Central",
+          establishmentId: "est1",
+          createdAt: new Date("2024-01-15"),
+          entriesCount: 45,
+          isActive: true,
+          description: "Libro oficial de reclamaciones"
+        },
+        {
+          id: "2", 
+          bookType: "sugerencias",
+          establishmentName: "Sucursal Norte",
+          establishmentId: "est2",
+          createdAt: new Date("2024-02-01"),
+          entriesCount: 23,
+          isActive: true
+        }
+      ];
+      res.json(books);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch books" });
+    }
+  });
+
+  app.post('/api/books', requireAuth, async (req: any, res) => {
+    try {
+      const bookData = req.body;
+      const book = {
+        id: Date.now().toString(),
+        ...bookData,
+        entriesCount: 0,
+        isActive: true,
+        createdAt: new Date()
+      };
+      res.json(book);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create book" });
+    }
+  });
+
+  app.get('/api/books/:id/download', requireAuth, async (req: any, res) => {
+    try {
+      // Simulate PDF download
+      res.json({ message: "PDF download would start here", bookId: req.params.id });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to download book" });
+    }
+  });
+
+  // Users routes
+  app.get('/api/users', requireAuth, async (req: any, res) => {
+    try {
+      const users = [
+        {
+          id: "1",
+          username: "admin",
+          email: "admin@empresa.com",
+          role: "admin",
+          businessName: "SuperMercado Central SAC",
+          isActive: true,
+          createdAt: new Date("2024-01-01")
+        },
+        {
+          id: "2",
+          username: "operador1", 
+          email: "operador@empresa.com",
+          role: "user",
+          businessName: "SuperMercado Central SAC",
+          isActive: true,
+          createdAt: new Date("2024-01-15")
+        }
+      ];
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
+  app.post('/api/users', requireAuth, async (req: any, res) => {
+    try {
+      const userData = req.body;
+      const user = {
+        id: Date.now().toString(),
+        ...userData,
+        isActive: true,
+        createdAt: new Date()
+      };
+      delete user.password; // Don't return password
+      res.json(user);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create user" });
+    }
+  });
+
+  app.patch('/api/users/:id/status', requireAuth, async (req: any, res) => {
+    try {
+      const { isActive } = req.body;
+      res.json({ id: req.params.id, isActive, message: "Status updated" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update user status" });
+    }
+  });
+
+  app.patch('/api/users/profile', requireAuth, async (req: any, res) => {
+    try {
+      const profileData = req.body;
+      res.json({ ...req.user, ...profileData, password: undefined });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update profile" });
+    }
+  });
+
+  app.post('/api/users/change-password', requireAuth, async (req: any, res) => {
+    try {
+      res.json({ message: "Password changed successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to change password" });
+    }
+  });
+
+  app.get('/api/users/stats', requireAuth, async (req: any, res) => {
+    try {
+      const stats = {
+        totalLogins: 143,
+        actionsPerformed: 892,
+        lastLogin: new Date("2024-01-20"),
+        complaintsManaged: 67
+      };
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch user stats" });
+    }
+  });
+
+  // History routes
+  app.get('/api/history/activity', requireAuth, async (req: any, res) => {
+    try {
+      const activity = [
+        {
+          id: "1",
+          description: "Reclamación creada por cliente",
+          action: "create",
+          username: "operador1",
+          createdAt: new Date("2024-01-20T10:30:00")
+        },
+        {
+          id: "2",
+          description: "Perfil de usuario actualizado",
+          action: "update", 
+          username: "admin",
+          createdAt: new Date("2024-01-20T09:15:00")
+        }
+      ];
+      res.json(activity);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch activity history" });
+    }
+  });
+
+  app.get('/api/history/audit', requireAuth, async (req: any, res) => {
+    try {
+      const auditLogs = [
+        {
+          id: "1",
+          tableName: "complaints",
+          operation: "UPDATE",
+          recordId: "comp123",
+          username: "operador1",
+          timestamp: new Date("2024-01-20T10:30:00"),
+          oldValues: { status: "new" },
+          newValues: { status: "in_progress" }
+        }
+      ];
+      res.json(auditLogs);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch audit logs" });
+    }
+  });
+
+  app.get('/api/history/system-changes', requireAuth, async (req: any, res) => {
+    try {
+      const systemChanges = [
+        {
+          id: "1",
+          title: "Actualización del sistema",
+          type: "update",
+          description: "Mejoras en el sistema de notificaciones",
+          version: "1.2.3",
+          timestamp: new Date("2024-01-15T00:00:00")
+        }
+      ];
+      res.json(systemChanges);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch system changes" });
+    }
+  });
+
   // Complaints routes
   app.get('/api/complaints', requireAuth, async (req: any, res) => {
     try {

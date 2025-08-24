@@ -123,9 +123,9 @@ export default function Sidebar({ className }: SidebarProps) {
                 
                 return (
                   <Link key={item.name} href={item.href}>
-                    <a
+                    <div
                       className={cn(
-                        "flex items-center px-3 py-2 rounded-lg transition-colors text-sm",
+                        "flex items-center px-3 py-2 rounded-lg transition-colors text-sm cursor-pointer",
                         isLibros
                           ? "bg-orange-500 text-white font-medium"
                           : isActive
@@ -141,7 +141,7 @@ export default function Sidebar({ className }: SidebarProps) {
                           {item.badge}
                         </span>
                       )}
-                    </a>
+                    </div>
                   </Link>
                 );
               })}
