@@ -106,6 +106,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   };
 
+  // Test email endpoint (development only)
+  app.post('/api/test/email', async (req, res) => {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).json({ message: "Not found" });
+    }
+    
+    try {
+      const { emailService } = await import('./services/emailService');
+      
+      // Test connection first
+      const isConnected = await emailService.testConnection();
+      if (!isConnected) {
+        return res.status(500).json({ 
+          message: "SMTP connection failed",
+          success: false 
+        });
+      }
+      
+      // Send test email
+      await emailService.sendWelcomePassword(
+        'jan.milata@gmail.com',
+        'Jan',
+        'TEST123456'
+      );
+      
+      res.json({ 
+        message: "Test email sent successfully to jan.milata@gmail.com",
+        success: true,
+        smtp: {
+          host: process.env.SMTP_HOST,
+          port: process.env.SMTP_PORT,
+          user: process.env.SMTP_USER
+        }
+      });
+    } catch (error: any) {
+      console.error('Test email error:', error);
+      res.status(500).json({ 
+        message: `Email test failed: ${error.message}`,
+        success: false 
+      });
+    }
+  });
+
   // Step 1: User Registration (sends password via email)
   app.post('/api/auth/register', registerLimiter, async (req, res) => {
     try {
