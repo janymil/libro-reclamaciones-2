@@ -31,7 +31,6 @@ function Router() {
       <Route path="/profile" component={Profile} />
       <Route path="/history" component={History} />
       <Route path="/compliance" component={Compliance} />
-      <Route path="/:businessId" component={PublicPortal} />
       <Route component={NotFound} />
     </Switch>
   );

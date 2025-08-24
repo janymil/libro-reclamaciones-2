@@ -222,17 +222,11 @@ export default function Landing() {
                 Automatiza procesos y facilita el seguimiento de reclamaciones.
               </p>
 
-              <div className="flex flex-col sm:flex-row items-center justify-center space-y-4 sm:space-y-0 sm:space-x-6 mb-12">
+              <div className="flex justify-center mb-12">
                 <Link href="/dashboard">
                   <Button size="lg" className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-lg px-8 py-4 h-auto">
                     <PlayCircle className="h-5 w-5 mr-2" />
                     Probar Plataforma
-                  </Button>
-                </Link>
-                <Link href="/demo">
-                  <Button variant="outline" size="lg" className="text-lg px-8 py-4 h-auto border-2">
-                    Portal Público Demo
-                    <ArrowRight className="h-5 w-5 ml-2" />
                   </Button>
                 </Link>
               </div>
@@ -413,12 +407,6 @@ export default function Landing() {
                 Acceder al Sistema
               </Button>
             </Link>
-            <Link href="/demo">
-              <Button variant="outline" size="lg" className="border-white text-white hover:bg-white hover:text-blue-600 text-lg px-8 py-4 h-auto">
-                Portal Público
-                <ArrowRight className="h-5 w-5 ml-2" />
-              </Button>
-            </Link>
           </div>
 
           <div className="mt-12 flex items-center justify-center space-x-8 text-blue-200">
@@ -460,7 +448,6 @@ export default function Landing() {
               <ul className="space-y-2 text-gray-400">
                 <li><a href="#features" className="hover:text-white transition-colors">Características</a></li>
                 <li><a href="/dashboard" className="hover:text-white transition-colors">Dashboard</a></li>
-                <li><a href="/demo" className="hover:text-white transition-colors">Portal Público</a></li>
               </ul>
             </div>
             
