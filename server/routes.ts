@@ -107,6 +107,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
 
+
   // Step 1: User Registration (sends password via email)
   app.post('/api/auth/register', registerLimiter, async (req, res) => {
     try {

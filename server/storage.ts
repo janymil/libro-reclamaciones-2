@@ -166,12 +166,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createUser(userData: InsertUser & { password: string }): Promise<User> {
-    const hashedPassword = await bcrypt.hash(userData.password, 14); // Bank-level security (14+ rounds)
+    // Password is already hashed by AuthService - don't hash again!
     const [user] = await db
       .insert(users)
       .values({
         ...userData,
-        password: hashedPassword,
+        password: userData.password, // Already hashed by AuthService
       })
       .returning();
     return user;

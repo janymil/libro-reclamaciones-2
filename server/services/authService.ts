@@ -205,6 +205,7 @@ export class AuthService {
     userAgent: string
   ): Promise<{ success: boolean; message: string; user?: User }> {
     try {
+      
       // Check rate limiting - recent failed attempts
       const recentFailedAttempts = await this.getRecentFailedAttempts(loginData.email, ipAddress);
       if (recentFailedAttempts >= MAX_LOGIN_ATTEMPTS) {
