@@ -56,9 +56,12 @@ export const businesses = pgTable("businesses", {
   ruc: varchar("ruc", { length: 11 }).notNull().unique(),
   businessName: text("business_name").notNull(),
   commercialName: text("commercial_name"),
-  email: varchar("email", { length: 255 }).notNull(),
   phone: varchar("phone", { length: 20 }),
+  // Peruvian address structure
   address: text("address").notNull(),
+  distrito: varchar("distrito", { length: 100 }).notNull(),
+  provincia: varchar("provincia", { length: 100 }).notNull(),
+  departamento: varchar("departamento", { length: 100 }).notNull(),
   website: varchar("website", { length: 255 }),
   isActive: boolean("is_active").notNull().default(true),
   subscriptionPlan: varchar("subscription_plan", { length: 50 }).notNull().default("basic"),

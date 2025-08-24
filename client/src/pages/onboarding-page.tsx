@@ -15,9 +15,11 @@ interface BusinessData {
   ruc: string;
   businessName: string;
   commercialName: string;
-  email: string;
   phone: string;
   address: string;
+  distrito: string;
+  provincia: string;
+  departamento: string;
   website?: string;
 }
 
@@ -50,9 +52,11 @@ export default function OnboardingPage() {
     ruc: '',
     businessName: '',
     commercialName: '',
-    email: '',
     phone: '',
     address: '',
+    distrito: '',
+    provincia: '',
+    departamento: '',
     website: ''
   });
 
@@ -109,7 +113,7 @@ export default function OnboardingPage() {
         .replace(/[^a-z0-9]/g, '-')
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, ''),
-      notificationEmail: businessForm.email,
+      notificationEmail: user?.email || '',
       websiteUrl: businessForm.website
     }));
     
@@ -205,7 +209,7 @@ export default function OnboardingPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="commercialName">Nombre Comercial</Label>
+                    <Label htmlFor="commercialName">Nombre Comercial <span className="text-gray-500">(opcional)</span></Label>
                     <Input
                       id="commercialName"
                       data-testid="input-commercialName"
@@ -216,31 +220,17 @@ export default function OnboardingPage() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="email">Email empresarial *</Label>
-                      <Input
-                        id="email"
-                        data-testid="input-email"
-                        type="email"
-                        value={businessForm.email}
-                        onChange={(e) => setBusinessForm({...businessForm, email: e.target.value})}
-                        required
-                        placeholder="contacto@miempresa.com"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="phone">Teléfono *</Label>
-                      <Input
-                        id="phone"
-                        data-testid="input-phone"
-                        type="text"
-                        value={businessForm.phone}
-                        onChange={(e) => setBusinessForm({...businessForm, phone: e.target.value})}
-                        required
-                        placeholder="(01) 123-4567"
-                      />
-                    </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Teléfono *</Label>
+                    <Input
+                      id="phone"
+                      data-testid="input-phone"
+                      type="text"
+                      value={businessForm.phone}
+                      onChange={(e) => setBusinessForm({...businessForm, phone: e.target.value})}
+                      required
+                      placeholder="01 2345678 o 987654321"
+                    />
                   </div>
 
                   <div className="space-y-2">
@@ -252,8 +242,47 @@ export default function OnboardingPage() {
                       value={businessForm.address}
                       onChange={(e) => setBusinessForm({...businessForm, address: e.target.value})}
                       required
-                      placeholder="Av. Ejemplo 123, Lima, Perú"
+                      placeholder="Av. Javier Prado 123, Urbanización San Borja"
                     />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="distrito">Distrito *</Label>
+                      <Input
+                        id="distrito"
+                        data-testid="input-distrito"
+                        type="text"
+                        value={businessForm.distrito}
+                        onChange={(e) => setBusinessForm({...businessForm, distrito: e.target.value})}
+                        required
+                        placeholder="San Borja"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="provincia">Provincia *</Label>
+                      <Input
+                        id="provincia"
+                        data-testid="input-provincia"
+                        type="text"
+                        value={businessForm.provincia}
+                        onChange={(e) => setBusinessForm({...businessForm, provincia: e.target.value})}
+                        required
+                        placeholder="Lima"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="departamento">Departamento *</Label>
+                      <Input
+                        id="departamento"
+                        data-testid="input-departamento"
+                        type="text"
+                        value={businessForm.departamento}
+                        onChange={(e) => setBusinessForm({...businessForm, departamento: e.target.value})}
+                        required
+                        placeholder="Lima"
+                      />
+                    </div>
                   </div>
 
                   <div className="space-y-2">
