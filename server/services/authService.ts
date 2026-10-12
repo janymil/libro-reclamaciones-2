@@ -1,5 +1,5 @@
 import bcrypt from 'bcrypt';
-import crypto from 'crypto';
+import { randomBytes } from 'node:crypto';
 import { storage } from '../storage';
 import { emailService } from './emailService';
 import type { 
@@ -345,7 +345,7 @@ export class AuthService {
    * Generate password reset token (for future use)
    */
   async generatePasswordResetToken(email: string): Promise<string> {
-    const token = crypto.randomBytes(32).toString('hex');
+    const token = randomBytes(32).toString('hex');
     const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
     
     await storage.setPasswordResetToken(email, token, expires);

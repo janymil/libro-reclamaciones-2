@@ -1,8 +1,31 @@
 import OpenAI from "openai";
 
-const openai = new OpenAI({ 
-  apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_ENV_VAR || "default_key"
-});
+/**
+ * Model used for complaint analysis and response drafting.
+ *
+ * Configurable so it can be changed without a code edit; the previous hardcoded
+ * value was repeated in three places.
+ */
+export const AI_MODEL = process.env.AI_MODEL || "gpt-4o";
+
+let client: OpenAI | null = null;
+
+/**
+ * Lazily builds the OpenAI client, returning null when no API key is configured.
+ *
+ * AI features are optional - every caller degrades to heuristics or a
+ * "write it manually" message - so the server must still boot without a key.
+ * Building the client eagerly with a placeholder key used to move the failure to
+ * request time, where it was indistinguishable from a real API error.
+ */
+function getOpenAIClient(): OpenAI | null {
+  if (!process.env.OPENAI_API_KEY) {
+    return null;
+  }
+
+  client ??= new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return client;
+}
 
 export interface ComplaintClassification {
   type: 'reclamo' | 'queja';
@@ -15,8 +38,35 @@ export interface ComplaintClassification {
   sentiment: 'positive' | 'neutral' | 'negative';
 }
 
+/** Heuristic classification used when no API key is configured or a call fails. */
+const FALLBACK_CLASSIFICATION: ComplaintClassification = {
+  type: 'reclamo',
+  confidence: 0.5,
+  category: 'general',
+  priority: 'normal',
+  riskLevel: 'medium',
+  keywords: [],
+  sentiment: 'neutral',
+};
+
+const FALLBACK_RESPONSE =
+  'No se pudo generar una respuesta automática. Por favor, redacte manualmente la respuesta considerando la normativa vigente.';
+
+const FALLBACK_TRENDS = {
+  commonIssues: [] as string[],
+  categories: [] as string[],
+  severity: 'medium',
+  recommendations: [] as string[],
+  riskAreas: [] as string[],
+};
+
 class AIService {
   async classifyComplaint(complaintText: string): Promise<ComplaintClassification> {
+    const openai = getOpenAIClient();
+    if (!openai) {
+      return FALLBACK_CLASSIFICATION;
+    }
+
     try {
       const prompt = `
 Analiza la siguiente reclamación y clasifícala según la normativa peruana (DS 011-2011-PCM).
@@ -36,7 +86,7 @@ Considera la gravedad, urgencia legal y potencial impacto en la reputación del 
 `;
 
       const response = await openai.chat.completions.create({
-        model: "gpt-4o", // the newest OpenAI model is "gpt-4o" which was released May 13, 2024. do not change this unless explicitly requested by the user
+        model: AI_MODEL,
         messages: [
           {
             role: "system",
@@ -64,20 +114,16 @@ Considera la gravedad, urgencia legal y potencial impacto en la reputación del 
       };
     } catch (error) {
       console.error('Error in AI classification:', error);
-      // Return default classification if AI fails
-      return {
-        type: 'reclamo',
-        confidence: 0.5,
-        category: 'general',
-        priority: 'normal',
-        riskLevel: 'medium',
-        keywords: [],
-        sentiment: 'neutral',
-      };
+      return FALLBACK_CLASSIFICATION;
     }
   }
 
   async suggestResponse(complaintText: string, complaintType: 'reclamo' | 'queja'): Promise<string> {
+    const openai = getOpenAIClient();
+    if (!openai) {
+      return FALLBACK_RESPONSE;
+    }
+
     try {
       const prompt = `
 Como experto en atención al cliente y derecho del consumidor peruano, redacta una respuesta profesional para esta ${complaintType}.
@@ -97,7 +143,7 @@ Máximo 300 palabras.
 `;
 
       const response = await openai.chat.completions.create({
-        model: "gpt-4o", // the newest OpenAI model is "gpt-4o" which was released May 13, 2024. do not change this unless explicitly requested by the user
+        model: AI_MODEL,
         messages: [
           {
             role: "system",
@@ -115,11 +161,16 @@ Máximo 300 palabras.
       return response.choices[0].message.content || 'No se pudo generar una respuesta. Por favor, redacte manualmente.';
     } catch (error) {
       console.error('Error generating AI response:', error);
-      return 'No se pudo generar una respuesta automática. Por favor, redacte manualmente la respuesta considerando la normativa vigente.';
+      return FALLBACK_RESPONSE;
     }
   }
 
   async analyzeComplaintTrends(complaints: string[]): Promise<any> {
+    const openai = getOpenAIClient();
+    if (!openai) {
+      return FALLBACK_TRENDS;
+    }
+
     try {
       const prompt = `
 Analiza las siguientes reclamaciones para identificar patrones y tendencias:
@@ -135,7 +186,7 @@ Proporciona un análisis en formato JSON con:
 `;
 
       const response = await openai.chat.completions.create({
-        model: "gpt-4o", // the newest OpenAI model is "gpt-4o" which was released May 13, 2024. do not change this unless explicitly requested by the user
+        model: AI_MODEL,
         messages: [
           {
             role: "system",
@@ -153,13 +204,7 @@ Proporciona un análisis en formato JSON con:
       return JSON.parse(response.choices[0].message.content || '{}');
     } catch (error) {
       console.error('Error analyzing complaint trends:', error);
-      return {
-        commonIssues: [],
-        categories: [],
-        severity: 'medium',
-        recommendations: [],
-        riskAreas: [],
-      };
+      return FALLBACK_TRENDS;
     }
   }
 }

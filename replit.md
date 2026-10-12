@@ -20,6 +20,33 @@ The application follows a monorepo structure with clear separation between clien
 - **Styling**: Tailwind CSS with shadcn/ui component library for consistent UI
 - **Routing**: Wouter for lightweight client-side routing
 
+### Project Structure
+```
+client/src/              React app: pages/, components/, hooks/, lib/
+server/
+  index.ts               Process entry: express app, error handler, Vite/static
+  routes.ts              Thin facade: applies middleware, calls each route module
+  routes/*.routes.ts     One module per domain (auth, complaints, public, ai, ...)
+  middleware/            security (helmet + session), rateLimits, requireAuth
+  storage.ts             Barrel: composes the aggregate modules over IStorage
+  storage/*.storage.ts   One module per aggregate (users, complaints, reporting...)
+  services/              Business logic: auth, AI, email, PDF, business days
+  types/express.d.ts     Ambient `req.user` / `req.session.userId` types
+shared/
+  schema.ts              Drizzle tables and zod schemas
+  peru-holidays.ts       Only source of holiday data and business-day maths
+migrations/              Drizzle SQL migrations; apply extras with `npm run db:apply`
+```
+
+Both god files were split by feature: `routes.ts` (50 endpoints) and `storage.ts`
+(64 `IStorage` methods) are now stable, reviewable facades. Adding an endpoint means
+touching one small file.
+
+### Verifying changes
+- `npm run check` - TypeScript across client, server and shared
+- `npm test` - Vitest suite (Peruvian business-day maths, form validation, AI fallbacks)
+- `npm run build` - production client bundle plus the bundled server
+
 ### Database Design
 The system uses a multi-tenant PostgreSQL database with the following core entities:
 - **Users**: Business user accounts with role-based access

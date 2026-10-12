@@ -1,0 +1,17 @@
+-- ============================================================================
+-- Demo / sandbox accounts
+-- ============================================================================
+-- Adds the `is_demo` flag to `users`, which the application has required since
+-- demo accounts were introduced (`shared/schema.ts`, and the PATCH/PUT/DELETE
+-- guard in `server/middleware/requireAuth.ts`).
+--
+-- The column used to be added only by `legacy-*.sql` scripts applied by hand via
+-- `npm run db:apply`, which Drizzle's migration runner never sees. As a result a
+-- freshly created database (including the embedded PGlite database used for local
+-- development) was missing the column and every login failed with
+-- `column "is_demo" does not exist`.
+--
+-- `IF NOT EXISTS` keeps this idempotent for databases that already received the
+-- column from the manual scripts.
+-- ============================================================================
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "is_demo" boolean NOT NULL DEFAULT false;
