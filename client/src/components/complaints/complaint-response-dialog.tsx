@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { useUpdateComplaint, useAISuggestResponse } from "@/hooks/use-complaints";
+import { useUpdateComplaint, useAISuggestResponse, useSimilarComplaints, useCaseSummary, type CaseSummaryResult } from "@/hooks/use-complaints";
 import { useBusinessDays } from "@/hooks/use-business-days";
 import type { Complaint } from "@shared/schema";
 
@@ -33,16 +33,24 @@ export default function ComplaintResponseDialog({ complaint, open, onOpenChange 
   const { getBusinessDaysRemaining, getUrgencyLevel } = useBusinessDays();
   const updateComplaint = useUpdateComplaint();
   const suggestResponse = useAISuggestResponse();
+  const { data: similarComplaints } = useSimilarComplaints(complaint?.id ?? "", open);
 
   const [providerActions, setProviderActions] = useState("");
   const [providerResponse, setProviderResponse] = useState("");
   const [responseMethod, setResponseMethod] = useState("email");
+  const [caseSummary, setCaseSummary] = useState<CaseSummaryResult | null>(null);
+
+  const caseSummaryMutation = useCaseSummary();
 
   useEffect(() => {
     if (open && complaint) {
       setProviderActions(complaint.providerActions ?? "");
-      setProviderResponse(complaint.providerResponse ?? "");
+      // Pre-fill with the AI draft generated when the complaint was received
+      // (background enrichment) so staff can review, adjust and send in one
+      // pass instead of writing from scratch.
+      setProviderResponse(complaint.providerResponse ?? complaint.aiSuggestedResponse ?? "");
       setResponseMethod(complaint.responseMethod ?? "email");
+      setCaseSummary(null);
     }
   }, [open, complaint]);
 
@@ -61,8 +69,11 @@ export default function ComplaintResponseDialog({ complaint, open, onOpenChange 
       });
       setProviderResponse(result.suggestion);
       toast({
-        title: "Sugerencia generada",
-        description: "Revise y ajuste la respuesta antes de enviarla.",
+        title: result.source === 'fallback' ? "IA no disponible" : "Sugerencia generada",
+        description:
+          result.source === 'fallback'
+            ? "No hay proveedor de IA configurado: redacte la respuesta manualmente."
+            : "Revise y ajuste la respuesta antes de enviarla.",
       });
     } catch (error) {
       toast({
@@ -141,21 +152,119 @@ export default function ComplaintResponseDialog({ complaint, open, onOpenChange 
             )}
           </div>
 
+          {similarComplaints && similarComplaints.length > 0 && (
+            <div className="rounded-lg border border-purple-200 bg-purple-50 p-4" data-testid="similar-complaints">
+              <Label className="text-purple-700">Casos similares ({similarComplaints.length})</Label>
+              <p className="text-xs text-purple-600 mt-1 mb-2">
+                Reclamaciones anteriores parecidas a esta. Reutilice una respuesta ya enviada si aplica.
+              </p>
+              <div className="space-y-2">
+                {similarComplaints.map((similar) => (
+                  <div key={similar.complaintId} className="bg-white rounded border border-purple-100 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-sm font-medium">{similar.correlativeNumber}</span>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs">
+                          {Math.round(similar.similarity * 100)}% similar
+                        </Badge>
+                        {similar.providerResponse && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setProviderResponse(similar.providerResponse as string)}
+                            data-testid={`button-reuse-${similar.complaintId}`}
+                          >
+                            Reutilizar respuesta
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">{similar.complaintDetail}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div>
             <div className="mb-2 flex items-center justify-between">
               <Label htmlFor="provider-response">Respuesta para el consumidor *</Label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleSuggest}
-                disabled={suggestResponse.isPending}
-                data-testid="button-ai-suggest-inline"
-              >
-                <span className="material-icons mr-1 text-sm">psychology</span>
-                {suggestResponse.isPending ? "Generando..." : "Sugerir con IA"}
-              </Button>
+              {complaint.aiSuggestedResponse && !complaint.providerResponse && (
+                <span className="text-xs text-purple-600">
+                  Borrador IA precargado — revíselo y ajústelo antes de enviar
+                </span>
+              )}
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      const result = await caseSummaryMutation.mutateAsync(complaint.id);
+                      setCaseSummary(result);
+                    } catch {
+                      setCaseSummary(null);
+                      toast({
+                        title: "No se pudo generar el resumen",
+                        description: "Intente nuevamente en unos momentos.",
+                        variant: "destructive",
+                      });
+                    }
+                  }}
+                  disabled={caseSummaryMutation.isPending}
+                  data-testid="button-case-summary"
+                >
+                  <span className="material-icons mr-1 text-sm">summarize</span>
+                  {caseSummaryMutation.isPending ? "Resumiendo..." : "Resumen ejecutivo"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSuggest}
+                  disabled={suggestResponse.isPending}
+                  data-testid="button-ai-suggest-inline"
+                >
+                  <span className="material-icons mr-1 text-sm">psychology</span>
+                  {suggestResponse.isPending ? "Generando..." : "Sugerir con IA"}
+                </Button>
+              </div>
             </div>
+
+            {caseSummary && (
+              <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3" data-testid="case-summary-result">
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge className={
+                    caseSummary.riskLevel === 'high'
+                      ? 'bg-red-100 text-red-800'
+                      : caseSummary.riskLevel === 'medium'
+                        ? 'bg-yellow-100 text-yellow-800'
+                        : 'bg-green-100 text-green-800'
+                  }>
+                    Riesgo {caseSummary.riskLevel === 'high' ? 'alto' : caseSummary.riskLevel === 'medium' ? 'medio' : 'bajo'}
+                  </Badge>
+                  {caseSummary.source === 'fallback' && (
+                    <Badge className="bg-gray-100 text-gray-600">IA no disponible</Badge>
+                  )}
+                </div>
+                <p className="text-sm text-gray-800">{caseSummary.summary}</p>
+                {caseSummary.keyFacts.length > 0 && (
+                  <ul className="mt-2 list-disc list-inside text-xs text-gray-600">
+                    {caseSummary.keyFacts.map((fact, index) => (
+                      <li key={index}>{fact}</li>
+                    ))}
+                  </ul>
+                )}
+                {caseSummary.recommendedAction && (
+                  <p className="mt-2 text-xs font-medium text-blue-900">
+                    Siguiente paso: {caseSummary.recommendedAction}
+                  </p>
+                )}
+              </div>
+            )}
+
             <Textarea
               id="provider-response"
               rows={7}

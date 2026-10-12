@@ -5,6 +5,9 @@ import { libroStorage } from "./storage/libro.storage";
 import { businessStorage } from "./storage/business.storage";
 import { establishmentStorage } from "./storage/establishment.storage";
 import { complaintStorage } from "./storage/complaint.storage";
+import { attachmentStorage } from "./storage/attachment.storage";
+import { accessStorage } from "./storage/access.storage";
+import { integrationStorage } from "./storage/integration.storage";
 import { arcoStorage } from "./storage/arco.storage";
 import { complianceStorage } from "./storage/compliance.storage";
 import { notificationStorage } from "./storage/notification.storage";
@@ -28,6 +31,9 @@ export const storage: IStorage = {
   ...businessStorage,
   ...establishmentStorage,
   ...complaintStorage,
+  ...attachmentStorage,
+  ...accessStorage,
+  ...integrationStorage,
   ...arcoStorage,
   ...complianceStorage,
   ...notificationStorage,

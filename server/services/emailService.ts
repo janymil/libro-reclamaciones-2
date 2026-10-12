@@ -14,6 +14,35 @@ interface EmailConfig {
   };
 }
 
+/**
+ * Per-business email customization (Phase 2.8). Values come from the
+ * libro_configuration record; everything is optional and falls back to the
+ * default LibroVirtual.pe wording.
+ */
+export interface EmailCustomization {
+  subjectPrefix?: string | null;
+  headerText?: string | null;
+  footerText?: string | null;
+}
+
+/** Applies the subject prefix, if configured. */
+function applySubject(subject: string, customization?: EmailCustomization): string {
+  const prefix = customization?.subjectPrefix?.trim();
+  return prefix ? `${prefix} ${subject}` : subject;
+}
+
+/** Renders the custom header block, or an empty string when not configured. */
+function renderHeader(customization?: EmailCustomization): string {
+  const text = customization?.headerText?.trim();
+  return text ? `<div class="brand-header">${text}</div>` : '';
+}
+
+/** Renders the custom footer line inside the standard footer block. */
+function renderFooter(customization?: EmailCustomization): string {
+  const text = customization?.footerText?.trim();
+  return text ? `<p>${text}</p>` : '';
+}
+
 export class EmailService {
   private transporter: nodemailer.Transporter;
 
@@ -426,11 +455,11 @@ export class EmailService {
   /**
    * Send the provider's response to a consumer complaint
    */
-  async sendComplaintResponse(email: string, complaint: Complaint, response: string): Promise<void> {
+  async sendComplaintResponse(email: string, complaint: Complaint, response: string, customization?: EmailCustomization): Promise<void> {
     const mailOptions = {
       from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to: email,
-      subject: `Respuesta a tu ${complaint.complaintType} ${complaint.correlativeNumber} - LibroVirtual.pe`,
+      subject: applySubject(`Respuesta a tu ${complaint.complaintType} ${complaint.correlativeNumber} - LibroVirtual.pe`, customization),
       html: `
         <!DOCTYPE html>
         <html>
@@ -450,6 +479,7 @@ export class EmailService {
         </head>
         <body>
           <div class="container">
+            ${renderHeader(customization)}
             <div class="header">
               <h1>📄 Respuesta a tu reclamación</h1>
             </div>
@@ -465,6 +495,7 @@ export class EmailService {
               <p>Si tienes alguna consulta adicional, responde a este correo.</p>
             </div>
             <div class="footer">
+              ${renderFooter(customization)}
               <p>© 2024 LibroVirtual.pe</p>
             </div>
           </div>
@@ -491,13 +522,20 @@ LibroVirtual.pe
   }
 
   /**
-   * Send the complaint confirmation together with the generated PDF receipt
+   * Send the complaint confirmation together with the generated PDF receipt.
+   * The optional customization applies the business's own subject prefix and
+   * header/footer texts (Phase 2.8).
    */
-  async sendComplaintConfirmation(email: string, complaint: Complaint, pdfBuffer?: Buffer): Promise<void> {
+  async sendComplaintConfirmation(
+    email: string,
+    complaint: Complaint,
+    pdfBuffer?: Buffer,
+    customization?: EmailCustomization,
+  ): Promise<void> {
     const mailOptions = {
       from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to: email,
-      subject: `Confirmación de ${complaint.complaintType} ${complaint.correlativeNumber} - LibroVirtual.pe`,
+      subject: applySubject(`Confirmación de ${complaint.complaintType} ${complaint.correlativeNumber} - LibroVirtual.pe`, customization),
       html: `
         <!DOCTYPE html>
         <html>
@@ -517,6 +555,7 @@ LibroVirtual.pe
         </head>
         <body>
           <div class="container">
+            ${renderHeader(customization)}
             <div class="header">
               <h1>✅ Reclamación registrada</h1>
             </div>
@@ -536,6 +575,7 @@ LibroVirtual.pe
               <p>Adjuntamos el documento PDF con el detalle de tu registro.</p>
             </div>
             <div class="footer">
+              ${renderFooter(customization)}
               <p>© 2024 LibroVirtual.pe</p>
             </div>
           </div>
@@ -553,6 +593,9 @@ Fecha límite de respuesta: ${new Date(complaint.dueDate).toLocaleDateString('es
 
 Conforme al DS 101-2022-PCM la empresa cuenta con 15 días hábiles para responder.
 
+Los datos de esta reclamación se conservan por 24 meses y luego se anonimizan,
+de acuerdo con la Ley N° 29733.
+
 LibroVirtual.pe
       `,
       attachments: pdfBuffer
@@ -569,6 +612,35 @@ LibroVirtual.pe
     } catch (error) {
       console.error('Error sending complaint confirmation:', error);
       throw new Error('Failed to send complaint confirmation');
+    }
+  }
+
+  /**
+   * SLA escalation notice for the responsible staff member (Phase 2.9).
+   * Fire-and-forget: failures are logged by the caller, never the complaint flow.
+   */
+  async sendSlaEscalation(email: string, businessName: string, correlativeNumber: string, message: string): Promise<void> {
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to: email,
+      subject: `⚠️ ESCALADO SLA: ${correlativeNumber} - ${businessName}`,
+      text: `
+Escalado automático de SLA - ${businessName}
+
+${message}
+
+El plazo legal de respuesta es de 15 días hábiles (DS 101-2022-PCM).
+Revise la reclamación en el panel de gestión: /reclamos
+
+LibroVirtual.pe
+      `,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending SLA escalation:', error);
+      throw new Error('Failed to send SLA escalation');
     }
   }
 

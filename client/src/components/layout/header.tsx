@@ -1,7 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
+import { useUserBusinesses, type UserBusiness } from "@/hooks/use-subscription";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Business } from "@shared/schema";
 import {
   DropdownMenu,
@@ -35,6 +37,9 @@ export default function Header({
     queryKey: ["/api/businesses/current"],
   });
 
+  // Multi-RUC switcher (Phase 2.7): the businesses this login may manage
+  const { data: userBusinesses } = useUserBusinesses();
+
   const { data: notifications } = useQuery<NotificationItem[]>({
     queryKey: ["/api/notifications"],
   });
@@ -53,15 +58,66 @@ export default function Header({
     }
   };
 
+  const switchableBusinesses: UserBusiness[] = (userBusinesses ?? []).filter(
+    (entry) => !entry.isActive,
+  );
+
+  const handleSwitchBusiness = async (businessId: string) => {
+    try {
+      await apiRequest("POST", "/api/auth/switch-business", { businessId });
+      // The whole cache belongs to the previous business: drop everything
+      queryClient.clear();
+      setLocation("/panel");
+      window.location.reload();
+    } catch {
+      // Non fatal: the dropdown simply stays
+    }
+  };
+
   return (
-    <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4" data-testid="header">
+    <header className="border-b border-[#e3d9c6] bg-[#fdfaf3]/90 px-6 py-4 backdrop-blur-sm" data-testid="header">
       <div className="flex items-center justify-between">
         <div data-testid="header-info">
-          <h2 className="text-2xl font-semibold text-gray-900">{title}</h2>
-          <p className="text-sm text-gray-600">{subtitle || businessName}</p>
+          <h2 className="font-display text-2xl font-semibold tracking-tight text-[#1b1611]">{title}</h2>
+          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5c5246]">{subtitle || businessName}</p>
         </div>
 
         <div className="flex items-center space-x-4">
+          {/* Multi-RUC switcher (Phase 2.7) */}
+          {switchableBusinesses.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="max-w-[220px] border-[#e3d9c6] bg-transparent text-[#1b1611] hover:bg-[#f3eadc]"
+                  title="Cambiar de empresa (RUC)"
+                  data-testid="business-switcher"
+                >
+                  <span className="material-icons mr-1 text-sm">business</span>
+                  <span className="truncate">{businessName || "Empresa"}</span>
+                  <span className="material-icons ml-1 text-sm">expand_more</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel>Cambiar de empresa</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {switchableBusinesses.map((entry) => (
+                  <DropdownMenuItem
+                    key={entry.businessId}
+                    onClick={() => handleSwitchBusiness(entry.businessId)}
+                    data-testid={`switch-business-${entry.ruc}`}
+                  >
+                    <span className="flex flex-col">
+                      <span className="font-medium truncate">{entry.businessName}</span>
+                      <span className="text-xs text-gray-500">RUC {entry.ruc}</span>
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
           {/* Notification Bell */}
           <Button
             variant="ghost"
@@ -90,14 +146,14 @@ export default function Header({
                 className="flex items-center space-x-3 h-auto p-2"
                 data-testid="user-profile-button"
               >
-                <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center">
-                  <span className="text-white text-sm font-medium">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#c02b0a] text-white shadow-[0_6px_14px_-6px_rgba(192,43,10,0.8)]">
+                  <span className="text-xs font-semibold tracking-wide">
                     {userName.split(' ').map(n => n[0]).join('').slice(0, 2)}
                   </span>
                 </div>
-                <div className="hidden md:block text-left">
-                  <p className="text-sm font-medium text-gray-900">{userName}</p>
-                  <p className="text-xs text-gray-500">
+                <div className="hidden text-left md:block">
+                  <p className="text-sm font-medium text-[#1b1611]">{userName}</p>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5c5246]">
                     {user?.role === 'admin' ? 'Administrador' : user?.role === 'viewer' ? 'Visualizador' : 'Usuario'}
                   </p>
                 </div>

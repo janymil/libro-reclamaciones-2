@@ -4,6 +4,7 @@ import { insertEstablishmentSchema } from "@shared/schema";
 
 import { storage } from "../storage";
 import { requireAuth } from "../middleware/requireAuth";
+import { enforceQuota } from "../services/subscriptionService";
 
 /**
  * Establishments (sucursales) belonging to the authenticated business.
@@ -26,7 +27,13 @@ export function registerEstablishmentsRoutes(app: Express): void {
         ...req.body,
         businessId: req.user.businessId,
       });
-      
+
+      // Plan quota on sucursales (Phase 2.6)
+      const quota = await enforceQuota(req.user.businessId, req.user.id, 'establishments');
+      if (!quota.allowed) {
+        return res.status(402).json({ message: quota.reason, code: "quota_exceeded" });
+      }
+
       const establishment = await storage.createEstablishment(data);
       res.json(establishment);
     } catch (error) {

@@ -33,3 +33,21 @@ export const requireAuth = async (req: any, res: any, next: any) => {
     return res.status(500).json({ message: "Error de autenticación" });
   }
 };
+
+/**
+ * Blocks an endpoint for the shared, publicly known demo account even when the
+ * request is a POST.
+ *
+ * The demo password is public, so settings-level actions (changing the plan,
+ * minting API keys/webhooks, creating tenants or logins) must not be reachable
+ * from it - otherwise any visitor could hijack the shared demo tenant.
+ * Creating complaints stays allowed, which is what the demo is for.
+ */
+export const requireNonDemo = (req: any, res: any, next: any) => {
+  if (req.user?.isDemo) {
+    return res.status(403).json({
+      message: "Cuenta de demostración: esta configuración no está disponible en el entorno de prueba.",
+    });
+  }
+  next();
+};

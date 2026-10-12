@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { MonthlyReport, ReportStats } from '@/lib/api-types';
 import { downloadCsv, todayStamp } from '@/lib/export';
 import { downloadSirecReport } from '@/lib/sirec';
+import { useReincidenceReport, useAbusiveClauses } from '@/hooks/use-complaints';
 import type { Complaint } from '@shared/schema';
 import AppLayout from '@/components/layout/app-layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,11 +11,50 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { CalendarDays, Download, FileText, TrendingUp } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { CalendarDays, Download, FileText, TrendingUp, PackageSearch, Gavel } from 'lucide-react';
 
 export default function Reports() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [contractText, setContractText] = useState('');
+
+  // Phase 1.3: INDECOPI expediente download
+  const [isBuildingExpediente, setIsBuildingExpediente] = useState(false);
+
+  // Phase 3.11: reincidence panel + abusive-clause detector
+  const reincidence = useReincidenceReport();
+  const abusiveClauses = useAbusiveClauses();
+
+  const downloadExpediente = async () => {
+    try {
+      setIsBuildingExpediente(true);
+      const params = new URLSearchParams();
+      if (startDate) params.set('dateFrom', startDate);
+      if (endDate) params.set('dateTo', endDate);
+
+      const response = await fetch(`/api/complaints/expediente/descargar?${params.toString()}`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error('No se pudo generar el expediente');
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `expediente-indecopi-${todayStamp()}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Expediente download failed:', error);
+    } finally {
+      setIsBuildingExpediente(false);
+    }
+  };
 
   const { data: reportStats, isLoading } = useQuery<ReportStats>({
     queryKey: ['/api/reports/stats'],
@@ -177,6 +217,7 @@ export default function Reports() {
             <TabsTrigger value="monthly" data-testid="tab-monthly">Reportes Mensuales</TabsTrigger>
             <TabsTrigger value="custom" data-testid="tab-custom">Reporte Personalizado</TabsTrigger>
             <TabsTrigger value="legal" data-testid="tab-legal">Cumplimiento Legal</TabsTrigger>
+            <TabsTrigger value="analitica" data-testid="tab-analitica">Analítica IA</TabsTrigger>
           </TabsList>
 
           <TabsContent value="monthly" className="space-y-4">
@@ -298,6 +339,152 @@ export default function Reports() {
                 <Button className="w-full" onClick={exportAudit} data-testid="button-audit-report">
                   Generar Reporte de Auditoría
                 </Button>
+              </CardContent>
+            </Card>
+
+            {/* Expediente digital INDECOPI (Phase 1.3) */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Expediente digital para INDECOPI</CardTitle>
+                <CardDescription>
+                  Descarga un ZIP listo para remisión a la autoridad: constancias PDF de cada
+                  reclamación, evidencias adjuntas, registro SIREC (CSV) y un manifiesto con marca
+                  de tiempo y código de verificación. Respeta el rango de fechas seleccionado arriba.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  className="w-full"
+                  onClick={downloadExpediente}
+                  disabled={isBuildingExpediente}
+                  data-testid="button-download-expediente"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  {isBuildingExpediente ? 'Generando expediente...' : 'Descargar expediente (ZIP)'}
+                </Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="analitica" className="space-y-4">
+            {/* Reincidence panel (Phase 3.11) */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <PackageSearch className="h-5 w-5" />
+                  Panel de reincidencia
+                </CardTitle>
+                <CardDescription>
+                  Productos y sucursales que generan reclamaciones repetidas - la señal más clara
+                  de un problema estructural por corregir.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {reincidence.isLoading && <p className="text-sm text-gray-500">Calculando reincidencia...</p>}
+
+                {reincidence.data && (
+                  <>
+                    <div>
+                      <h4 className="text-sm font-medium mb-2">Por producto / servicio</h4>
+                      {reincidence.data.byProduct.length === 0 ? (
+                        <p className="text-sm text-gray-500">Sin reincidencias por producto.</p>
+                      ) : (
+                        <ul className="space-y-2" data-testid="reincidence-products">
+                          {reincidence.data.byProduct.map((entry) => (
+                            <li key={entry.key} className="flex items-center justify-between border rounded-lg px-3 py-2 text-sm">
+                              <span className="truncate">{entry.key}</span>
+                              <span className="whitespace-nowrap text-gray-600">
+                                {entry.total} reclamos · {entry.resolved} resueltos
+                                {entry.overdue > 0 && <span className="text-red-600"> · {entry.overdue} vencidos</span>}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-medium mb-2">Por sucursal</h4>
+                      {reincidence.data.byEstablishment.length === 0 ? (
+                        <p className="text-sm text-gray-500">Sin reincidencias por sucursal.</p>
+                      ) : (
+                        <ul className="space-y-2" data-testid="reincidence-establishments">
+                          {reincidence.data.byEstablishment.map((entry) => (
+                            <li key={entry.key} className="flex items-center justify-between border rounded-lg px-3 py-2 text-sm">
+                              <span className="truncate">{entry.key}</span>
+                              <span className="whitespace-nowrap text-gray-600">
+                                {entry.total} reclamos · {entry.resolved} resueltos
+                                {entry.overdue > 0 && <span className="text-red-600"> · {entry.overdue} vencidos</span>}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Abusive-clause detector (Phase 3.11) */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Gavel className="h-5 w-5" />
+                  Detector de cláusulas abusivas
+                </CardTitle>
+                <CardDescription>
+                  Pegue las condiciones de sus contratos o contratos de adhesión y la IA las
+                  revisará contra el artículo 47 del Código de Protección y Defensa del Consumidor.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label htmlFor="contract-text">Texto del contrato / condiciones</Label>
+                  <Textarea
+                    id="contract-text"
+                    rows={6}
+                    value={contractText}
+                    onChange={(e) => setContractText(e.target.value)}
+                    placeholder="Pegue aquí los términos y condiciones, contratos o letras chicas..."
+                    data-testid="input-contract-text"
+                  />
+                </div>
+                <Button
+                  className="w-full"
+                  disabled={contractText.trim().length < 20 || abusiveClauses.isPending}
+                  onClick={() => abusiveClauses.mutate(contractText)}
+                  data-testid="button-analyze-clauses"
+                >
+                  {abusiveClauses.isPending ? 'Analizando...' : 'Analizar cláusulas'}
+                </Button>
+
+                {abusiveClauses.data && (
+                  <div className="space-y-3" data-testid="abusive-clauses-result">
+                    <p className={`font-medium ${abusiveClauses.data.hasAbusiveClauses ? 'text-red-600' : 'text-green-600'}`}>
+                      {abusiveClauses.data.hasAbusiveClauses
+                        ? '⚠ Se detectaron cláusulas potencialmente abusivas:'
+                        : '✓ No se detectaron cláusulas potencialmente abusivas.'}
+                    </p>
+                    {abusiveClauses.data.clauses.map((clause, index) => (
+                      <div key={index} className="border-l-4 border-red-400 bg-red-50 p-3 rounded">
+                        <p className="text-sm font-medium text-gray-900">"{clause.quote}"</p>
+                        <p className="text-sm text-gray-700 mt-1">{clause.issue}</p>
+                        <p className="text-xs text-gray-500 mt-1">Base legal: {clause.legalBasis}</p>
+                      </div>
+                    ))}
+                    {abusiveClauses.data.recommendations.length > 0 && (
+                      <div>
+                        <p className="text-sm font-medium text-gray-900 mb-1">Recomendaciones:</p>
+                        <ul className="list-disc list-inside text-sm text-gray-700">
+                          {abusiveClauses.data.recommendations.map((recommendation, index) => (
+                            <li key={index}>{recommendation}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

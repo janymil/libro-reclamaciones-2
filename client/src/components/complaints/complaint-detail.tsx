@@ -1,6 +1,9 @@
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { COMPLAINT_TYPES, COMPLAINT_STATUSES, COMPLAINT_PRIORITIES } from "@/lib/constants";
+import { useComplaintAttachments, useDeleteAttachment } from "@/hooks/use-complaints";
+import { useToast } from "@/hooks/use-toast";
 import type { Complaint } from "@shared/schema";
 
 const RESPONSE_METHODS: Record<string, string> = {
@@ -8,6 +11,86 @@ const RESPONSE_METHODS: Record<string, string> = {
   letter: "Carta / Cargo",
   phone: "Teléfono",
 };
+
+const formatSize = (bytes: number): string => {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${Math.round(bytes / 1024)} KB`;
+};
+
+/** Evidence files the consumer attached to this complaint (Phase 1.1). */
+function AttachmentsSection({ complaintId }: { complaintId: string }) {
+  const { toast } = useToast();
+  const { data: attachments, isLoading } = useComplaintAttachments(complaintId);
+  const deleteAttachment = useDeleteAttachment();
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Archivos Adjuntos</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-gray-500">Cargando adjuntos...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!attachments || attachments.length === 0) {
+    return null;
+  }
+
+  return (
+    <Card data-testid="attachments-section">
+      <CardHeader>
+        <CardTitle>Archivos Adjuntos ({attachments.length})</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ul className="space-y-2">
+          {attachments.map((attachment) => (
+            <li
+              key={attachment.id}
+              className="flex items-center justify-between border rounded-lg px-3 py-2 text-sm"
+            >
+              <a
+                href={`/api/attachments/${attachment.id}/file`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center min-w-0 text-primary hover:underline"
+              >
+                <span className="material-icons text-gray-400 mr-2 text-lg">
+                  {attachment.mimeType === "application/pdf" ? "picture_as_pdf" : "image"}
+                </span>
+                <span className="truncate">{attachment.originalName}</span>
+                <span className="text-gray-400 ml-2 whitespace-nowrap">({formatSize(attachment.fileSize)})</span>
+              </a>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  deleteAttachment.mutate(attachment.id, {
+                    onSuccess: () =>
+                      toast({ title: "Adjunto eliminado", description: attachment.originalName }),
+                    onError: () =>
+                      toast({
+                        title: "No se pudo eliminar el adjunto",
+                        variant: "destructive",
+                      }),
+                  })
+                }
+                aria-label={`Eliminar ${attachment.originalName}`}
+              >
+                <span className="material-icons text-lg">delete</span>
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
 
 /**
  * Read-only rendering of a complaint. Shared by the complaints table, the
@@ -125,6 +208,9 @@ export default function ComplaintDetail({ complaint }: { complaint: Complaint })
           </div>
         </CardContent>
       </Card>
+
+      {/* Evidence attachments (Phase 1.1) */}
+      <AttachmentsSection complaintId={complaint.id} />
 
       {/* Provider Response */}
       {(complaint.providerResponse || complaint.providerActions) && (

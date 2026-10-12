@@ -1,0 +1,36 @@
+{
+  "name": "LibroVirtual.pe - Libro de Reclamaciones",
+  "short_name": "LibroVirtual",
+  "description": "Gestión del Libro de Reclamaciones conforme a la normativa peruana (DS 011-2011-PCM, DS 101-2022-PCM y Ley 29733).",
+  "start_url": "/panel",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "lang": "es-PE",
+  "background_color": "#f8fafc",
+  "theme_color": "#3b82f6",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Reclamos",
+      "url": "/reclamos"
+    },
+    {
+      "name": "Estado del sistema",
+      "url": "/estado"
+    }
+  ]
+}

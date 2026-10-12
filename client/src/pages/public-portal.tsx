@@ -17,6 +17,8 @@ interface PublicLibro {
     slug: string;
     whatsappNumber: string | null;
     websiteUrl: string | null;
+    brandColor?: string | null;
+    confirmationMessage?: string | null;
   };
   business: {
     id: string;
@@ -57,10 +59,21 @@ export default function PublicPortal() {
   const params = useParams<{ slug: string }>();
   const slug = params.slug;
 
+  // Embed mode (Phase 3.12): the widget iframe renders the same portal in a
+  // compact layout without the outer page chrome.
+  const [search] = useState(() => new URLSearchParams(window.location.search));
+  const isEmbed = search.get("embed") === "1";
+
+  // QR deep link (printed on the constancia): /libro/:slug?folio=R-2026-0001
+  // jumps straight to the status lookup with the folio pre-filled. The document
+  // number is deliberately not part of the link (it is personal data).
+  const folioFromUrl = search.get("folio") ?? "";
+
   const [establishmentId, setEstablishmentId] = useState("");
   const [submitted, setSubmitted] = useState<{ correlativeNumber: string; dueDate: string } | null>(null);
-  const [correlative, setCorrelative] = useState("");
+  const [correlative, setCorrelative] = useState(folioFromUrl);
   const [documentNumber, setDocumentNumber] = useState("");
+  const [activeTab, setActiveTab] = useState(folioFromUrl ? "consultar" : "registrar");
 
   const { data, isLoading, error } = useQuery<PublicLibro>({
     queryKey: [`/api/public/libro/${slug}`],
@@ -110,13 +123,17 @@ export default function PublicPortal() {
 
   const selectedEstablishment = data.establishments.find(e => e.id === establishmentId);
 
+  // Per-business brand color (Phase 2.8), applied as the accent of the portal
+  const brandColor = data.libro.brandColor || undefined;
+
   return (
-    <div className="min-h-screen bg-surface py-8 px-4" data-testid="public-portal">
-      <div className="max-w-3xl mx-auto space-y-6">
+    <div className={isEmbed ? "bg-surface p-2" : "min-h-screen bg-surface py-8 px-4"} data-testid="public-portal">
+      <div className={isEmbed ? "space-y-4" : "max-w-3xl mx-auto space-y-6"}>
+        {!isEmbed && (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-2xl">
-              <FileText className="h-6 w-6" />
+            <CardTitle className="flex items-center gap-2 text-2xl" style={brandColor ? { color: brandColor } : undefined}>
+              <FileText className="h-6 w-6" style={brandColor ? { color: brandColor } : undefined} />
               {data.libro.name}
             </CardTitle>
             <CardDescription>
@@ -130,8 +147,9 @@ export default function PublicPortal() {
             Conforme al D.S. 011-2011-PCM y a la Ley 29571 (Código de Protección y Defensa del Consumidor)
           </CardContent>
         </Card>
+        )}
 
-        <Tabs defaultValue="registrar" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="registrar" data-testid="tab-registrar">Registrar reclamo</TabsTrigger>
             <TabsTrigger value="consultar" data-testid="tab-consultar">Consultar estado</TabsTrigger>
@@ -142,6 +160,11 @@ export default function PublicPortal() {
                 <CardContent className="pt-6 text-center space-y-3">
                   <CheckCircle2 className="h-14 w-14 text-green-600 mx-auto" />
                   <h2 className="text-xl font-bold text-gray-900">¡Reclamo registrado!</h2>
+                  {data.libro.confirmationMessage && (
+                    <p className="text-gray-700" data-testid="custom-confirmation-message">
+                      {data.libro.confirmationMessage}
+                    </p>
+                  )}
                   <p className="text-gray-600">Su reclamo quedó registrado con el número:</p>
                   <p className="text-2xl font-mono font-bold text-primary" data-testid="success-correlative">
                     {submitted.correlativeNumber}

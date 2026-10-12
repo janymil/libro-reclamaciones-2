@@ -74,6 +74,11 @@ export default {
       fontFamily: {
         inter: ["var(--font-inter)"],
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],
+        // Landing page ("El libro, reinventado"): editorial display serif +
+        // typewriter mono for folios, labels and legal references.
+        display: ["Fraunces", "Georgia", "serif"],
+        editorial: ["'Instrument Sans'", "system-ui", "sans-serif"],
+        mono: ["'JetBrains Mono'", "ui-monospace", "SFMono-Regular", "monospace"],
       },
       keyframes: {
         "accordion-down": {
@@ -92,10 +97,25 @@ export default {
             height: "0",
           },
         },
+        marquee: {
+          from: { transform: "translateX(0)" },
+          to: { transform: "translateX(-50%)" },
+        },
+        "float-soft": {
+          "0%, 100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-10px)" },
+        },
+        "spin-slow": {
+          from: { transform: "rotate(0deg)" },
+          to: { transform: "rotate(360deg)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        marquee: "marquee 42s linear infinite",
+        "float-soft": "float-soft 6s ease-in-out infinite",
+        "spin-slow": "spin-slow 26s linear infinite",
       },
     },
   },

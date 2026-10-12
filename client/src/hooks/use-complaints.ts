@@ -124,6 +124,119 @@ export function useComplaintAuditLog(complaintId: string) {
   });
 }
 
+export interface AIStatus {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  fastModel: string;
+}
+
+export function useAIStatus() {
+  return useQuery({
+    queryKey: ['/api/ai/status'],
+    queryFn: async () => {
+      const response = await fetch('/api/ai/status', { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error('Failed to fetch AI status');
+      }
+      return response.json() as Promise<AIStatus>;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export interface AITrends {
+  commonIssues: string[];
+  categories: string[];
+  severity: string;
+  recommendations: string[];
+  riskAreas: string[];
+  source: 'ai' | 'fallback';
+  analyzedCount: number;
+}
+
+export function useAITrends() {
+  return useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/ai/trends', {});
+      return response.json() as Promise<AITrends>;
+    },
+  });
+}
+
+export interface SimilarComplaint {
+  complaintId: string;
+  correlativeNumber: string;
+  complaintType: string;
+  status: string;
+  priority: string;
+  similarity: number;
+  complaintDetail: string;
+  providerResponse: string | null;
+  submissionDate: string;
+}
+
+export function useSimilarComplaints(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['/api/complaints', id, 'similar'],
+    queryFn: async () => {
+      const response = await fetch(`/api/complaints/${id}/similar`, { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error('Failed to fetch similar complaints');
+      }
+      return response.json() as Promise<SimilarComplaint[]>;
+    },
+    enabled: enabled && Boolean(id),
+  });
+}
+
+export interface SlaPrediction {
+  assessments: Array<{
+    complaintId: string;
+    correlativeNumber: string;
+    consumerFullName: string;
+    productServiceName: string | null;
+    priority: string;
+    status: string;
+    businessDaysRemaining: number;
+    riskLevel: 'low' | 'medium' | 'high';
+    score: number;
+    reasons: string[];
+  }>;
+  summary: { total: number; highRisk: number; mediumRisk: number };
+}
+
+export function useSlaPrediction() {
+  return useQuery({
+    queryKey: ['/api/ai/sla-prediction'],
+    queryFn: async () => {
+      const response = await fetch('/api/ai/sla-prediction', { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error('Failed to fetch SLA prediction');
+      }
+      return response.json() as Promise<SlaPrediction>;
+    },
+  });
+}
+
+export interface ConsumerAssistanceResult {
+  isComplete: boolean;
+  missingFields: string[];
+  suggestions: string[];
+  improvedText?: string;
+  source: 'ai' | 'fallback';
+}
+
+/** Consumer-side form assistant (public endpoint, no auth). */
+export function useAIPublicAssist() {
+  return useMutation({
+    mutationFn: async (text: string) => {
+      const response = await apiRequest('POST', '/api/ai/public/assist', { text });
+      return response.json() as Promise<ConsumerAssistanceResult>;
+    },
+  });
+}
+
 export function useAIClassification() {
   return useMutation({
     mutationFn: async (text: string) => {
@@ -141,6 +254,105 @@ export function useAISuggestResponse() {
         complaintType,
       });
       return response.json();
+    },
+  });
+}
+
+// ---- Phase 1.1: evidence attachments ----------------------------------------
+
+export interface ComplaintAttachmentInfo {
+  id: string;
+  complaintId: string;
+  originalName: string;
+  mimeType: string;
+  fileSize: number;
+  uploadedAt: string;
+}
+
+export function useComplaintAttachments(complaintId: string | null | undefined, enabled: boolean = true) {
+  return useQuery({
+    queryKey: ['/api/complaints', complaintId, 'attachments'],
+    queryFn: async () => {
+      const response = await fetch(`/api/complaints/${complaintId}/attachments`, { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error('Failed to fetch attachments');
+      }
+      return response.json() as Promise<ComplaintAttachmentInfo[]>;
+    },
+    enabled: enabled && Boolean(complaintId),
+  });
+}
+
+export function useDeleteAttachment() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (attachmentId: string) => {
+      const response = await apiRequest('DELETE', `/api/attachments/${attachmentId}`);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/complaints'] });
+    },
+  });
+}
+
+// ---- Phase 3.11: executive summary, abusive clauses, reincidence ------------
+
+export interface CaseSummaryResult {
+  summary: string;
+  keyFacts: string[];
+  riskLevel: 'low' | 'medium' | 'high';
+  recommendedAction: string;
+  source: 'ai' | 'fallback';
+}
+
+export function useCaseSummary() {
+  return useMutation({
+    mutationFn: async (complaintId: string) => {
+      const response = await apiRequest('POST', '/api/ai/case-summary', { complaintId });
+      return response.json() as Promise<CaseSummaryResult>;
+    },
+  });
+}
+
+export interface AbusiveClauseResult {
+  hasAbusiveClauses: boolean;
+  clauses: Array<{ quote: string; issue: string; legalBasis: string }>;
+  recommendations: string[];
+  source: 'ai' | 'fallback';
+}
+
+export function useAbusiveClauses() {
+  return useMutation({
+    mutationFn: async (text: string) => {
+      const response = await apiRequest('POST', '/api/ai/abusive-clauses', { text });
+      return response.json() as Promise<AbusiveClauseResult>;
+    },
+  });
+}
+
+export interface ReincidenceEntry {
+  key: string;
+  total: number;
+  resolved: number;
+  overdue: number;
+}
+
+export interface ReincidenceReport {
+  byProduct: ReincidenceEntry[];
+  byEstablishment: ReincidenceEntry[];
+}
+
+export function useReincidenceReport() {
+  return useQuery({
+    queryKey: ['/api/reports/reincidencia'],
+    queryFn: async () => {
+      const response = await fetch('/api/reports/reincidencia', { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error('Failed to fetch reincidence report');
+      }
+      return response.json() as Promise<ReincidenceReport>;
     },
   });
 }

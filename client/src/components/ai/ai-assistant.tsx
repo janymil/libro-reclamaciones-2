@@ -4,7 +4,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { useAIClassification, useAISuggestResponse } from "@/hooks/use-complaints";
+import { useAIClassification, useAISuggestResponse, useAIStatus, useAITrends, useSlaPrediction } from "@/hooks/use-complaints";
 import { COMPLAINT_TYPES } from "@/lib/constants";
 
 interface AIAssistantProps {
@@ -17,6 +17,9 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
   const [responseType, setResponseType] = useState<"reclamo" | "queja">("reclamo");
   
   const { toast } = useToast();
+  const { data: aiStatus } = useAIStatus();
+  const trendsMutation = useAITrends();
+  const { data: slaPrediction } = useSlaPrediction();
   const classifyMutation = useAIClassification();
   const suggestResponseMutation = useAISuggestResponse();
 
@@ -31,10 +34,13 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
     }
 
     try {
-      await classifyMutation.mutateAsync(analysisText);
+      const result = await classifyMutation.mutateAsync(analysisText);
       toast({
-        title: "Análisis completado",
-        description: "El texto ha sido clasificado exitosamente",
+        title: result.source === 'fallback' ? "Análisis heurístico local" : "Análisis completado",
+        description:
+          result.source === 'fallback'
+            ? "No hay proveedor de IA configurado: se aplicaron reglas locales. Configure AI_API_KEY para usar el modelo."
+            : "El texto ha sido clasificado exitosamente",
       });
     } catch (error) {
       toast({
@@ -64,10 +70,13 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
       if (onSuggestionAccept) {
         onSuggestionAccept(result.suggestion);
       }
-      
+
       toast({
-        title: "Sugerencia generada",
-        description: "Se ha generado una respuesta sugerida",
+        title: result.source === 'fallback' ? "IA no disponible" : "Sugerencia generada",
+        description:
+          result.source === 'fallback'
+            ? "No hay proveedor de IA configurado: redacte la respuesta manualmente."
+            : "Se ha generado una respuesta sugerida. Revísela antes de enviarla.",
       });
     } catch (error) {
       toast({
@@ -88,7 +97,17 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
               <span className="material-icons text-purple-600">psychology</span>
             </div>
             <div>
-              <CardTitle>Asistente IA - ReclamoBot</CardTitle>
+              <CardTitle className="flex flex-wrap items-center gap-2">
+                Asistente IA - ReclamoBot
+                {aiStatus && (
+                  <Badge
+                    className={aiStatus.enabled ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}
+                    data-testid="badge-ai-status"
+                  >
+                    {aiStatus.enabled ? `IA activa · ${aiStatus.fastModel}` : 'IA inactiva · modo heurístico'}
+                  </Badge>
+                )}
+              </CardTitle>
               <p className="text-sm text-gray-600">Inteligencia artificial para gestión eficiente</p>
             </div>
           </div>
@@ -102,7 +121,7 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
                   <span className="material-icons text-purple-600 text-sm">auto_awesome</span>
                   <h4 className="font-medium text-gray-900">Clasificación Automática</h4>
                 </div>
-                <p className="text-sm text-gray-600">Detecta automáticamente si es reclamo o queja con 95% de precisión</p>
+                <p className="text-sm text-gray-600">Clasifica automáticamente reclamos y quejas según su gravedad y riesgo legal</p>
               </CardContent>
             </Card>
             
@@ -165,6 +184,11 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
             <Card className="bg-blue-50 border-blue-200">
               <CardContent className="pt-4">
                 <h4 className="font-medium mb-3">Resultado del Análisis</h4>
+                {classifyMutation.data.source === 'fallback' && (
+                  <Badge className="mb-3 bg-yellow-100 text-yellow-800">
+                    Heurístico local (IA no disponible)
+                  </Badge>
+                )}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
                     <label className="text-xs font-medium text-gray-500">Tipo</label>
@@ -273,6 +297,11 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
               <CardContent className="pt-4">
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="font-medium">Respuesta Sugerida</h4>
+                  {suggestResponseMutation.data.source === 'fallback' && (
+                    <Badge className="bg-yellow-100 text-yellow-800">
+                      IA no disponible
+                    </Badge>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
@@ -303,6 +332,130 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
                     Regenerar
                   </Button>
                 </div>
+              </CardContent>
+            </Card>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* SLA-breach prediction */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <span className="material-icons text-orange-600">schedule</span>
+            <span>Predicción de riesgo de vencimiento (SLA)</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3" data-testid="sla-prediction">
+          {slaPrediction ? (
+            <>
+              <p className="text-sm text-gray-600">
+                {slaPrediction.summary.highRisk} de {slaPrediction.summary.total} reclamaciones
+                abiertas con alto riesgo de vencer el plazo legal de 15 días hábiles
+                (DS 101-2022-PCM). Atienda primero las de mayor riesgo.
+              </p>
+              {slaPrediction.assessments.slice(0, 5).map((assessment) => (
+                <div key={assessment.complaintId} className="border rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-medium">{assessment.correlativeNumber}</span>
+                    <Badge
+                      className={
+                        assessment.riskLevel === 'high'
+                          ? 'bg-red-100 text-red-800'
+                          : assessment.riskLevel === 'medium'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-green-100 text-green-800'
+                      }
+                    >
+                      {assessment.riskLevel === 'high' ? 'Riesgo alto' : assessment.riskLevel === 'medium' ? 'Riesgo medio' : 'En control'}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {assessment.consumerFullName} · {assessment.businessDaysRemaining} días hábiles restantes
+                  </p>
+                  <ul className="text-xs text-gray-600 mt-1 list-disc list-inside">
+                    {assessment.reasons.map((reason: string, index: number) => (
+                      <li key={index}>{reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              {slaPrediction.assessments.length === 0 && (
+                <p className="text-sm text-gray-500">No hay reclamaciones abiertas.</p>
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-gray-500">Cargando predicción...</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Trend Analysis */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <span className="material-icons text-purple-600">trending_up</span>
+            <span>Análisis de Tendencias</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Analiza las reclamaciones abiertas de su negocio para detectar patrones, problemas
+            frecuentes y áreas de riesgo legal.
+          </p>
+          <Button
+            onClick={() => trendsMutation.mutate()}
+            disabled={trendsMutation.isPending}
+            data-testid="button-analyze-trends"
+          >
+            {trendsMutation.isPending ? "Analizando..." : "Analizar tendencias"}
+          </Button>
+
+          {trendsMutation.data && (
+            <Card className="bg-purple-50 border-purple-200" data-testid="trends-results">
+              <CardContent className="pt-4 space-y-3">
+                {trendsMutation.data.source === 'fallback' && (
+                  <Badge className="bg-yellow-100 text-yellow-800">
+                    Heurístico local (IA no disponible)
+                  </Badge>
+                )}
+                <div>
+                  <h4 className="font-medium">Problemas frecuentes</h4>
+                  {trendsMutation.data.commonIssues.length > 0 ? (
+                    <ul className="list-disc list-inside text-sm text-gray-700">
+                      {trendsMutation.data.commonIssues.map((issue: string, index: number) => (
+                        <li key={index}>{issue}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-gray-500">
+                      Sin datos suficientes para identificar patrones.
+                    </p>
+                  )}
+                </div>
+                {trendsMutation.data.recommendations.length > 0 && (
+                  <div>
+                    <h4 className="font-medium">Recomendaciones</h4>
+                    <ul className="list-disc list-inside text-sm text-gray-700">
+                      {trendsMutation.data.recommendations.map((recommendation: string, index: number) => (
+                        <li key={index}>{recommendation}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {trendsMutation.data.riskAreas.length > 0 && (
+                  <div>
+                    <h4 className="font-medium">Áreas de riesgo</h4>
+                    <ul className="list-disc list-inside text-sm text-gray-700">
+                      {trendsMutation.data.riskAreas.map((risk: string, index: number) => (
+                        <li key={index}>{risk}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <p className="text-xs text-gray-500">
+                  {trendsMutation.data.analyzedCount} reclamaciones abiertas analizadas.
+                </p>
               </CardContent>
             </Card>
           )}

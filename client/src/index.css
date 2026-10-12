@@ -4,43 +4,45 @@
 @tailwind utilities;
 
 :root {
-  --background: hsl(0 0% 100%);
-  --foreground: hsl(210 25% 7.8431%);
-  --card: hsl(180 6.6667% 97.0588%);
-  --card-foreground: hsl(210 25% 7.8431%);
+  /* Brand bridge: warm paper & ink neutrals with the vermillion stamp accent,
+     so the authenticated app reads as the same product as the landing page. */
+  --background: hsl(40 33% 97%);
+  --foreground: hsl(30 23% 9%);
+  --card: hsl(40 40% 99%);
+  --card-foreground: hsl(30 23% 9%);
   --popover: hsl(0 0% 100%);
-  --popover-foreground: hsl(210 25% 7.8431%);
-  --primary: hsl(205 89% 38%);
-  --primary-foreground: hsl(0 0% 100%);
+  --popover-foreground: hsl(30 23% 9%);
+  --primary: hsl(11 90% 40%);
+  --primary-foreground: hsl(40 40% 98%);
   --secondary: hsl(355 75% 45%);
   --secondary-foreground: hsl(0 0% 100%);
-  --muted: hsl(240 1.9608% 90%);
-  --muted-foreground: hsl(210 25% 7.8431%);
-  --accent: hsl(211.5789 51.3514% 92.7451%);
-  --accent-foreground: hsl(205 89% 38%);
+  --muted: hsl(40 20% 92%);
+  --muted-foreground: hsl(33 16% 36%);
+  --accent: hsl(40 32% 90%);
+  --accent-foreground: hsl(11 90% 34%);
   --destructive: hsl(355 75% 45%);
   --destructive-foreground: hsl(0 0% 100%);
-  --border: hsl(201.4286 30.4348% 90.9804%);
-  --input: hsl(200 23.0769% 97.4510%);
-  --ring: hsl(205 89% 38%);
-  --chart-1: hsl(205 89% 38%);
-  --chart-2: hsl(122 57% 27.8431%);
+  --border: hsl(40 24% 86%);
+  --input: hsl(40 26% 95%);
+  --ring: hsl(11 90% 40%);
+  --chart-1: hsl(11 90% 40%);
+  --chart-2: hsl(154 50% 28%);
   --chart-3: hsl(30 100% 50%);
   --chart-4: hsl(147.1429 78.5047% 41.9608%);
   --chart-5: hsl(341.4894 75.2000% 50.9804%);
-  --sidebar: hsl(0 0% 100%);
-  --sidebar-foreground: hsl(210 25% 7.8431%);
-  --sidebar-primary: hsl(205 89% 38%);
-  --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(205 89% 95%);
-  --sidebar-accent-foreground: hsl(205 89% 38%);
-  --sidebar-border: hsl(205.0000 25.0000% 90.5882%);
-  --sidebar-ring: hsl(205 89% 38%);
-  --success: hsl(122 57% 27.8431%);
+  --sidebar: hsl(40 33% 95%);
+  --sidebar-foreground: hsl(30 23% 9%);
+  --sidebar-primary: hsl(11 90% 40%);
+  --sidebar-primary-foreground: hsl(40 40% 98%);
+  --sidebar-accent: hsl(40 30% 90%);
+  --sidebar-accent-foreground: hsl(30 23% 9%);
+  --sidebar-border: hsl(40 24% 86%);
+  --sidebar-ring: hsl(11 90% 40%);
+  --success: hsl(154 50% 28%);
   --success-foreground: hsl(0 0% 100%);
   --warning: hsl(30 100% 50%);
   --warning-foreground: hsl(0 0% 100%);
-  --surface: hsl(240 6% 98%);
+  --surface: hsl(40 30% 96%);
   --font-inter: 'Inter', system-ui, sans-serif;
   --radius: 0.75rem;
 }
@@ -52,27 +54,27 @@
   --card-foreground: hsl(0 0% 85.0980%);
   --popover: hsl(0 0% 0%);
   --popover-foreground: hsl(200 6.6667% 91.1765%);
-  --primary: hsl(205 89% 52%);
+  --primary: hsl(11 90% 58%);
   --primary-foreground: hsl(0 0% 100%);
   --secondary: hsl(355 75% 54%);
   --secondary-foreground: hsl(0 0% 100%);
   --muted: hsl(0 0% 9.4118%);
   --muted-foreground: hsl(210 3.3898% 46.2745%);
-  --accent: hsl(205.7143 70% 7.8431%);
-  --accent-foreground: hsl(205 89% 52%);
+  --accent: hsl(11 40% 14%);
+  --accent-foreground: hsl(11 90% 72%);
   --destructive: hsl(355 75% 54%);
   --destructive-foreground: hsl(0 0% 100%);
-  --border: hsl(210 5.2632% 14.9020%);
-  --input: hsl(207.6923 27.6596% 18.4314%);
-  --ring: hsl(205 89% 53%);
-  --sidebar: hsl(228 9.8039% 10%);
-  --sidebar-foreground: hsl(0 0% 85.0980%);
-  --sidebar-primary: hsl(205 89% 53%);
-  --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(205.7143 70% 7.8431%);
-  --sidebar-accent-foreground: hsl(205 89% 52%);
-  --sidebar-border: hsl(205.7143 15.7895% 26.0784%);
-  --sidebar-ring: hsl(205 89% 53%);
+  --border: hsl(30 10% 18%);
+  --input: hsl(30 12% 16%);
+  --ring: hsl(11 90% 58%);
+  --sidebar: hsl(30 14% 8%);
+  --sidebar-foreground: hsl(40 20% 88%);
+  --sidebar-primary: hsl(11 90% 58%);
+  --sidebar-primary-foreground: hsl(40 40% 98%);
+  --sidebar-accent: hsl(30 12% 14%);
+  --sidebar-accent-foreground: hsl(40 25% 92%);
+  --sidebar-border: hsl(30 10% 18%);
+  --sidebar-ring: hsl(11 90% 58%);
   --success: hsl(122 57% 41%);
   --success-foreground: hsl(0 0% 100%);
   --warning: hsl(30 100% 50%);
@@ -105,11 +107,11 @@
 
 @layer components {
   .btn-primary {
-    @apply bg-primary text-primary-foreground hover:bg-blue-700 focus:ring-2 focus:ring-primary focus:ring-offset-2;
+    @apply bg-primary text-primary-foreground hover:brightness-110 focus:ring-2 focus:ring-primary focus:ring-offset-2;
   }
 
   .btn-secondary {
-    @apply bg-secondary text-secondary-foreground hover:bg-gray-700 focus:ring-2 focus:ring-secondary focus:ring-offset-2;
+    @apply bg-secondary text-secondary-foreground hover:brightness-110 focus:ring-2 focus:ring-secondary focus:ring-offset-2;
   }
 
   .btn-success {
@@ -154,5 +156,121 @@
 
   .priority-urgent {
     @apply bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300;
+  }
+}
+
+/* ============================================================================
+   Landing page — "El libro, reinventado"
+   Warm editorial paper & ink: cream paper, typewriter folios, vermillion
+   rubber-stamp accent. Scoped under .landing-root so the app theme is intact.
+   ========================================================================== */
+
+.landing-root {
+  --paper: #f7f2e8;
+  --paper-2: #fdfaf3;
+  --ink: #1b1611;
+  --ink-soft: #5c5246;
+  --stamp: #c02b0a;
+  --stamp-deep: #9c2107;
+  --moss: #1e6b4a;
+  --line: #e3d9c6;
+  font-family: "Instrument Sans", system-ui, sans-serif;
+  color: var(--ink);
+  background-color: var(--paper);
+}
+
+/* Subtle paper grain + keyline grid */
+.landing-paper {
+  background-color: var(--paper);
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.10 0 0 0 0 0.08 0 0 0 0 0.05 0 0 0 0.035 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.landing-grid-bg {
+  background-image:
+    linear-gradient(to right, rgb(27 22 17 / 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(27 22 17 / 0.045) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 20%, black 30%, transparent 75%);
+}
+
+/* Ruled lines of the physical hoja de reclamación */
+.hoja-rule {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 27px,
+    rgb(27 22 17 / 0.16) 27px,
+    rgb(27 22 17 / 0.16) 28px
+  );
+}
+
+/* Rubber stamp ring (vermillion, slightly distressed edges) */
+.stamp-ring {
+  border: 3px solid var(--stamp);
+  border-radius: 9999px;
+  box-shadow:
+    inset 0 0 0 2px rgb(192 43 10 / 0.25),
+    0 10px 30px -12px rgb(192 43 10 / 0.45);
+  opacity: 0.92;
+  mix-blend-mode: multiply;
+}
+
+/* Perforated divider between sections (dashed cut line + scissors tick) */
+.divider-cut {
+  background-image: repeating-linear-gradient(
+    to right,
+    rgb(27 22 17 / 0.28) 0,
+    rgb(27 22 17 / 0.28) 10px,
+    transparent 10px,
+    transparent 20px
+  );
+  height: 2px;
+}
+
+/* Scroll reveal (IntersectionObserver adds .reveal-visible) */
+.landing-root .reveal {
+  opacity: 0;
+  transform: translateY(26px);
+  transition:
+    opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.landing-root .reveal-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Ticker marquee pauses on hover/focus for readability */
+.landing-root .marquee-track:hover,
+.landing-root .marquee-track:focus-within {
+  animation-play-state: paused;
+}
+
+/* Smooth in-page anchors + sticky-nav offset */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+.landing-root section[id],
+.landing-root [id] {
+  scroll-margin-top: 6rem;
+}
+
+/* Reduced motion: stop every decorative loop, show content immediately */
+@media (prefers-reduced-motion: reduce) {
+  .landing-root .animate-marquee,
+  .landing-root .animate-float-soft,
+  .landing-root .animate-spin-slow {
+    animation: none;
+  }
+
+  .landing-root .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
   }
 }

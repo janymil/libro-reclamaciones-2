@@ -102,6 +102,79 @@ export function registerAuthRoutes(app: Express): void {
     res.json(req.user);
   });
 
+  // ---- Multi-RUC switching (Phase 2.7) ---------------------------------------
+
+  // Businesses this login may manage: explicit grants plus the active one
+  app.get('/api/auth/businesses', requireAuth, async (req: any, res) => {
+    try {
+      const access = await storage.getUserBusinessAccess(req.user.id);
+
+      // Seed the active business into the list (bootstrap: pre-existing
+      // accounts had no access rows)
+      const ids = new Set(access.map((entry) => entry.businessId));
+      let list = access;
+
+      if (req.user.businessId && !ids.has(req.user.businessId)) {
+        const active = await storage.getBusiness(req.user.businessId);
+        if (active) {
+          list = [
+            {
+              id: 'active',
+              userId: req.user.id,
+              businessId: active.id,
+              role: req.user.role,
+              createdAt: new Date(),
+              businessName: active.businessName,
+              ruc: active.ruc,
+            },
+            ...access,
+          ];
+        }
+      }
+
+      res.json(list.map((entry) => ({
+        businessId: entry.businessId,
+        businessName: entry.businessName,
+        ruc: entry.ruc,
+        role: entry.role,
+        isActive: entry.businessId === req.user.businessId,
+      })));
+    } catch (error) {
+      console.error('Error listing user businesses:', error);
+      res.status(500).json({ message: "No se pudieron listar las empresas" });
+    }
+  });
+
+  // Switch the active business of this login
+  app.post('/api/auth/switch-business', requireAuth, async (req: any, res) => {
+    try {
+      const { businessId } = req.body as { businessId?: string };
+      if (!businessId) {
+        return res.status(400).json({ message: "businessId es requerido" });
+      }
+
+      const business = await storage.getBusiness(businessId);
+      if (!business || !business.isActive) {
+        return res.status(404).json({ message: "Empresa no encontrada" });
+      }
+
+      // Access: explicit grant, or it is already the user's active business
+      const hasAccess =
+        businessId === req.user.businessId || (await storage.hasBusinessAccess(req.user.id, businessId));
+      if (!hasAccess) {
+        return res.status(403).json({ message: "No tiene acceso a esa empresa" });
+      }
+
+      const updated = await storage.updateUser(req.user.id, { businessId });
+      const { password: _password, ...safeUser } = updated;
+
+      res.json({ message: `Empresa activa: ${business.businessName}`, user: safeUser });
+    } catch (error) {
+      console.error('Error switching business:', error);
+      res.status(500).json({ message: "No se pudo cambiar de empresa" });
+    }
+  });
+
   // Step 2: Configure business and libro (onboarding completion)
   app.post('/api/auth/complete-onboarding', requireAuth, async (req: any, res) => {
     try {

@@ -104,4 +104,37 @@ describe("complaintFormSchema", () => {
     const result = complaintFormSchema.safeParse({ ...validSubmission, consumerFullName: "" });
     expect(result.success).toBe(false);
   });
+
+  it("does not require guardian data for an adult consumer", () => {
+    expect(complaintFormSchema.safeParse({ ...validSubmission, consumerIsMinor: false }).success).toBe(true);
+    expect(complaintFormSchema.safeParse(validSubmission).success).toBe(true);
+  });
+
+  it("requires the parent/guardian data when the consumer is a minor", () => {
+    const result = complaintFormSchema.safeParse({ ...validSubmission, consumerIsMinor: true });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const fields = result.error.issues.map((issue) => issue.path[0]);
+      expect(fields).toEqual(
+        expect.arrayContaining([
+          "guardianFullName",
+          "guardianRelationship",
+          "guardianDocumentType",
+          "guardianDocumentNumber",
+        ]),
+      );
+    }
+  });
+
+  it("accepts a minor's complaint once the guardian is identified", () => {
+    const result = complaintFormSchema.safeParse({
+      ...validSubmission,
+      consumerIsMinor: true,
+      guardianFullName: "Rosa Pérez",
+      guardianRelationship: "Madre",
+      guardianDocumentType: "DNI" as const,
+      guardianDocumentNumber: "87654321",
+    });
+    expect(result.success).toBe(true);
+  });
 });

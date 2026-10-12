@@ -27,15 +27,22 @@ interface LegalDocument {
 const DOCUMENTS: LegalDocument[] = [
   {
     key: 'aviso',
-    title: 'Aviso del Libro de Reclamaciones',
+    title: 'Aviso del Libro de Reclamaciones (Anexo III)',
     description: 'Cartel imprimible exigido por el DS 011-2011-PCM.',
     endpoint: '/api/documents/complaint-notice',
     filename: 'aviso-libro-reclamaciones.pdf',
   },
   {
+    key: 'anexo-ii',
+    title: 'Hoja de Reclamación (Anexo II)',
+    description: 'Formato imprimible en A4 para consumidores que prefieren registrarlo en papel.',
+    endpoint: '/api/documents/anexo-ii',
+    filename: 'anexo-ii-hoja-de-reclamacion.pdf',
+  },
+  {
     key: 'privacidad',
     title: 'Política de Privacidad',
-    description: 'Borrador conforme a la Ley 29733 y el DS 016-2024-JUS.',
+    description: 'Borrador conforme a la Ley 29733 y el DS 016-2024-JUS, con la política de retención de 24 meses.',
     endpoint: '/api/documents/privacy-policy',
     filename: 'politica-privacidad.pdf',
   },
@@ -70,6 +77,13 @@ export default function LegalDocumentsDialog({ open, onOpenChange }: LegalDocume
   };
 
   const publicUrl = config ? `${window.location.origin}/libro/${config.urlSlug}` : null;
+
+  // Web notice snippet (Phase 1.4): DS 011-2011-PCM requires the provider to
+  // publish, on its website, the notice that the Libro de Reclamaciones exists
+  // and is available virtually.
+  const webNoticeSnippet = publicUrl
+    ? `<p>Conforme al Código de Protección y Defensa del Consumidor (Ley N° 29571) y al DS 011-2011-PCM, contamos con un Libro de Reclamaciones a su disposición.</p>\n<p><a href="${publicUrl}" target="_blank" rel="noopener">Registre su reclamo en nuestro Libro de Reclamaciones Virtual</a></p>`
+    : '';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -106,11 +120,40 @@ export default function LegalDocumentsDialog({ open, onOpenChange }: LegalDocume
         </div>
 
         {publicUrl && (
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-            <p className="font-medium">Libro virtual público</p>
-            <a href={publicUrl} target="_blank" rel="noreferrer" className="break-all underline">
-              {publicUrl}
-            </a>
+          <div className="space-y-3">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+              <p className="font-medium">Libro virtual público</p>
+              <a href={publicUrl} target="_blank" rel="noreferrer" className="break-all underline">
+                {publicUrl}
+              </a>
+            </div>
+
+            {/* Web notice snippet (Phase 1.4): the text the business must embed
+                on its website, as required by DS 011-2011-PCM. */}
+            <div className="rounded-lg border p-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="font-medium text-sm">Aviso para su web (copiar y pegar)</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(webNoticeSnippet);
+                      toast({ title: "Aviso copiado", description: "Péguelo en el pie de página de su web." });
+                    } catch {
+                      toast({ title: "No se pudo copiar", variant: "destructive" });
+                    }
+                  }}
+                  data-testid="button-copy-notice-snippet"
+                >
+                  <span className="material-icons mr-1 text-sm">content_copy</span>
+                  Copiar
+                </Button>
+              </div>
+              <pre className="bg-gray-50 border rounded p-2 text-xs whitespace-pre-wrap break-words text-gray-700">
+                {webNoticeSnippet}
+              </pre>
+            </div>
           </div>
         )}
       </DialogContent>

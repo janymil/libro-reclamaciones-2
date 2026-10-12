@@ -1,11 +1,18 @@
 import type { Express } from "express";
 
 import { storage } from "../storage";
+import { captchaLimiter } from "../middleware/rateLimits";
+import { issueCaptcha } from "../services/captchaService";
 
 /**
  * Consumer facing endpoints. Deliberately unauthenticated: only public-safe fields are returned.
  */
 export function registerPublicRoutes(app: Express): void {
+  // CAPTCHA challenge for the public complaint form (Phase 1.5)
+  app.get('/api/public/captcha', captchaLimiter, (_req, res) => {
+    res.json(issueCaptcha());
+  });
+
   // Public Libro de Reclamaciones (consumer facing, no authentication)
   app.get('/api/public/libro/:slug', async (req, res) => {
     try {
@@ -30,6 +37,9 @@ export function registerPublicRoutes(app: Express): void {
           websiteUrl: config.websiteUrl,
           logoUrl: config.logoUrl,
           notificationEmail: config.notificationEmail,
+          // Per-business branding and confirmation text (Phase 2.8)
+          brandColor: config.brandColor,
+          confirmationMessage: config.confirmationMessage,
         },
         business: {
           id: business.id,

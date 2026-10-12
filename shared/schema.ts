@@ -12,6 +12,7 @@ import {
   uuid,
   index,
   serial,
+  unique,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -68,7 +69,13 @@ export const businesses = pgTable("businesses", {
   departamento: varchar("departamento", { length: 100 }).notNull(),
   website: varchar("website", { length: 255 }),
   isActive: boolean("is_active").notNull().default(true),
-  subscriptionPlan: varchar("subscription_plan", { length: 50 }).notNull().default("basic"),
+  subscriptionPlan: varchar("subscription_plan", { length: 50 }).notNull().default("esencial"),
+  // Commercial lifecycle: 7-day trial, then the plan's quotas apply.
+  // trialing | active | past_due | canceled | trial_ended
+  subscriptionStatus: varchar("subscription_status", { length: 30 }).notNull().default("trialing"),
+  trialEndsAt: timestamp("trial_ends_at"),
+  planPeriod: varchar("plan_period", { length: 20 }).notNull().default("monthly"), // monthly | annual
+  currentPeriodEnd: timestamp("current_period_end"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -152,7 +159,13 @@ export const complaints = pgTable("complaints", {
   submissionDate: timestamp("submission_date").defaultNow().notNull(),
   dueDate: timestamp("due_date").notNull(), // 15 business days from submission
   isOverdue: boolean("is_overdue").notNull().default(false),
-  
+
+  // 2-year retention (DS 011-2011-PCM): archived records keep their
+  // correlative/dates for statistics, but consumer PII is anonymized once
+  // the retention window closes. See server/services/retentionService.ts.
+  archivedAt: timestamp("archived_at"),
+  retentionPurgedAt: timestamp("retention_purged_at"),
+
   // AI analysis
   aiClassification: jsonb("ai_classification"), // AI analysis results
   aiSuggestedResponse: text("ai_suggested_response"),
@@ -324,7 +337,20 @@ export const libroConfiguration = pgTable("libro_configuration", {
   logoFileName: varchar("logo_file_name", { length: 255 }),
   logoFileSize: integer("logo_file_size"),
   logoMimeType: varchar("logo_mime_type", { length: 100 }),
-  
+
+  // Configurable templates (Professional tier): per-business branding and
+  // email/confirmation texts used by emailService and the public portal.
+  brandColor: varchar("brand_color", { length: 20 }),
+  emailSubjectPrefix: varchar("email_subject_prefix", { length: 120 }),
+  emailHeaderText: text("email_header_text"),
+  emailFooterText: text("email_footer_text"),
+  confirmationMessage: text("confirmation_message"),
+
+  // AI brand voice: response drafts follow the business's own tone and
+  // policies instead of a generic template (see aiService.suggestResponse).
+  brandTone: text("brand_tone"),
+  brandPolicies: text("brand_policies"),
+
   // Configuration status
   isActive: boolean("is_active").notNull().default(true),
   configurationCompleted: boolean("configuration_completed").notNull().default(true),
@@ -336,12 +362,71 @@ export const libroConfiguration = pgTable("libro_configuration", {
   index("idx_libro_config_url_slug").on(table.urlSlug),
 ]);
 
+// Attachments (evidence files) submitted by consumers with their complaint.
+// Files live on disk (see server/services/attachmentService.ts); this table
+// only stores the metadata so the 2-year retention sweep can purge them.
+export const complaintAttachments = pgTable("complaint_attachments", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  complaintId: uuid("complaint_id").notNull(),
+  fileName: varchar("file_name", { length: 255 }).notNull(), // stored name on disk
+  originalName: varchar("original_name", { length: 255 }).notNull(), // name the consumer chose
+  mimeType: varchar("mime_type", { length: 100 }).notNull(),
+  fileSize: integer("file_size").notNull(),
+  uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at"), // soft delete (manual removal or retention purge)
+}, (table) => [
+  index("idx_attachments_complaint_id").on(table.complaintId),
+]);
+
+// Multi-RUC access: one login can manage several businesses (Corporativo).
+// users.businessId remains the *active* business; this table records every
+// business the user may switch to (see POST /api/auth/switch-business).
+export const userBusinessAccess = pgTable("user_business_access", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull(),
+  businessId: uuid("business_id").notNull(),
+  role: varchar("role", { length: 50 }).notNull().default("admin"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  unique("uq_user_business_access").on(table.userId, table.businessId),
+  index("idx_user_business_access_user_id").on(table.userId),
+]);
+
+// API keys for the public REST API (/api/v1, CRM/ERP integrations).
+export const apiKeys = pgTable("api_keys", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessId: uuid("business_id").notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  keyPrefix: varchar("key_prefix", { length: 20 }).notNull(), // shown in the UI
+  keyHash: text("key_hash").notNull(), // sha256 of the full key
+  lastUsedAt: timestamp("last_used_at"),
+  revokedAt: timestamp("revoked_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_api_keys_business_id").on(table.businessId),
+]);
+
+// Outgoing webhooks fired on business events (complaint.created, ...).
+export const webhooks = pgTable("webhooks", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessId: uuid("business_id").notNull(),
+  url: varchar("url", { length: 500 }).notNull(),
+  secret: varchar("secret", { length: 100 }).notNull(), // HMAC-SHA256 signing secret
+  events: jsonb("events"), // Array of event names, e.g. ["complaint.created"]
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_webhooks_business_id").on(table.businessId),
+]);
+
 // Relations
-export const usersRelations = relations(users, ({ one }) => ({
+export const usersRelations = relations(users, ({ one, many }) => ({
   business: one(businesses, {
     fields: [users.businessId],
     references: [businesses.id],
   }),
+  businessAccess: many(userBusinessAccess),
 }));
 
 export const businessesRelations = relations(businesses, ({ many }) => ({
@@ -352,6 +437,34 @@ export const businessesRelations = relations(businesses, ({ many }) => ({
   complianceTracking: many(complianceTracking),
   dataProcessingActivities: many(dataProcessingActivities),
   notifications: many(notifications),
+  userAccess: many(userBusinessAccess),
+  apiKeys: many(apiKeys),
+  webhooks: many(webhooks),
+}));
+
+export const userBusinessAccessRelations = relations(userBusinessAccess, ({ one }) => ({
+  user: one(users, {
+    fields: [userBusinessAccess.userId],
+    references: [users.id],
+  }),
+  business: one(businesses, {
+    fields: [userBusinessAccess.businessId],
+    references: [businesses.id],
+  }),
+}));
+
+export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
+  business: one(businesses, {
+    fields: [apiKeys.businessId],
+    references: [businesses.id],
+  }),
+}));
+
+export const webhooksRelations = relations(webhooks, ({ one }) => ({
+  business: one(businesses, {
+    fields: [webhooks.businessId],
+    references: [businesses.id],
+  }),
 }));
 
 export const establishmentsRelations = relations(establishments, ({ one, many }) => ({
@@ -376,6 +489,14 @@ export const complaintsRelations = relations(complaints, ({ one, many }) => ({
     references: [users.id],
   }),
   auditLogs: many(complaintAuditLog),
+  attachments: many(complaintAttachments),
+}));
+
+export const complaintAttachmentsRelations = relations(complaintAttachments, ({ one }) => ({
+  complaint: one(complaints, {
+    fields: [complaintAttachments.complaintId],
+    references: [complaints.id],
+  }),
 }));
 
 export const complaintAuditLogRelations = relations(complaintAuditLog, ({ one }) => ({
@@ -521,6 +642,27 @@ export const insertLibroConfigurationSchema = createInsertSchema(libroConfigurat
   updatedAt: true,
 });
 
+export const insertComplaintAttachmentSchema = createInsertSchema(complaintAttachments).omit({
+  id: true,
+  uploadedAt: true,
+});
+
+export const insertUserBusinessAccessSchema = createInsertSchema(userBusinessAccess).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertApiKeySchema = createInsertSchema(apiKeys).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertWebhookSchema = createInsertSchema(webhooks).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Auth-specific schemas for the 2-step onboarding
 export const userRegistrationSchema = z.object({
   firstName: z.string().min(2, "Nombre debe tener al menos 2 caracteres"),
@@ -572,6 +714,21 @@ export type InsertAuthAuditLog = z.infer<typeof insertAuthAuditLogSchema>;
 
 export type LibroConfiguration = typeof libroConfiguration.$inferSelect;
 export type InsertLibroConfiguration = z.infer<typeof insertLibroConfigurationSchema>;
+
+export type ComplaintAttachment = typeof complaintAttachments.$inferSelect;
+export type InsertComplaintAttachment = z.infer<typeof insertComplaintAttachmentSchema>;
+
+export type UserBusinessAccess = typeof userBusinessAccess.$inferSelect;
+export type InsertUserBusinessAccess = z.infer<typeof insertUserBusinessAccessSchema>;
+
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
+
+export type Webhook = typeof webhooks.$inferSelect;
+export type InsertWebhook = z.infer<typeof insertWebhookSchema>;
+
+/** Public (safe) projection of an API key - never exposes the hash. */
+export type ApiKeyPublic = Omit<ApiKey, "keyHash">;
 
 export type UserRegistration = z.infer<typeof userRegistrationSchema>;
 export type LoginData = z.infer<typeof loginSchema>;

@@ -1,18 +1,47 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { complaintFormSchema, type ComplaintFormData } from "@/lib/validation";
 import { DOCUMENT_TYPES, COMPLAINT_TYPES, LEGAL_NOTICES } from "@/lib/constants";
-import { useCreateComplaint } from "@/hooks/use-complaints";
+import { useCreateComplaint, useAIPublicAssist } from "@/hooks/use-complaints";
+
+const MAX_FILE_SIZE_MB = 5;
+const MAX_FILES = 5;
+
+interface CaptchaChallenge {
+  token: string;
+  question: string;
+}
+
+/** Parses the error message a failed apiRequest carries (JSON body text). */
+function parseApiError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : "";
+  const match = message.match(/^\d+:\s*(\{.*\})$/s);
+  if (match) {
+    try {
+      const body = JSON.parse(match[1]);
+      if (typeof body.message === "string") {
+        return body.message;
+      }
+    } catch {
+      // fall through
+    }
+  }
+  return message || fallback;
+}
+
 
 interface ComplaintFormProps {
   businessId: string;
@@ -38,31 +67,150 @@ export default function ComplaintForm({
 }: ComplaintFormProps) {
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
+  const [captchaAnswer, setCaptchaAnswer] = useState("");
+  const [captchaFailed, setCaptchaFailed] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const createComplaint = useCreateComplaint();
+  const aiAssist = useAIPublicAssist();
+
+  // Math CAPTCHA (Phase 1.5): challenge is issued by the server and verified
+  // on submit; a new one is fetched whenever the previous one failed.
+  const { data: captcha, refetch: refetchCaptcha } = useQuery<CaptchaChallenge>({
+    queryKey: ["/api/public/captcha"],
+    queryFn: async () => {
+      const response = await fetch("/api/public/captcha");
+      if (!response.ok) {
+        throw new Error("No se pudo cargar el captcha");
+      }
+      return response.json() as Promise<CaptchaChallenge>;
+    },
+    staleTime: 0,
+  });
+
+  // A failed captcha expires the challenge: fetch a fresh one
+  useEffect(() => {
+    if (captchaFailed) {
+      setCaptchaAnswer("");
+      setCaptchaFailed(false);
+      void refetchCaptcha();
+    }
+  }, [captchaFailed, refetchCaptcha]);
 
   const form = useForm<ComplaintFormData>({
     resolver: zodResolver(complaintFormSchema),
     defaultValues: {
       consumerDocumentType: "DNI",
+      consumerIsMinor: false,
+      guardianDocumentType: "DNI",
       complaintType: "reclamo",
       responseMethod: "email",
       consentGiven: false,
     },
   });
 
+  const addFiles = (selected: FileList | null) => {
+    if (!selected) {
+      return;
+    }
+
+    const valid: File[] = [];
+    const rejected: string[] = [];
+
+    for (const file of Array.from(selected)) {
+      const isAllowed = /\.(pdf|jpe?g|png)$/i.test(file.name) || ["application/pdf", "image/jpeg", "image/png"].includes(file.type);
+      if (!isAllowed) {
+        rejected.push(`${file.name}: solo PDF, JPG o PNG`);
+      } else if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        rejected.push(`${file.name}: supera los ${MAX_FILE_SIZE_MB} MB`);
+      } else {
+        valid.push(file);
+      }
+    }
+
+    setFiles((current) => [...current, ...valid].slice(0, MAX_FILES));
+
+    if (rejected.length > 0) {
+      toast({
+        title: "Algunos archivos fueron descartados",
+        description: rejected.join(" · "),
+        variant: "destructive",
+      });
+    }
+  };
+
+  /** Uploads the evidence files right after the complaint is registered. */
+  const uploadAttachments = async (complaintId: string, documentNumber: string) => {
+    if (files.length === 0) {
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("documento", documentNumber);
+      files.forEach((file) => formData.append("files", file));
+
+      const response = await fetch(`/api/public/complaints/${complaintId}/attachments`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.message || "No se pudieron subir los adjuntos");
+      }
+    } catch (error) {
+      toast({
+        title: "Adjuntos no subidos",
+        description: error instanceof Error ? error.message : "Intente nuevamente",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
+      setFiles([]);
+    }
+  };
+
   const onSubmit = async (data: ComplaintFormData) => {
     try {
       setIsSubmitting(true);
 
+      if (!captcha || !captchaAnswer.trim()) {
+        setCaptchaFailed(true);
+        toast({
+          title: "Captcha requerido",
+          description: "Responda la pregunta de verificación para enviar su reclamación.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const { consumerIsMinor, ...formData } = data;
+
       const complaintData = {
-        ...data,
+        ...formData,
+        // Guardian data only travels with the complaint when it is for a minor,
+        // so adult complaints never store a stray guardian document type.
+        guardianFullName: consumerIsMinor ? formData.guardianFullName : undefined,
+        guardianDocumentType: consumerIsMinor ? formData.guardianDocumentType : undefined,
+        guardianDocumentNumber: consumerIsMinor ? formData.guardianDocumentNumber : undefined,
+        guardianRelationship: consumerIsMinor ? formData.guardianRelationship : undefined,
         businessId,
         establishmentId,
         purchaseAmount: data.purchaseAmount ? String(data.purchaseAmount) : undefined,
         purchaseDate: data.purchaseDate ? new Date(data.purchaseDate) : undefined,
+        // Anti-spam (Phase 1.5)
+        captchaToken: captcha.token,
+        captchaAnswer: captchaAnswer.trim(),
+        website: "", // honeypot: must stay empty
       };
 
-      const result = await createComplaint.mutateAsync(complaintData);
+      const result = await createComplaint.mutateAsync(complaintData as any);
+
+      // Evidence upload (Phase 1.1) - non blocking for the confirmation
+      void uploadAttachments(result.complaintId, data.consumerDocumentNumber);
 
       toast({
         title: "Reclamación enviada exitosamente",
@@ -74,10 +222,17 @@ export default function ComplaintForm({
       }
 
       form.reset();
+      setCaptchaAnswer("");
+      void refetchCaptcha();
     } catch (error) {
+      const message = parseApiError(error, "Hubo un problema al procesar su solicitud. Intente nuevamente.");
+      // A bad/expired captcha needs a fresh challenge
+      if (/captcha/i.test(message)) {
+        setCaptchaFailed(true);
+      }
       toast({
         title: "Error al enviar reclamación",
-        description: "Hubo un problema al procesar su solicitud. Intente nuevamente.",
+        description: message,
         variant: "destructive",
       });
     } finally {
@@ -225,6 +380,91 @@ export default function ComplaintForm({
           </CardContent>
         </Card>
 
+        {/* Minor / guardian (Anexo 1: datos del representante si es menor de edad) */}
+        <Card>
+          <CardContent className="pt-6 space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <Label htmlFor="consumerIsMinor" className="font-medium">
+                  La reclamación corresponde a un menor de edad
+                </Label>
+                <p className="text-sm text-gray-500">
+                  Si es menor, la hoja de reclamación debe registrar los datos del padre, madre o tutor.
+                </p>
+              </div>
+              <Switch
+                id="consumerIsMinor"
+                checked={form.watch("consumerIsMinor") ?? false}
+                onCheckedChange={(checked) =>
+                  form.setValue("consumerIsMinor", checked, { shouldValidate: true })
+                }
+                data-testid="switch-consumer-is-minor"
+              />
+            </div>
+
+            {form.watch("consumerIsMinor") && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t pt-4">
+                <div>
+                  <Label htmlFor="guardianFullName">Padre/Madre/Tutor — Nombres y Apellidos *</Label>
+                  <Input
+                    id="guardianFullName"
+                    {...form.register("guardianFullName")}
+                    data-testid="input-guardian-name"
+                  />
+                  {form.formState.errors.guardianFullName && (
+                    <p className="text-sm text-red-600">{form.formState.errors.guardianFullName.message}</p>
+                  )}
+                </div>
+
+                <div>
+                  <Label htmlFor="guardianRelationship">Relación con el menor *</Label>
+                  <Input
+                    id="guardianRelationship"
+                    placeholder="Madre / Padre / Tutor"
+                    {...form.register("guardianRelationship")}
+                    data-testid="input-guardian-relationship"
+                  />
+                  {form.formState.errors.guardianRelationship && (
+                    <p className="text-sm text-red-600">{form.formState.errors.guardianRelationship.message}</p>
+                  )}
+                </div>
+
+                <div>
+                  <Label>Documento del representante *</Label>
+                  <div className="flex space-x-2">
+                    <Select
+                      value={form.watch("guardianDocumentType")}
+                      onValueChange={(value) =>
+                        form.setValue("guardianDocumentType", value as keyof typeof DOCUMENT_TYPES, {
+                          shouldValidate: true,
+                        })
+                      }
+                    >
+                      <SelectTrigger className="w-32" data-testid="select-guardian-document-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(DOCUMENT_TYPES).map(([key, label]) => (
+                          <SelectItem key={key} value={key}>{label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      {...form.register("guardianDocumentNumber")}
+                      placeholder="Número de documento"
+                      className="flex-1"
+                      data-testid="input-guardian-document-number"
+                    />
+                  </div>
+                  {form.formState.errors.guardianDocumentNumber && (
+                    <p className="text-sm text-red-600">{form.formState.errors.guardianDocumentNumber.message}</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Product/Service Information */}
         <Card>
           <CardHeader>
@@ -312,27 +552,143 @@ export default function ComplaintForm({
             <Textarea
               {...form.register("complaintDetail")}
               rows={6}
-              placeholder="Describa en detalle su reclamo o queja..."
+              placeholder="Describa en detalle su reclamo o queja... (producto o servicio, qué pasó, cuándo y qué solución solicita)"
               data-testid="textarea-complaint-detail"
             />
             {form.formState.errors.complaintDetail && (
               <p className="text-sm text-red-600 mt-2">{form.formState.errors.complaintDetail.message}</p>
             )}
+
+            {/* AI draft assistant: helps consumers write complete complaints */}
+            <div className="mt-3 space-y-3" data-testid="ai-draft-assistant">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => aiAssist.mutate(form.watch("complaintDetail") || "")}
+                disabled={aiAssist.isPending || (form.watch("complaintDetail") || "").trim().length < 10}
+                data-testid="button-ai-review"
+              >
+                <span className="material-icons mr-1 text-sm">psychology</span>
+                {aiAssist.isPending ? "Revisando..." : "Revisar mi borrador con IA"}
+              </Button>
+
+              {aiAssist.data && (
+                <div className="rounded-lg border p-3 bg-gray-50 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge className={aiAssist.data.isComplete ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}>
+                      {aiAssist.data.isComplete ? "Borrador completo" : "Borrador incompleto"}
+                    </Badge>
+                    {aiAssist.data.source === 'fallback' && (
+                      <Badge className="bg-gray-100 text-gray-600">Asistente básico</Badge>
+                    )}
+                  </div>
+                  {aiAssist.data.missingFields.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-gray-600">Falta mencionar:</p>
+                      <ul className="list-disc list-inside text-xs text-gray-600">
+                        {aiAssist.data.missingFields.map((field: string, index: number) => (
+                          <li key={index}>{field}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {aiAssist.data.suggestions.length > 0 && (
+                    <ul className="list-disc list-inside text-xs text-gray-600">
+                      {aiAssist.data.suggestions.map((suggestion: string, index: number) => (
+                        <li key={index}>{suggestion}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {aiAssist.data.improvedText && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        form.setValue("complaintDetail", aiAssist.data!.improvedText!, { shouldValidate: true });
+                        toast({
+                          title: "Borrador mejorado",
+                          description: "Revise el texto mejorado antes de enviar su reclamación.",
+                        });
+                      }}
+                      data-testid="button-apply-improved"
+                    >
+                      Usar versión mejorada
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
 
-        {/* File Attachments */}
+        {/* File Attachments (Phase 1.1) */}
         <Card>
           <CardHeader>
             <CardTitle>Adjuntos (Opcional)</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+            <button
+              type="button"
+              className="w-full border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-primary transition-colors"
+              onClick={() => fileInputRef.current?.click()}
+              data-testid="button-select-files"
+              aria-label="Seleccionar archivos de evidencia"
+            >
               <span className="material-icons text-gray-400 text-4xl">cloud_upload</span>
               <p className="mt-2 text-sm text-gray-600">Arrastre archivos aquí o haga clic para seleccionar</p>
-              <p className="text-xs text-gray-500 mt-1">PDF, JPG, PNG hasta 5MB</p>
-              <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png" className="hidden" />
-            </div>
+              <p className="text-xs text-gray-500 mt-1">
+                PDF, JPG, PNG hasta {MAX_FILE_SIZE_MB}MB · máximo {MAX_FILES} archivos
+              </p>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+              className="hidden"
+              onChange={(e) => {
+                addFiles(e.target.files);
+                e.target.value = "";
+              }}
+              data-testid="input-files"
+            />
+
+            {files.length > 0 && (
+              <ul className="mt-4 space-y-2" data-testid="list-selected-files">
+                {files.map((file, index) => (
+                  <li
+                    key={`${file.name}-${index}`}
+                    className="flex items-center justify-between border rounded-lg px-3 py-2 text-sm"
+                  >
+                    <span className="flex items-center min-w-0">
+                      <span className="material-icons text-gray-400 mr-2 text-lg">
+                        {file.type === "application/pdf" ? "picture_as_pdf" : "image"}
+                      </span>
+                      <span className="truncate">{file.name}</span>
+                      <span className="text-gray-400 ml-2 whitespace-nowrap">
+                        ({(file.size / (1024 * 1024)).toFixed(1)} MB)
+                      </span>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}
+                      aria-label={`Quitar ${file.name}`}
+                      data-testid={`button-remove-file-${index}`}
+                    >
+                      <span className="material-icons text-lg">delete</span>
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {isUploading && (
+              <p className="mt-2 text-sm text-gray-500" data-testid="uploading-indicator">
+                Subiendo adjuntos...
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -358,12 +714,45 @@ export default function ComplaintForm({
           </CardContent>
         </Card>
 
+        {/* Verification: math CAPTCHA + honeypot (Phase 1.5) */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Verificación de Seguridad</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="captcha-answer" className="mb-1 block">
+                {captcha ? captcha.question : "Cargando verificación..."} *
+              </Label>
+              <Input
+                id="captcha-answer"
+                inputMode="numeric"
+                className="w-32"
+                value={captchaAnswer}
+                onChange={(e) => setCaptchaAnswer(e.target.value)}
+                placeholder="Respuesta"
+                data-testid="input-captcha-answer"
+                aria-required="true"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Ayuda a evitar envíos automatizados de spam.
+              </p>
+            </div>
+
+            {/* Honeypot: invisible to humans, irresistible to bots */}
+            <div aria-hidden="true" className="hidden">
+              <Label htmlFor="website">Sitio web</Label>
+              <Input id="website" tabIndex={-1} autoComplete="off" />
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Action Buttons */}
         <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4 pt-6 border-t border-gray-200">
           <Button
             type="submit"
             className="flex-1 btn-primary"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isUploading}
             data-testid="button-submit-complaint"
           >
             {isSubmitting ? "Enviando..." : "Enviar Reclamación"}

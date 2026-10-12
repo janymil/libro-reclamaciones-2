@@ -7,7 +7,7 @@ import {
 
 // Validation schemas for forms
 
-export const complaintFormSchema = z.object({
+const complaintFormObjectSchema = z.object({
   // Consumer data (mandatory fields from Anexo 1)
   consumerFullName: z.string().min(1, "Nombres y apellidos son obligatorios"),
   consumerDocumentType: z.enum(["DNI", "CE", "Pasaporte"], {
@@ -17,8 +17,11 @@ export const complaintFormSchema = z.object({
   consumerAddress: z.string().min(1, "Domicilio es obligatorio"),
   consumerPhone: z.string().min(1, "Teléfono es obligatorio"),
   consumerEmail: z.string().email("Email inválido"),
-  
-  // Guardian data (optional, for minors)
+
+  // When the consumer is a minor, the Anexo requires the parent/guardian data.
+  consumerIsMinor: z.boolean().optional(),
+
+  // Guardian data (required only when consumerIsMinor is true - enforced below)
   guardianFullName: z.string().optional(),
   guardianDocumentType: z.enum(["DNI", "CE", "Pasaporte"]).optional(),
   guardianDocumentNumber: z.string().optional(),
@@ -45,6 +48,31 @@ export const complaintFormSchema = z.object({
   consentGiven: z.boolean().refine((val) => val === true, {
     message: "Debe aceptar el tratamiento de datos personales",
   }),
+});
+
+/**
+ * A minor's complaint must identify the parent/guardian (Anexo 1: "datos del
+ * padre/madre/representante si es menor de edad"). The guardian block is only
+ * required when the consumer flagged the complaint as being for a minor.
+ */
+export const complaintFormSchema = complaintFormObjectSchema.superRefine((data, ctx) => {
+  if (!data.consumerIsMinor) {
+    return;
+  }
+
+  const required: Array<[keyof typeof data, string]> = [
+    ["guardianFullName", "Nombres y apellidos del padre, madre o tutor son obligatorios"],
+    ["guardianRelationship", "Indique la relación con el menor (madre, padre, tutor)"],
+    ["guardianDocumentType", "Seleccione el tipo de documento del representante"],
+    ["guardianDocumentNumber", "Número de documento del representante es obligatorio"],
+  ];
+
+  for (const [field, message] of required) {
+    const value = data[field];
+    if (typeof value !== "string" || value.trim().length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: [field] });
+    }
+  }
 });
 
 export const establishmentFormSchema = z.object({
@@ -123,7 +151,7 @@ export function getBusinessDaysRemaining(dueDate: Date, currentDate: Date = new 
   return countPeruBusinessDaysRemaining(dueDate, currentDate);
 }
 
-export type ComplaintFormData = z.infer<typeof complaintFormSchema>;
+export type ComplaintFormData = z.infer<typeof complaintFormObjectSchema>;
 export type EstablishmentFormData = z.infer<typeof establishmentFormSchema>;
 export type ArcoRequestFormData = z.infer<typeof arcoRequestSchema>;
 export type ComplaintResponseFormData = z.infer<typeof complaintResponseSchema>;

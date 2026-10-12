@@ -1,4 +1,6 @@
+import crypto from 'crypto';
 import PDFDocument from 'pdfkit';
+import QRCode from 'qrcode';
 import type { Complaint, Business, Establishment } from '@shared/schema';
 
 export interface ComplianceReportData {
@@ -34,6 +36,35 @@ function toList(value: unknown): string {
   return 'No especificado';
 }
 
+/**
+ * Alphabet without look-alike characters (0/O, 1/I/L) so a verification code can
+ * be read aloud over the phone or copied by hand without ambiguity.
+ */
+const VERIFICATION_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+
+/**
+ * Short verification code for a single constancia (Phase: evidence trail).
+ *
+ * Deterministic on (business, complaint id, correlative) so the consumer, the
+ * business and an INDECOPI inspector can recompute and confirm the same code
+ * from the printed hoja alone.
+ */
+export function computeComplaintVerificationCode(
+  businessId: string,
+  complaint: Pick<Complaint, 'id' | 'correlativeNumber'>,
+): string {
+  const digest = crypto
+    .createHash('sha256')
+    .update(`${businessId}|${complaint.id}|${complaint.correlativeNumber}`)
+    .digest();
+
+  let code = '';
+  for (let i = 0; i < 8; i += 1) {
+    code += VERIFICATION_ALPHABET[digest[i] % VERIFICATION_ALPHABET.length];
+  }
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
+}
+
 class PDFService {
   /**
    * Shared boilerplate for the newer documents: collects the emitted chunks and
@@ -59,8 +90,23 @@ class PDFService {
   async generateComplaintConfirmation(
     complaint: Complaint, 
     business: Business, 
-    establishment: Establishment
+    establishment: Establishment,
+    options?: { attachmentNames?: string[]; consultUrl?: string },
   ): Promise<Buffer> {
+    const verificationCode = computeComplaintVerificationCode(business.id, complaint);
+    const consultUrl = options?.consultUrl;
+
+    // QR to the public status page. Best effort: a QR failure must never block
+    // the legal constancia from being issued.
+    let qrBuffer: Buffer | null = null;
+    if (consultUrl) {
+      try {
+        qrBuffer = await QRCode.toBuffer(consultUrl, { type: 'png', margin: 1, width: 160 });
+      } catch (error) {
+        console.error('No se pudo generar el QR de la constancia:', error);
+      }
+    }
+
     return new Promise((resolve, reject) => {
       try {
         const doc = new PDFDocument({ size: 'A4', margin: 50 });
@@ -128,16 +174,67 @@ class PDFService {
         doc.text(complaint.complaintDetail, { width: 500 });
         doc.moveDown();
 
+        // Evidence attachments submitted with the complaint (Phase 1.1)
+        const attachmentNames = options?.attachmentNames ?? [];
+        if (attachmentNames.length > 0) {
+          doc.fontSize(12).font('Helvetica-Bold').text('ARCHIVOS ADJUNTOS:');
+          doc.fontSize(10).font('Helvetica');
+          attachmentNames.forEach((name) => doc.text(`- ${name}`));
+          doc.moveDown();
+        }
+
         // Legal notice
+        const noticeTop = doc.y;
+        doc.rect(50, noticeTop, 500, 60).stroke();
         doc.fontSize(8).font('Helvetica-Oblique');
-        doc.rect(50, doc.y, 500, 60).stroke();
         doc.text('IMPORTANTE: La presentación de esta hoja de reclamación no limita otras vías de solución, ' +
                  'ni constituye condición previa para denunciar ante las autoridades competentes. ' +
                  'El proveedor deberá dar respuesta en un plazo no mayor a 15 días hábiles, ' +
                  'pudiendo extenderse hasta 30 días en casos debidamente justificados.', 
-                 60, doc.y + 10, { width: 480 });
+                 60, noticeTop + 10, { width: 480 });
+        doc.y = noticeTop + 70;
+
+        // Verification block: code + QR to the public status page
+        if (doc.y > 640) {
+          doc.addPage();
+        }
+        const blockTop = doc.y;
+        doc.rect(50, blockTop, 500, 86).stroke();
+        doc.fontSize(9).font('Helvetica-Bold').text(
+          'CÓDIGO DE VERIFICACIÓN',
+          60,
+          blockTop + 10,
+          { width: 480 }
+        );
+
+        if (qrBuffer) {
+          doc.image(qrBuffer, 60, blockTop + 26, { width: 52 });
+          doc.fontSize(12).font('Helvetica-Bold').text(verificationCode, 128, blockTop + 30);
+          if (consultUrl) {
+            doc.fontSize(7.5).font('Helvetica').text(
+              `Consulte el estado de esta reclamación en: ${consultUrl}`,
+              128,
+              blockTop + 50,
+              { width: 408 }
+            );
+          }
+        } else {
+          doc.fontSize(12).font('Helvetica-Bold').text(verificationCode, 60, blockTop + 32);
+          if (consultUrl) {
+            doc.fontSize(7.5).font('Helvetica').text(
+              `Consulte el estado de esta reclamación en: ${consultUrl}`,
+              60,
+              blockTop + 52,
+              { width: 470 }
+            );
+          }
+        }
+        doc.y = blockTop + 96;
 
         // Footer
+        if (doc.y > 740) {
+          doc.addPage();
+        }
         doc.fontSize(8).font('Helvetica').text(
           `Generado automáticamente por LibroVirtual.pe el ${new Date().toLocaleString('es-PE')}`,
           { align: 'center' }
@@ -212,6 +309,71 @@ class PDFService {
       } catch (error) {
         reject(error);
       }
+    });
+  }
+
+  /**
+   * Anexo II of DS 011-2011-PCM: the print-ready blank "hoja de reclamación"
+   * (Phase 1.4). Title uses a font of at least 1x1 cm (>= 28.35 pt) and the
+   * body at least 0.5x0.5 cm (>= 14.17 pt), as the regulation requires for
+   * printed formats. Print it, hand it to the consumer and later transcribe
+   * the record into the virtual libro.
+   */
+  async generateAnexoRegistroForm(business: Business): Promise<Buffer> {
+    return this.render((doc) => {
+      // Title >= 1 cm high (29 pt) - regulation minimum
+      doc.fontSize(29).font('Helvetica-Bold').text('HOJA DE RECLAMACIÓN', { align: 'center' });
+      doc.fontSize(15).font('Helvetica').text('(Anexo II - DS 011-2011-PCM)', { align: 'center' });
+      doc.moveDown(2);
+
+      // Body >= 0.5 cm high (15 pt) - regulation minimum
+      doc.fontSize(15).font('Helvetica-Bold').text('I. DATOS DEL PROVEEDOR');
+      doc.fontSize(15).font('Helvetica');
+      doc.text(`Razón Social / Nombre Comercial: ${business.businessName}`);
+      doc.text(`RUC: ${business.ruc}`);
+      doc.text(`Domicilio: ${business.address}`);
+      doc.moveDown();
+
+      doc.fontSize(15).font('Helvetica-Bold').text('II. DATOS DEL CONSUMIDOR');
+      doc.fontSize(15).font('Helvetica');
+      doc.text('Nombres y apellidos: ______________________________________');
+      doc.text('DNI / CE / Pasaporte: ______________________________________');
+      doc.text('Domicilio: ________________________________________________');
+      doc.text('Teléfono: ______________  Correo: __________________________');
+      doc.text('Padre/madre/tutor (si es menor de edad): ___________________');
+      doc.moveDown();
+
+      doc.fontSize(15).font('Helvetica-Bold').text('III. IDENTIFICACIÓN DEL BIEN O SERVICIO');
+      doc.fontSize(15).font('Helvetica');
+      doc.text('Producto / servicio: _______________________________________');
+      doc.text('Monto: S/ ____________  Comprobante: _______________________');
+      doc.moveDown();
+
+      doc.fontSize(15).font('Helvetica-Bold').text('IV. TIPO DE RECLAMACIÓN');
+      doc.fontSize(15).font('Helvetica');
+      doc.text('☐ Reclamo   ☐ Queja');
+      doc.moveDown();
+
+      doc.fontSize(15).font('Helvetica-Bold').text('V. DETALLE DE LA RECLAMACIÓN Y PEDIDO');
+      doc.fontSize(15).font('Helvetica');
+      for (let i = 0; i < 8; i += 1) {
+        doc.text('____________________________________________________________');
+      }
+      doc.moveDown();
+
+      doc.fontSize(15).font('Helvetica-Bold').text('VI. OBSERVACIONES Y FIRMAS');
+      doc.fontSize(15).font('Helvetica');
+      doc.text('La presentación de esta hoja no limita otras vías de solución ni es');
+      doc.text('condición previa para acudir a INDECOPI.');
+      doc.moveDown(2);
+      doc.text('Firma del consumidor: _______________________________________');
+      doc.text('Fecha: _____ / _____ / __________');
+
+      doc.moveDown(2);
+      doc.fontSize(8).font('Helvetica-Oblique').text(
+        `Formato generado por LibroVirtual.pe el ${new Date().toLocaleString('es-PE')} - ${business.businessName}`,
+        { align: 'center' },
+      );
     });
   }
 
@@ -308,8 +470,10 @@ class PDFService {
         ],
         [
           '5. Plazo de conservación',
-          'Los datos se conservan durante el plazo legal requerido para la atención de reclamos y las obligaciones ' +
-            'de fiscalización posteriores, tras lo cual son eliminados o anonimizados.',
+          'Los datos personales de cada reclamación se conservan durante 24 meses desde su registro, ' +
+            'plazo durante el cual el Libro de Reclamaciones debe permanecer a disposición de la autoridad ' +
+            'de consumo. Cumplido el plazo, los datos personales son anonimizados automáticamente y los ' +
+            'archivos adjuntos eliminados, conservándose únicamente los datos agregados exigidos por la normativa.',
         ],
         [
           '6. Derechos ARCO',

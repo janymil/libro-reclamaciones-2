@@ -2,7 +2,8 @@ import type { Express } from "express";
 import bcrypt from "bcrypt";
 
 import { storage } from "../storage";
-import { requireAuth } from "../middleware/requireAuth";
+import { requireAuth, requireNonDemo } from "../middleware/requireAuth";
+import { enforceQuota } from "../services/subscriptionService";
 
 /**
  * Team members of the authenticated business, plus own profile and password.
@@ -18,7 +19,7 @@ export function registerUsersRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/users', requireAuth, async (req: any, res) => {
+  app.post('/api/users', requireAuth, requireNonDemo, async (req: any, res) => {
     try {
       const { username, firstName, lastName, email, password, role, businessId } = req.body;
 
@@ -29,6 +30,15 @@ export function registerUsersRoutes(app: Express): void {
       const existingUser = await storage.getUserByEmail(email);
       if (existingUser) {
         return res.status(400).json({ message: "El email ya está registrado" });
+      }
+
+      // Plan quota on team members (Phase 2.6)
+      const targetBusinessId = businessId || req.user.businessId || null;
+      if (targetBusinessId) {
+        const quota = await enforceQuota(targetBusinessId, req.user.id, 'users');
+        if (!quota.allowed) {
+          return res.status(402).json({ message: quota.reason, code: "quota_exceeded" });
+        }
       }
 
       // The form collects a single username; map it onto the first/last name columns

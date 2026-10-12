@@ -1,17 +1,16 @@
 import type { Express } from "express";
 import { z } from "zod";
 
-import { getPeruYear } from "@shared/peru-time";
 import { complaintSubmissionSchema, type InsertComplaint } from "@shared/schema";
 
-import { aiService } from "../services/aiService";
-import { businessDayCalculator } from "../services/businessDayCalculator";
 import { emailService } from "../services/emailService";
-import { pdfService } from "../services/pdfService";
+import { similarityService } from "../services/similarityService";
 import { storage } from "../storage";
 import { requireAuth } from "../middleware/requireAuth";
-
-const complaintFormSchema = complaintSubmissionSchema;
+import { intakeComplaint, IntakeError } from "../services/complaintIntakeService";
+import { enforceQuota } from "../services/subscriptionService";
+import { verifyCaptcha, isHoneypotTriggered } from "../services/captchaService";
+import { buildExpedienteZip } from "../services/expedienteService";
 
 // Whitelisted fields a business user can change on an existing complaint.
 const complaintUpdateSchema = z.object({
@@ -46,6 +45,25 @@ export function registerComplaintsRoutes(app: Express): void {
     } catch (error) {
       console.error('Error fetching complaints:', error);
       res.status(500).json({ message: "Failed to fetch complaints" });
+    }
+  });
+
+  // Similar-complaint detection: surfaces past complaints of the same business
+  // that resemble this one, so staff can reuse an already-sent response.
+  app.get('/api/complaints/:id/similar', requireAuth, async (req: any, res) => {
+    try {
+      const complaint = await storage.getComplaint(req.params.id);
+
+      if (!complaint || complaint.businessId !== req.user.businessId) {
+        return res.status(404).json({ message: "Complaint not found" });
+      }
+
+      const businessComplaints = await storage.getComplaintsByBusiness(req.user.businessId);
+      const similar = await similarityService.findSimilarComplaints(complaint, businessComplaints);
+      res.json(similar);
+    } catch (error) {
+      console.error('Error finding similar complaints:', error);
+      res.status(500).json({ message: "Failed to find similar complaints" });
     }
   });
 
@@ -99,12 +117,20 @@ export function registerComplaintsRoutes(app: Express): void {
         userAgent: req.get('User-Agent') ?? null,
       });
       
-      // Send response to consumer if provided
+      // Send response to consumer if provided (with the business's templates)
       if (updates.providerResponse) {
+        const config = await storage.getLibroConfiguration(complaint.businessId);
         await emailService.sendComplaintResponse(
           updatedComplaint.consumerEmail,
           updatedComplaint,
-          updates.providerResponse
+          updates.providerResponse,
+          config
+            ? {
+                subjectPrefix: config.emailSubjectPrefix,
+                headerText: config.emailHeaderText,
+                footerText: config.emailFooterText,
+              }
+            : undefined,
         );
       }
       
@@ -131,61 +157,76 @@ export function registerComplaintsRoutes(app: Express): void {
     }
   });
 
-  // Public complaint submission (no auth required)
+  // INDECOPI expediente digital (Phase 1.3): one-click ZIP with the constancia
+  // PDFs, the evidence files, the SIREC CSV and a timestamped manifest with a
+  // verification code. Filterable by establishment, date range and type.
+  app.get('/api/complaints/expediente/descargar', requireAuth, async (req: any, res) => {
+    try {
+      const business = await storage.getBusiness(req.user.businessId);
+      if (!business) {
+        return res.status(404).json({ message: "Empresa no encontrada" });
+      }
+
+      const filters = {
+        establishmentId: (req.query.establishmentId as string) || undefined,
+        type: (req.query.type as string) || undefined,
+        dateFrom: req.query.dateFrom ? new Date(req.query.dateFrom as string) : undefined,
+        dateTo: req.query.dateTo ? new Date(req.query.dateTo as string) : undefined,
+      };
+
+      const complaints = await storage.getComplaintsByBusiness(req.user.businessId, {
+        establishmentId: filters.establishmentId,
+        type: filters.type,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+      });
+
+      const { buffer, verificationCode } = await buildExpedienteZip({
+        business,
+        complaints,
+        filters,
+      });
+
+      const stamp = new Date().toISOString().slice(0, 10);
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="expediente-indecopi-${stamp}.zip"`);
+      res.setHeader('X-Verification-Code', verificationCode);
+      res.send(buffer);
+    } catch (error) {
+      console.error('Error building expediente:', error);
+      res.status(500).json({ message: "No se pudo generar el expediente" });
+    }
+  });
+
+  // Public complaint submission (no auth required).
+  //
+  // Phase 1.5: every submission must pass the math CAPTCHA and leave the
+  // honeypot field empty; the rate limits in middleware/rateLimits.ts still
+  // apply. Phase 2.6: the business's monthly complaint quota is enforced.
   app.post('/api/public/complaints', async (req, res) => {
     try {
-      const data = complaintFormSchema.parse(req.body);
-      
-      // Get business and establishment
-      const business = await storage.getBusiness(data.businessId);
-      const establishment = await storage.getEstablishment(data.establishmentId);
-      
-      if (!business || !establishment || establishment.businessId !== business.id) {
-        return res.status(404).json({ message: "Business or establishment not found" });
+      const data = complaintSubmissionSchema.parse(req.body);
+
+      // Honeypot: bots that fill the hidden "website" input are rejected
+      // silently-ish (404 keeps them guessing).
+      if (isHoneypotTriggered(req.body)) {
+        return res.status(404).json({ message: "Recurso no encontrado" });
       }
-      
-      // Generate correlative number
-      const year = getPeruYear(new Date());
-      const count = (await storage.getComplaintsByBusiness(data.businessId)).length + 1;
-      const correlativeNumber = `${year}-${count.toString().padStart(4, '0')}`;
-      
-      // Calculate due date (15 business days)
-      const dueDate = businessDayCalculator.addBusinessDays(new Date(), 15);
-      
-      // AI classification
-      const aiAnalysis = await aiService.classifyComplaint(data.complaintDetail);
-      
-      const complaint = await storage.createComplaint({
-        ...data,
-        correlativeNumber,
-        dueDate,
-        submissionDate: new Date(),
-        status: 'new',
-        priority: aiAnalysis.priority || 'normal',
-        aiClassification: aiAnalysis,
-        aiSuggestedResponse: aiAnalysis.suggestedResponse,
-        aiRiskLevel: aiAnalysis.riskLevel,
-      });
-      
-      // Generate and send confirmation PDF
-      const confirmationPdf = await pdfService.generateComplaintConfirmation(complaint, business, establishment);
-      
-      await emailService.sendComplaintConfirmation(
-        data.consumerEmail,
-        complaint,
-        confirmationPdf
-      );
-      
-      // Create notification for business
-      await storage.createNotification({
-        businessId: data.businessId,
-        type: 'complaint_new',
-        title: 'Nueva reclamación recibida',
-        message: `Se ha recibido una nueva ${data.complaintType} de ${data.consumerFullName}`,
-        relatedEntityType: 'complaint',
-        relatedEntityId: complaint.id,
-      });
-      
+
+      // CAPTCHA: the challenge is issued by GET /api/public/captcha
+      const captcha = verifyCaptcha(req.body.captchaToken, req.body.captchaAnswer);
+      if (!captcha.ok) {
+        return res.status(400).json({ message: captcha.reason, code: "captcha_invalid" });
+      }
+
+      // Quota (Phase 2.6)
+      const quota = await enforceQuota(data.businessId, null, 'complaintsThisMonth');
+      if (!quota.allowed) {
+        return res.status(402).json({ message: quota.reason, code: "quota_exceeded" });
+      }
+
+      const { complaint } = await intakeComplaint(data);
+
       res.json({
         success: true,
         complaintId: complaint.id,
@@ -193,6 +234,12 @@ export function registerComplaintsRoutes(app: Express): void {
         dueDate: complaint.dueDate,
       });
     } catch (error) {
+      if (error instanceof IntakeError) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      }
       console.error('Error creating complaint:', error);
       res.status(500).json({ message: "Failed to create complaint" });
     }

@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table,
@@ -22,24 +24,49 @@ import ComplaintDetail from "@/components/complaints/complaint-detail";
 import ComplaintResponseDialog from "@/components/complaints/complaint-response-dialog";
 import ComplaintEditDialog from "@/components/complaints/complaint-edit-dialog";
 import AIAssistantDialog from "@/components/ai/ai-assistant-dialog";
-import type { Complaint } from "@shared/schema";
+import type { Complaint, Establishment } from "@shared/schema";
+
+// Radix UI's Select forbids items whose value is an empty string (it is reserved
+// to clear the selection and show the placeholder). "Show everything" is modelled
+// with this sentinel and mapped back to "" for the filter state, where an empty
+// value already means "no filter" (see useComplaints).
+const ALL_FILTER = "all";
 
 interface ComplaintTableProps {
   showFilters?: boolean;
 }
 
+const EMPTY_FILTERS = {
+  status: "",
+  type: "",
+  priority: "",
+  establishmentId: "",
+  dateFrom: "",
+  dateTo: "",
+  search: "",
+};
+
 export default function ComplaintTable({ showFilters = true }: ComplaintTableProps) {
-  const [filters, setFilters] = useState({
-    status: "",
-    type: "",
-    priority: "",
-    search: "",
-  });
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
 
   const [viewTarget, setViewTarget] = useState<Complaint | null>(null);
   const [respondTarget, setRespondTarget] = useState<Complaint | null>(null);
   const [editTarget, setEditTarget] = useState<Complaint | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
+
+  // Sucursal filter options for the current business
+  const { data: establishments = [] } = useQuery<Establishment[]>({
+    queryKey: ["/api/establishments"],
+    queryFn: async () => {
+      const response = await fetch("/api/establishments", { credentials: "include" });
+      if (!response.ok) {
+        return [];
+      }
+      return response.json();
+    },
+  });
+
+  const hasActiveFilters = Object.values(filters).some(Boolean);
 
   const { data: complaints = [], isLoading, error } = useComplaints(filters);
   const { getBusinessDaysRemaining, getUrgencyLevel } = useBusinessDays();
@@ -181,61 +208,130 @@ export default function ComplaintTable({ showFilters = true }: ComplaintTablePro
             <CardTitle>Filtros</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="lg:col-span-2">
+                <Label htmlFor="filter-search" className="mb-1.5 block text-sm text-gray-600">Buscar</Label>
                 <Input
-                  placeholder="Buscar por número o consumidor..."
+                  id="filter-search"
+                  placeholder="Buscar por número o consumidor…"
                   value={filters.search}
                   onChange={(e) => setFilters({ ...filters, search: e.target.value })}
                   data-testid="input-search"
                 />
               </div>
 
-              <Select
-                value={filters.status}
-                onValueChange={(value) => setFilters({ ...filters, status: value })}
-              >
-                <SelectTrigger data-testid="select-status-filter">
-                  <SelectValue placeholder="Estado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Todos los estados</SelectItem>
-                  {Object.entries(COMPLAINT_STATUSES).map(([key, label]) => (
-                    <SelectItem key={key} value={key}>{label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div>
+                <Label htmlFor="filter-status" className="mb-1.5 block text-sm text-gray-600">Estado</Label>
+                <Select
+                  value={filters.status || ALL_FILTER}
+                  onValueChange={(value) => setFilters({ ...filters, status: value === ALL_FILTER ? "" : value })}
+                >
+                  <SelectTrigger id="filter-status" data-testid="select-status-filter">
+                    <SelectValue placeholder="Estado" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_FILTER}>Todos los estados</SelectItem>
+                    {Object.entries(COMPLAINT_STATUSES).map(([key, label]) => (
+                      <SelectItem key={key} value={key}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-              <Select
-                value={filters.type}
-                onValueChange={(value) => setFilters({ ...filters, type: value })}
-              >
-                <SelectTrigger data-testid="select-type-filter">
-                  <SelectValue placeholder="Tipo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Todos los tipos</SelectItem>
-                  {Object.entries(COMPLAINT_TYPES).map(([key, label]) => (
-                    <SelectItem key={key} value={key}>{label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div>
+                <Label htmlFor="filter-type" className="mb-1.5 block text-sm text-gray-600">Tipo</Label>
+                <Select
+                  value={filters.type || ALL_FILTER}
+                  onValueChange={(value) => setFilters({ ...filters, type: value === ALL_FILTER ? "" : value })}
+                >
+                  <SelectTrigger id="filter-type" data-testid="select-type-filter">
+                    <SelectValue placeholder="Tipo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_FILTER}>Todos los tipos</SelectItem>
+                    {Object.entries(COMPLAINT_TYPES).map(([key, label]) => (
+                      <SelectItem key={key} value={key}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-              <Select
-                value={filters.priority}
-                onValueChange={(value) => setFilters({ ...filters, priority: value })}
-              >
-                <SelectTrigger data-testid="select-priority-filter">
-                  <SelectValue placeholder="Prioridad" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Todas las prioridades</SelectItem>
-                  {Object.entries(COMPLAINT_PRIORITIES).map(([key, label]) => (
-                    <SelectItem key={key} value={key}>{label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div>
+                <Label htmlFor="filter-priority" className="mb-1.5 block text-sm text-gray-600">Prioridad</Label>
+                <Select
+                  value={filters.priority || ALL_FILTER}
+                  onValueChange={(value) => setFilters({ ...filters, priority: value === ALL_FILTER ? "" : value })}
+                >
+                  <SelectTrigger id="filter-priority" data-testid="select-priority-filter">
+                    <SelectValue placeholder="Prioridad" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_FILTER}>Todas las prioridades</SelectItem>
+                    {Object.entries(COMPLAINT_PRIORITIES).map(([key, label]) => (
+                      <SelectItem key={key} value={key}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="filter-establishment" className="mb-1.5 block text-sm text-gray-600">Sucursal</Label>
+                <Select
+                  value={filters.establishmentId || ALL_FILTER}
+                  onValueChange={(value) =>
+                    setFilters({ ...filters, establishmentId: value === ALL_FILTER ? "" : value })
+                  }
+                >
+                  <SelectTrigger id="filter-establishment" data-testid="select-establishment-filter">
+                    <SelectValue placeholder="Sucursal" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_FILTER}>Todas las sucursales</SelectItem>
+                    {establishments.map((establishment) => (
+                      <SelectItem key={establishment.id} value={establishment.id}>
+                        {establishment.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="filter-date-from" className="mb-1.5 block text-sm text-gray-600">Desde</Label>
+                <Input
+                  id="filter-date-from"
+                  type="date"
+                  value={filters.dateFrom}
+                  onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })}
+                  data-testid="input-filter-date-from"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="filter-date-to" className="mb-1.5 block text-sm text-gray-600">Hasta</Label>
+                <Input
+                  id="filter-date-to"
+                  type="date"
+                  value={filters.dateTo}
+                  onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
+                  data-testid="input-filter-date-to"
+                />
+              </div>
             </div>
+
+            {hasActiveFilters && (
+              <div className="mt-4 flex justify-end">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setFilters(EMPTY_FILTERS)}
+                  data-testid="button-clear-filters"
+                >
+                  <span className="material-icons mr-1 text-sm">filter_alt_off</span>
+                  Limpiar filtros
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

@@ -10,6 +10,7 @@ import type {
   Complaint,
   InsertComplaint,
   ComplaintAuditLog,
+  ComplaintAttachment,
   ArcoRequest,
   InsertArcoRequest,
   ComplianceTracking,
@@ -24,6 +25,11 @@ import type {
   InsertAuthAuditLog,
   LibroConfiguration,
   InsertLibroConfiguration,
+  UserBusinessAccess,
+  InsertUserBusinessAccess,
+  ApiKeyPublic,
+  Webhook,
+  InsertWebhook,
 } from "@shared/schema";
 
 // Application version reported alongside the derived system-change entries.
@@ -80,6 +86,39 @@ export interface IStorage {
   // Audit log operations
   createAuditLog(auditLog: Omit<ComplaintAuditLog, 'id' | 'createdAt'>): Promise<ComplaintAuditLog>;
   getAuditLogsByComplaint(complaintId: string): Promise<ComplaintAuditLog[]>;
+
+  // Attachment operations (evidence files, Phase 1.1)
+  createAttachment(data: Omit<ComplaintAttachment, 'id' | 'uploadedAt' | 'deletedAt'>): Promise<ComplaintAttachment>;
+  getAttachment(id: string): Promise<ComplaintAttachment | undefined>;
+  getAttachmentsByComplaint(complaintId: string): Promise<ComplaintAttachment[]>;
+  countAttachmentsByComplaint(complaintId: string): Promise<number>;
+  softDeleteAttachment(id: string): Promise<ComplaintAttachment | undefined>;
+  findAttachmentComplaintIdsOlderThan(cutoff: Date): Promise<string[]>;
+
+  // Complaint extras: quota usage, retention and reincidence
+  countComplaintsSince(businessId: string, since: Date): Promise<number>;
+  findComplaintsOlderThan(cutoff: Date, limit?: number): Promise<Complaint[]>;
+  anonymizeComplaint(id: string): Promise<Complaint | undefined>;
+  getReincidenceReport(businessId: string): Promise<ReincidenceReport>;
+
+  // Multi-RUC access (Phase 2.7)
+  grantBusinessAccess(access: InsertUserBusinessAccess): Promise<UserBusinessAccess>;
+  getUserBusinessAccess(userId: string): Promise<Array<UserBusinessAccess & { businessName: string; ruc: string }>>;
+  hasBusinessAccess(userId: string, businessId: string): Promise<boolean>;
+
+  // API keys (Phase 3.12)
+  createApiKey(data: { businessId: string; name: string; keyPrefix: string; keyHash: string }): Promise<ApiKeyPublic>;
+  getApiKeysByBusiness(businessId: string): Promise<ApiKeyPublic[]>;
+  getApiKeyByKeyHash(keyHash: string): Promise<ApiKeyPublic & { businessId: string } | undefined>;
+  markApiKeyUsed(id: string): Promise<void>;
+  revokeApiKey(id: string, businessId: string): Promise<ApiKeyPublic | undefined>;
+
+  // Webhooks (Phase 3.12)
+  createWebhook(data: InsertWebhook): Promise<Webhook>;
+  getWebhooksByBusiness(businessId: string): Promise<Webhook[]>;
+  getActiveWebhooks(businessId: string, event: string): Promise<Webhook[]>;
+  updateWebhook(id: string, businessId: string, updates: Partial<InsertWebhook>): Promise<Webhook | undefined>;
+  deleteWebhook(id: string, businessId: string): Promise<boolean>;
   
   // ARCO request operations
   getArcoRequests(businessId: string): Promise<ArcoRequest[]>;
@@ -148,6 +187,19 @@ export interface ComplaintStats {
   overdue: number;
   avgResponseTime: number;
   slaCompliance: number;
+}
+
+// Phase 3.11: reincidence (repeat complaints by product/store)
+export interface ReincidenceEntry {
+  key: string;
+  total: number;
+  resolved: number;
+  overdue: number;
+}
+
+export interface ReincidenceReport {
+  byProduct: ReincidenceEntry[];
+  byEstablishment: ReincidenceEntry[];
 }
 
 export interface DashboardMetrics {
