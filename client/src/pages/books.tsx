@@ -1,19 +1,23 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { Establishment } from '@shared/schema';
+import type { BookSummary } from '@/lib/api-types';
+import { downloadBlob, todayStamp } from '@/lib/export';
 import { apiRequest } from '@/lib/queryClient';
 import AppLayout from '@/components/layout/app-layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Plus, BookOpen, Download, FileText, Calendar, AlertCircle } from 'lucide-react';
+import { Plus, BookOpen, Download, FileText, Calendar, AlertCircle, Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import LibroQrCard from '@/components/libro/libro-qr-card';
 import { z } from 'zod';
 
 const createBookSchema = z.object({
@@ -26,14 +30,17 @@ type CreateBook = z.infer<typeof createBookSchema>;
 
 export default function Books() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [manageTarget, setManageTarget] = useState<BookSummary | null>(null);
+  const [manageDescription, setManageDescription] = useState('');
+  const [manageActive, setManageActive] = useState(true);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: books, isLoading } = useQuery({
+  const { data: books, isLoading } = useQuery<BookSummary[]>({
     queryKey: ['/api/books'],
   });
 
-  const { data: establishments } = useQuery({
+  const { data: establishments } = useQuery<Establishment[]>({
     queryKey: ['/api/establishments'],
   });
 
@@ -70,15 +77,65 @@ export default function Books() {
 
   const downloadBookMutation = useMutation({
     mutationFn: async (bookId: string) => {
-      return apiRequest(`/api/books/${bookId}/download`, 'GET');
+      const response = await fetch(`/api/books/${bookId}/download`, {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('No se pudo generar el PDF del libro');
+      }
+
+      const blob = await response.blob();
+      downloadBlob(`libro-de-reclamaciones-${todayStamp()}.pdf`, blob);
     },
     onSuccess: () => {
       toast({
-        title: "Descarga iniciada",
-        description: "El libro se está descargando...",
+        title: "Libro descargado",
+        description: "El PDF con los registros del libro se ha descargado.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "No se pudo generar el PDF del libro. Intente nuevamente.",
+        variant: "destructive",
       });
     },
   });
+
+  const updateBookMutation = useMutation({
+    mutationFn: async () => {
+      if (!manageTarget) return null;
+      const response = await apiRequest('PATCH', `/api/books/${manageTarget.id}`, {
+        description: manageDescription.trim() || null,
+        isActive: manageActive,
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/books'] });
+      toast({
+        title: "Libro actualizado",
+        description: "Los cambios se guardaron correctamente.",
+      });
+      setManageTarget(null);
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "No se pudo actualizar el libro. Intente nuevamente.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const openManage = (book: BookSummary) => {
+    setManageTarget(book);
+    setManageDescription(book.description ?? '');
+    setManageActive(book.isActive);
+  };
+
+  const saveManage = () => updateBookMutation.mutate();
 
   const onSubmit = (data: CreateBook) => {
     createBookMutation.mutate(data);
@@ -294,7 +351,12 @@ export default function Books() {
                       >
                         <Download className="h-4 w-4" />
                       </Button>
-                      <Button variant="outline" size="sm" data-testid={`button-manage-${book.id}`}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openManage(book)}
+                        data-testid={`button-manage-${book.id}`}
+                      >
                         Gestionar
                       </Button>
                     </div>
@@ -316,6 +378,70 @@ export default function Books() {
             </div>
           )}
         </div>
+        {/* Gestionar libro */}
+        <Dialog open={!!manageTarget} onOpenChange={(open) => !open && setManageTarget(null)}>
+          <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>
+                Gestionar {manageTarget ? getBookTypeLabel(manageTarget.bookType) : 'libro'}
+              </DialogTitle>
+              <DialogDescription>
+                {manageTarget?.establishmentName} · {manageTarget?.entriesCount || 0} registros
+              </DialogDescription>
+            </DialogHeader>
+
+            {manageTarget && (
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="manage-book-description">Descripción</Label>
+                  <Input
+                    id="manage-book-description"
+                    value={manageDescription}
+                    onChange={(e) => setManageDescription(e.target.value)}
+                    placeholder="Descripción interna del libro"
+                    data-testid="input-manage-book-description"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    id="manage-book-active"
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={manageActive}
+                    onChange={(e) => setManageActive(e.target.checked)}
+                  />
+                  <Label htmlFor="manage-book-active">Libro activo</Label>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => downloadBookMutation.mutate(manageTarget.id)}
+                    disabled={downloadBookMutation.isPending}
+                  >
+                    <Download className="h-4 w-4 mr-1" />
+                    Descargar PDF
+                  </Button>
+                  <Button
+                    className="btn-primary"
+                    onClick={saveManage}
+                    disabled={updateBookMutation.isPending}
+                    data-testid="button-save-book"
+                  >
+                    <Save className="h-4 w-4 mr-1" />
+                    {updateBookMutation.isPending ? 'Guardando...' : 'Guardar cambios'}
+                  </Button>
+                </div>
+
+                {/* Código QR del libro virtual público */}
+                <LibroQrCard />
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+
       </div>
     </AppLayout>
   );

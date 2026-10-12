@@ -2,34 +2,47 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { z } from "zod";
-import { 
-  insertComplaintSchema, 
-  insertEstablishmentSchema, 
+import {
+  insertComplaintSchema,
+  complaintSubmissionSchema,
+  insertEstablishmentSchema,
   insertArcoRequestSchema,
   userRegistrationSchema,
   loginSchema as authLoginSchema,
   insertBusinessSchema,
-  insertLibroConfigurationSchema
+  insertLibroConfigurationSchema,
+  insertDataProcessingActivitySchema,
+  type InsertComplaint
 } from "@shared/schema";
 import { authService } from "./services/authService";
+import { isLocalDatabase } from "./db";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
+import memorystore from "memorystore";
+import bcrypt from "bcrypt";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 
-// Comment out missing services for now - focus on core auth
-// import { aiService } from "./services/aiService";
-// import { businessDayCalculator } from "./services/businessDayCalculator";
-// import { legalComplianceService } from "./services/legalComplianceService";
-// import { pdfService } from "./services/pdfService";
+import { aiService } from "./services/aiService";
+import { businessDayCalculator } from "./services/businessDayCalculator";
+import { emailService } from "./services/emailService";
+import { pdfService } from "./services/pdfService";
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
 });
 
-const complaintFormSchema = insertComplaintSchema.extend({
-  responseMethod: z.enum(['email', 'letter']).optional(),
+const complaintFormSchema = complaintSubmissionSchema;
+
+// Whitelisted fields a business user can change on an existing complaint.
+const complaintUpdateSchema = z.object({
+  status: z.enum(['new', 'in_progress', 'responded', 'resolved', 'overdue']).optional(),
+  priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
+  assignedToUserId: z.string().uuid().nullable().optional(),
+  providerActions: z.string().max(5000).nullable().optional(),
+  providerResponse: z.string().max(20000).nullable().optional(),
+  responseMethod: z.enum(['email', 'letter', 'phone']).nullable().optional(),
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -50,12 +63,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } : false, // Disable CSP in development
   }));
 
-  // Session configuration with PostgreSQL store
-  const PostgresSessionStore = connectPg(session);
-  const sessionStore = new PostgresSessionStore({
-    conString: process.env.DATABASE_URL,
-    createTableIfMissing: true,
-  });
+  // Session configuration: PostgreSQL backed sessions in production, in-memory
+  // sessions when running against the embedded local development database.
+  const sessionStore = isLocalDatabase
+    ? new (memorystore(session))({ checkPeriod: 24 * 60 * 60 * 1000 })
+    : new (connectPg(session))({
+        conString: process.env.DATABASE_URL,
+        tableName: 'session',
+        createTableIfMissing: true,
+      });
 
   app.use(session({
     store: sessionStore,
@@ -96,6 +112,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) {
         req.session.destroy(() => {});
         return res.status(401).json({ message: "Sesión inválida" });
+      }
+
+      // Demo accounts are shared publicly: reading and creating is allowed,
+      // but existing records cannot be modified or deleted.
+      if (user.isDemo && ['PATCH', 'PUT', 'DELETE'].includes(req.method)) {
+        return res.status(403).json({
+          message: "Cuenta de demostración: no puede modificar ni eliminar registros.",
+        });
       }
 
       req.user = user;
@@ -209,16 +233,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Validate business data
       const validBusinessData = insertBusinessSchema.parse(businessData);
-      
-      // Validate libro configuration data
+
+      // Create business first so the libro configuration can reference it
+      const business = await storage.createBusiness(validBusinessData);
+
+      // Validate libro configuration data (businessId is injected from the new business)
       const validLibroData = insertLibroConfigurationSchema.parse({
         ...libroData,
         userId: user.id,
+        businessId: business.id,
       });
 
-      // Create business
-      const business = await storage.createBusiness(validBusinessData);
-      
       // Update user with business ID and onboarding completion
       await storage.updateUser(user.id, {
         businessId: business.id,
@@ -226,17 +251,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         onboardingCompleted: true,
       });
 
-      // Create libro configuration with business ID
-      const libroConfig = await storage.createLibroConfiguration({
-        ...validLibroData,
-        businessId: business.id,
-      });
+      const libroConfig = await storage.createLibroConfiguration(validLibroData);
 
       res.json({
         message: "Onboarding completado exitosamente",
         business,
         libroConfig,
-        redirectTo: '/dashboard'
+        redirectTo: '/panel'
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -281,6 +302,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Businesses routes
+  app.get('/api/businesses/current', requireAuth, async (req: any, res) => {
+    try {
+      if (!req.user.businessId) {
+        return res.json(null);
+      }
+
+      const business = await storage.getBusiness(req.user.businessId);
+      res.json(business ?? null);
+    } catch (error) {
+      console.error('Error fetching current business:', error);
+      res.status(500).json({ message: "Failed to fetch business" });
+    }
+  });
+
   app.get('/api/businesses', requireAuth, async (req: any, res) => {
     try {
       const businesses = await storage.getAllBusinesses();
@@ -312,19 +347,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/books', requireAuth, async (req: any, res) => {
     try {
-      const bookData = req.body;
-      const book = await storage.createBook(bookData);
-      res.json(book);
+      const { establishmentId, bookType, description } = req.body;
+
+      if (!establishmentId) {
+        return res.status(400).json({ message: "El establecimiento es requerido" });
+      }
+
+      // Ensure the establishment belongs to the authenticated business
+      const establishment = await storage.getEstablishment(establishmentId);
+      if (!establishment || establishment.businessId !== req.user.businessId) {
+        return res.status(404).json({ message: "Establecimiento no encontrado" });
+      }
+
+      const book = await storage.createBook({
+        businessId: req.user.businessId,
+        establishmentId,
+        bookType: bookType || 'reclamos',
+        description: description || null,
+        isActive: true,
+      });
+
+      res.status(201).json(book);
     } catch (error) {
+      console.error('Error creating book:', error);
       res.status(500).json({ message: "Failed to create book" });
     }
   });
 
   app.get('/api/books/:id/download', requireAuth, async (req: any, res) => {
     try {
-      // Simulate PDF download
-      res.json({ message: "PDF download would start here", bookId: req.params.id });
+      const books = await storage.getBooks(req.user.businessId);
+      const book = books.find(b => b.id === req.params.id);
+
+      if (!book) {
+        return res.status(404).json({ message: "Libro no encontrado" });
+      }
+
+      const business = await storage.getBusiness(req.user.businessId);
+      if (!business) {
+        return res.status(404).json({ message: "Empresa no encontrada" });
+      }
+
+      const complaints = await storage.getComplaintsByEstablishment(book.establishmentId);
+
+      const pdf = await pdfService.generateComplaintReport(complaints, business, {
+        establishment: book.establishmentName,
+        bookType: book.bookType,
+      });
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="libro-${book.bookType}-${book.establishmentId}.pdf"`
+      );
+      res.send(pdf);
     } catch (error) {
+      console.error('Error generating book PDF:', error);
       res.status(500).json({ message: "Failed to download book" });
     }
   });
@@ -341,10 +419,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/users', requireAuth, async (req: any, res) => {
     try {
-      const userData = req.body;
-      const user = await storage.createUser(userData);
-      res.json(user);
+      const { username, firstName, lastName, email, password, role, businessId } = req.body;
+
+      if (!email || !password) {
+        return res.status(400).json({ message: "Email y contraseña son requeridos" });
+      }
+
+      const existingUser = await storage.getUserByEmail(email);
+      if (existingUser) {
+        return res.status(400).json({ message: "El email ya está registrado" });
+      }
+
+      // The form collects a single username; map it onto the first/last name columns
+      const displayName = String(username || email.split('@')[0]).trim();
+      const hashedPassword = await bcrypt.hash(password, 12);
+
+      const user = await storage.createUser({
+        email,
+        password: hashedPassword,
+        firstName: firstName || displayName,
+        lastName: lastName || '',
+        role: role || 'user',
+        businessId: businessId || req.user.businessId || null,
+        isActive: true,
+      });
+
+      const { password: _password, ...userWithoutPassword } = user;
+      res.status(201).json(userWithoutPassword);
     } catch (error) {
+      console.error('Error creating user:', error);
       res.status(500).json({ message: "Failed to create user" });
     }
   });
@@ -364,19 +467,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const profileData = req.body;
       const user = await storage.updateUserProfile(req.user.id, profileData);
-      res.json(user);
+      const { password: _password, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
     } catch (error) {
-      res.status(500).json({ message: "Failed to update profile" });
+      console.error('Error updating profile:', error);
+      res.status(400).json({
+        message: error instanceof Error ? error.message : "Failed to update profile",
+      });
     }
   });
 
   app.post('/api/users/change-password', requireAuth, async (req: any, res) => {
     try {
       const { currentPassword, newPassword } = req.body;
+
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ message: "Las contraseñas son requeridas" });
+      }
+
       await storage.changeUserPassword(req.user.id, currentPassword, newPassword);
-      res.json({ message: "Password changed successfully" });
+      res.json({ message: "Contraseña actualizada exitosamente" });
     } catch (error) {
-      res.status(500).json({ message: "Failed to change password" });
+      console.error('Error changing password:', error);
+      res.status(400).json({
+        message: error instanceof Error ? error.message : "Failed to change password",
+      });
     }
   });
 
@@ -420,7 +535,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/history/system-changes', requireAuth, async (req: any, res) => {
     try {
       const { dateRange } = req.query;
-      const systemChanges = await storage.getSystemChanges({
+      const systemChanges = await storage.getSystemChanges(req.user.businessId, {
         dateRange: parseInt(dateRange as string) || 30,
       });
       res.json(systemChanges);
@@ -474,12 +589,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Complaint not found" });
       }
       
-      const updates = req.body;
-      
+      const complaintUpdates = complaintUpdateSchema.safeParse(req.body);
+      if (!complaintUpdates.success) {
+        return res.status(400).json({ message: "Datos inválidos", errors: complaintUpdates.error.errors });
+      }
+
+      const updates: Partial<InsertComplaint> = { ...complaintUpdates.data };
+
       // If providing a response, set response date and update status
       if (updates.providerResponse) {
         updates.responseDate = new Date();
-        updates.status = 'responded';
+        updates.status = updates.status ?? 'responded';
       }
       
       const updatedComplaint = await storage.updateComplaint(req.params.id, updates);
@@ -491,8 +611,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         action: 'complaint_updated',
         oldValues: complaint,
         newValues: updatedComplaint,
-        ipAddress: req.ip,
-        userAgent: req.get('User-Agent'),
+        notes: null,
+        ipAddress: req.ip ?? null,
+        userAgent: req.get('User-Agent') ?? null,
       });
       
       // Send response to consumer if provided
@@ -536,7 +657,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const business = await storage.getBusiness(data.businessId);
       const establishment = await storage.getEstablishment(data.establishmentId);
       
-      if (!business || !establishment) {
+      if (!business || !establishment || establishment.businessId !== business.id) {
         return res.status(404).json({ message: "Business or establishment not found" });
       }
       
@@ -735,6 +856,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Public Libro de Reclamaciones (consumer facing, no authentication)
+  app.get('/api/public/libro/:slug', async (req, res) => {
+    try {
+      const config = await storage.getLibroConfigurationBySlug(req.params.slug);
+
+      if (!config || !config.isActive) {
+        return res.status(404).json({ message: "Libro de Reclamaciones no encontrado" });
+      }
+
+      const business = await storage.getBusinessById(config.businessId);
+      if (!business) {
+        return res.status(404).json({ message: "Empresa no encontrada" });
+      }
+
+      const establishments = await storage.getEstablishmentsByBusiness(business.id);
+
+      res.json({
+        libro: {
+          name: config.libroName,
+          slug: config.urlSlug,
+          whatsappNumber: config.whatsappNumber,
+          websiteUrl: config.websiteUrl,
+          logoUrl: config.logoUrl,
+          notificationEmail: config.notificationEmail,
+        },
+        business: {
+          id: business.id,
+          businessName: business.businessName,
+          commercialName: business.commercialName,
+          ruc: business.ruc,
+          address: business.address,
+          distrito: business.distrito,
+          provincia: business.provincia,
+          departamento: business.departamento,
+        },
+        establishments: establishments.map(e => ({
+          id: e.id,
+          name: e.name,
+          address: e.address,
+        })),
+      });
+    } catch (error) {
+      console.error('Error fetching public libro:', error);
+      res.status(500).json({ message: "Error al cargar el Libro de Reclamaciones" });
+    }
+  });
+
+  // Public tracking of a registered complaint (requires correlative + document)
+  app.get('/api/public/libro/:slug/consultar/:correlative', async (req, res) => {
+    try {
+      const config = await storage.getLibroConfigurationBySlug(req.params.slug);
+      if (!config) {
+        return res.status(404).json({ message: "Libro de Reclamaciones no encontrado" });
+      }
+
+      const documentNumber = String(req.query.documento || '').trim();
+      if (!documentNumber) {
+        return res.status(400).json({ message: "Ingrese el número de documento del consumidor" });
+      }
+
+      const complaint = await storage.findComplaintByCorrelative(
+        config.businessId,
+        req.params.correlative,
+        documentNumber
+      );
+
+      if (!complaint) {
+        return res.status(404).json({ message: "No se encontró una reclamación con esos datos" });
+      }
+
+      // Only consumer-safe fields are exposed publicly
+      res.json({
+        correlativeNumber: complaint.correlativeNumber,
+        complaintType: complaint.complaintType,
+        status: complaint.status,
+        productServiceName: complaint.productServiceName,
+        submissionDate: complaint.submissionDate,
+        dueDate: complaint.dueDate,
+        responseDate: complaint.responseDate,
+        providerResponse: complaint.providerResponse,
+        isOverdue: complaint.isOverdue,
+      });
+    } catch (error) {
+      console.error('Error consulting complaint:', error);
+      res.status(500).json({ message: "Error al consultar la reclamación" });
+    }
+  });
+
   // Public business info (for complaint form)
   app.get('/api/public/business/:businessId', async (req, res) => {
     try {
@@ -783,6 +992,158 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to generate complaint notice" });
     }
   });
+
+  // --- Additional endpoints (QR code, management actions, legal documents) ---
+
+  // Libro configuration of the authenticated business. Used to build the public
+  // URL and the QR code of the Libro de Reclamaciones.
+  app.get('/api/libro-configuration', requireAuth, async (req: any, res) => {
+    try {
+      const config = await storage.getLibroConfiguration(req.user.businessId);
+      res.json(config ?? null);
+    } catch (error) {
+      console.error('Error fetching libro configuration:', error);
+      res.status(500).json({ message: "Failed to fetch libro configuration" });
+    }
+  });
+
+  // Update a business ("Gestionar" on Empresas)
+  app.patch('/api/businesses/:id', requireAuth, async (req: any, res) => {
+    try {
+      const business = await storage.getBusiness(req.params.id);
+      if (!business) {
+        return res.status(404).json({ message: "Empresa no encontrada" });
+      }
+
+      const data = insertBusinessSchema.partial().parse(req.body);
+      const updated = await storage.updateBusiness(req.params.id, data);
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      }
+      console.error('Error updating business:', error);
+      res.status(500).json({ message: "Failed to update business" });
+    }
+  });
+
+  // Update a book ("Gestionar" on Libros)
+  app.patch('/api/books/:id', requireAuth, async (req: any, res) => {
+    try {
+      const books = await storage.getBooks(req.user.businessId);
+      const book = books.find(b => b.id === req.params.id);
+
+      if (!book) {
+        return res.status(404).json({ message: "Libro no encontrado" });
+      }
+
+      const schema = z.object({
+        description: z.string().max(500).nullable().optional(),
+        isActive: z.boolean().optional(),
+      });
+      const data = schema.parse(req.body);
+
+      // Books are read through getBooks; persist the change and re-read it.
+      const updated = await storage.updateBook(req.params.id, data);
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      }
+      console.error('Error updating book:', error);
+      res.status(500).json({ message: "Failed to update book" });
+    }
+  });
+
+
+  // Data processing activities register (RNPD assistant)
+  app.get('/api/data-processing-activities', requireAuth, async (req: any, res) => {
+    try {
+      const activities = await storage.getDataProcessingActivities(req.user.businessId);
+      res.json(activities);
+    } catch (error) {
+      console.error('Error fetching data processing activities:', error);
+      res.status(500).json({ message: "Failed to fetch data processing activities" });
+    }
+  });
+
+  app.post('/api/data-processing-activities', requireAuth, async (req: any, res) => {
+    try {
+      const data = insertDataProcessingActivitySchema.parse({
+        ...req.body,
+        businessId: req.user.businessId,
+      });
+
+      const activity = await storage.createDataProcessingActivity(data);
+      res.status(201).json(activity);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      }
+      console.error('Error creating data processing activity:', error);
+      res.status(500).json({ message: "Failed to create data processing activity" });
+    }
+  });
+
+  // Compliance report as a downloadable PDF
+  app.get('/api/compliance/report/download', requireAuth, async (req: any, res) => {
+    try {
+      const report = await storage.generateComplianceReport(req.user.businessId);
+      const business = await storage.getBusiness(req.user.businessId);
+      if (!business) {
+        return res.status(404).json({ message: "Empresa no encontrada" });
+      }
+
+      const pdf = await pdfService.generateComplianceReportPdf(report, business);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="reporte-cumplimiento.pdf"');
+      res.send(pdf);
+    } catch (error) {
+      console.error('Error generating compliance report PDF:', error);
+      res.status(500).json({ message: "Failed to generate compliance report" });
+    }
+  });
+
+  // Privacy policy draft (Ley 29733 / DS 016-2024-JUS)
+  app.get('/api/documents/privacy-policy', requireAuth, async (req: any, res) => {
+    try {
+      const business = await storage.getBusiness(req.user.businessId);
+      if (!business) {
+        return res.status(404).json({ message: "Empresa no encontrada" });
+      }
+
+      const pdf = await pdfService.generatePrivacyPolicy(business);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="politica-privacidad.pdf"');
+      res.send(pdf);
+    } catch (error) {
+      console.error('Error generating privacy policy:', error);
+      res.status(500).json({ message: "Failed to generate privacy policy" });
+    }
+  });
+
+  // Registro de Actividades de Tratamiento (RNPD)
+  app.get('/api/documents/rnpd-register', requireAuth, async (req: any, res) => {
+    try {
+      const business = await storage.getBusiness(req.user.businessId);
+      if (!business) {
+        return res.status(404).json({ message: "Empresa no encontrada" });
+      }
+
+      const activities = await storage.getDataProcessingActivities(req.user.businessId);
+      const pdf = await pdfService.generateRnpdRegister(activities, business);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="registro-actividades-tratamiento.pdf"');
+      res.send(pdf);
+    } catch (error) {
+      console.error('Error generating RNPD register:', error);
+      res.status(500).json({ message: "Failed to generate RNPD register" });
+    }
+  });
+
 
   const httpServer = createServer(app);
   return httpServer;

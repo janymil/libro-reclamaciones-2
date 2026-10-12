@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import type { Complaint } from '@shared/schema';
 
 interface EmailConfig {
   host: string;
@@ -17,6 +18,36 @@ export class EmailService {
   private transporter: nodemailer.Transporter;
 
   constructor() {
+    const hasSmtpCredentials = Boolean(process.env.SMTP_USER && process.env.SMTP_PASSWORD);
+
+    if (!hasSmtpCredentials && process.env.NODE_ENV !== 'production') {
+      // Local development without SMTP credentials. Instead of failing the whole
+      // auth flow we capture the message with nodemailer's JSON transport and
+      // print it to the terminal (the generated password / reset link is part of
+      // the message body), so registration and login stay usable offline.
+      const captureTransport = nodemailer.createTransport({ jsonTransport: true });
+
+      console.warn(
+        '[email] SMTP credentials not configured - emails will be printed to this terminal instead of being sent'
+      );
+
+      this.transporter = {
+        ...captureTransport,
+        sendMail: async (mailOptions: nodemailer.SendMailOptions) => {
+          const info = await captureTransport.sendMail(mailOptions);
+          console.log(
+            `\n========== [email:dev] ${mailOptions.subject} ==========\n` +
+              `To: ${mailOptions.to}\n` +
+              `${mailOptions.text ?? (info as any).message}\n` +
+              `=======================================================\n`,
+          );
+          return info;
+        },
+      } as unknown as nodemailer.Transporter;
+
+      return;
+    }
+
     // SMTP configuration using provided Hostinger credentials
     const emailConfig: EmailConfig = {
       host: process.env.SMTP_HOST || 'smtp.hostinger.com',
@@ -95,7 +126,7 @@ export class EmailService {
               </p>
 
               <div style="text-align: center;">
-                <a href="${process.env.APP_URL || 'https://librovirtual.pe'}/dashboard" class="button">
+                <a href="${process.env.APP_URL || 'https://librovirtual.pe'}/panel" class="button">
                   Acceder a mi cuenta
                 </a>
               </div>
@@ -120,7 +151,7 @@ export class EmailService {
 
         Tu contraseña de acceso: ${password}
 
-        Para acceder a tu cuenta, visita: ${process.env.APP_URL || 'https://librovirtual.pe'}/dashboard
+        Para acceder a tu cuenta, visita: ${process.env.APP_URL || 'https://librovirtual.pe'}/panel
 
         Por seguridad, guarda esta contraseña en un lugar seguro.
 
@@ -141,7 +172,7 @@ export class EmailService {
    * Send email verification link
    */
   async sendEmailVerification(email: string, firstName: string, verificationToken: string): Promise<void> {
-    const verificationUrl = `${process.env.APP_URL || 'https://librovirtual.pe'}/auth/verify-email?token=${verificationToken}`;
+    const verificationUrl = `${process.env.APP_URL || 'https://librovirtual.pe'}/acceso/verificar-email?token=${verificationToken}`;
     
     const mailOptions = {
       from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
@@ -192,7 +223,7 @@ export class EmailService {
    * Send password reset email
    */
   async sendPasswordReset(email: string, firstName: string, resetToken: string): Promise<void> {
-    const resetUrl = `${process.env.APP_URL || 'https://librovirtual.pe'}/auth/reset-password?token=${resetToken}`;
+    const resetUrl = `${process.env.APP_URL || 'https://librovirtual.pe'}/acceso/restablecer-password?token=${resetToken}`;
     
     const mailOptions = {
       from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
@@ -390,6 +421,155 @@ export class EmailService {
     };
 
     await this.transporter.sendMail(mailOptions);
+  }
+
+  /**
+   * Send the provider's response to a consumer complaint
+   */
+  async sendComplaintResponse(email: string, complaint: Complaint, response: string): Promise<void> {
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to: email,
+      subject: `Respuesta a tu ${complaint.complaintType} ${complaint.correlativeNumber} - LibroVirtual.pe`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Respuesta a tu reclamación</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
+            .container { max-width: 600px; margin: 0 auto; background-color: white; }
+            .header { background: linear-gradient(135deg, #3b82f6, #8b5cf6); padding: 40px 20px; text-align: center; }
+            .header h1 { color: white; margin: 0; font-size: 26px; font-weight: bold; }
+            .content { padding: 40px 20px; }
+            .info-box { background-color: #f1f5f9; border-radius: 8px; padding: 20px; margin: 20px 0; }
+            .response-box { background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 20px; margin: 20px 0; white-space: pre-wrap; }
+            .footer { background-color: #f1f5f9; padding: 20px; text-align: center; color: #64748b; font-size: 14px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>📄 Respuesta a tu reclamación</h1>
+            </div>
+            <div class="content">
+              <h2>Hola ${complaint.consumerFullName}</h2>
+              <div class="info-box">
+                <p><strong>Número de registro:</strong> ${complaint.correlativeNumber}</p>
+                <p><strong>Tipo:</strong> ${complaint.complaintType}</p>
+                <p><strong>Fecha de presentación:</strong> ${new Date(complaint.submissionDate).toLocaleDateString('es-PE')}</p>
+              </div>
+              <p>Esta es la respuesta de la empresa a tu ${complaint.complaintType}:</p>
+              <div class="response-box">${response}</div>
+              <p>Si tienes alguna consulta adicional, responde a este correo.</p>
+            </div>
+            <div class="footer">
+              <p>© 2024 LibroVirtual.pe</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `
+Hola ${complaint.consumerFullName}
+
+Respuesta a tu ${complaint.complaintType} ${complaint.correlativeNumber}:
+
+${response}
+
+LibroVirtual.pe
+      `
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending complaint response:', error);
+      throw new Error('Failed to send complaint response');
+    }
+  }
+
+  /**
+   * Send the complaint confirmation together with the generated PDF receipt
+   */
+  async sendComplaintConfirmation(email: string, complaint: Complaint, pdfBuffer?: Buffer): Promise<void> {
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to: email,
+      subject: `Confirmación de ${complaint.complaintType} ${complaint.correlativeNumber} - LibroVirtual.pe`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Confirmación de reclamación</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
+            .container { max-width: 600px; margin: 0 auto; background-color: white; }
+            .header { background: linear-gradient(135deg, #10b981, #3b82f6); padding: 40px 20px; text-align: center; }
+            .header h1 { color: white; margin: 0; font-size: 26px; font-weight: bold; }
+            .content { padding: 40px 20px; }
+            .info-box { background-color: #f1f5f9; border-radius: 8px; padding: 20px; margin: 20px 0; }
+            .warning { background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 15px; margin: 20px 0; color: #92400e; }
+            .footer { background-color: #f1f5f9; padding: 20px; text-align: center; color: #64748b; font-size: 14px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>✅ Reclamación registrada</h1>
+            </div>
+            <div class="content">
+              <h2>Hola ${complaint.consumerFullName}</h2>
+              <p>Tu ${complaint.complaintType} ha sido registrada correctamente en nuestro Libro de Reclamaciones.</p>
+              <div class="info-box">
+                <p><strong>Número de registro:</strong> ${complaint.correlativeNumber}</p>
+                <p><strong>Tipo:</strong> ${complaint.complaintType}</p>
+                <p><strong>Fecha de presentación:</strong> ${new Date(complaint.submissionDate).toLocaleDateString('es-PE')}</p>
+                <p><strong>Fecha límite de respuesta:</strong> ${new Date(complaint.dueDate).toLocaleDateString('es-PE')}</p>
+              </div>
+              <div class="warning">
+                <strong>⚠️ Plazo legal:</strong> Conforme al DS 101-2022-PCM, la empresa cuenta con un plazo máximo de
+                15 días hábiles para responder tu reclamación.
+              </div>
+              <p>Adjuntamos el documento PDF con el detalle de tu registro.</p>
+            </div>
+            <div class="footer">
+              <p>© 2024 LibroVirtual.pe</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `
+Hola ${complaint.consumerFullName}
+
+Tu ${complaint.complaintType} ha sido registrada correctamente.
+
+Número de registro: ${complaint.correlativeNumber}
+Fecha de presentación: ${new Date(complaint.submissionDate).toLocaleDateString('es-PE')}
+Fecha límite de respuesta: ${new Date(complaint.dueDate).toLocaleDateString('es-PE')}
+
+Conforme al DS 101-2022-PCM la empresa cuenta con 15 días hábiles para responder.
+
+LibroVirtual.pe
+      `,
+      attachments: pdfBuffer
+        ? [{
+            filename: `reclamacion-${complaint.correlativeNumber}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf',
+          }]
+        : undefined,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending complaint confirmation:', error);
+      throw new Error('Failed to send complaint confirmation');
+    }
   }
 
   /**

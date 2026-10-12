@@ -59,6 +59,7 @@ export default function ComplaintForm({
         businessId,
         establishmentId,
         purchaseAmount: data.purchaseAmount ? String(data.purchaseAmount) : undefined,
+        purchaseDate: data.purchaseDate ? new Date(data.purchaseDate) : undefined,
       };
 
       const result = await createComplaint.mutateAsync(complaintData);

@@ -19,8 +19,8 @@ const navigationSections: NavigationSection[] = [
   {
     items: [
       {
-        name: 'Dashboard',
-        href: '/dashboard',
+        name: 'Panel',
+        href: '/panel',
         icon: 'dashboard'
       }
     ]
@@ -30,12 +30,12 @@ const navigationSections: NavigationSection[] = [
     items: [
       {
         name: 'Reclamos',
-        href: '/complaints',
+        href: '/reclamos',
         icon: 'assignment'
       },
       {
         name: 'Reportes',
-        href: '/reports',
+        href: '/reportes',
         icon: 'assessment'
       }
     ]
@@ -45,12 +45,12 @@ const navigationSections: NavigationSection[] = [
     items: [
       {
         name: 'Empresas',
-        href: '/businesses',
+        href: '/empresas',
         icon: 'business'
       },
       {
         name: 'Sucursales',
-        href: '/establishments',
+        href: '/sucursales',
         icon: 'share'
       }
     ]
@@ -59,8 +59,13 @@ const navigationSections: NavigationSection[] = [
     items: [
       {
         name: 'Libros',
-        href: '/books',
+        href: '/libros',
         icon: 'menu_book'
+      },
+      {
+        name: 'Código QR',
+        href: '/codigo-qr',
+        icon: 'qr_code_2'
       }
     ]
   },
@@ -69,7 +74,7 @@ const navigationSections: NavigationSection[] = [
     items: [
       {
         name: 'Usuarios',
-        href: '/users',
+        href: '/usuarios',
         icon: 'people'
       }
     ]
@@ -79,12 +84,12 @@ const navigationSections: NavigationSection[] = [
     items: [
       {
         name: 'Mi Perfil',
-        href: '/profile',
+        href: '/perfil',
         icon: 'account_circle'
       },
       {
         name: 'Historial',
-        href: '/history',
+        href: '/historial',
         icon: 'history'
       }
     ]

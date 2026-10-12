@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,8 +11,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useBusinessDays } from "@/hooks/use-business-days";
 import { COMPLAINT_TYPES } from "@/lib/constants";
+import ComplaintDetail from "@/components/complaints/complaint-detail";
+import ComplaintResponseDialog from "@/components/complaints/complaint-response-dialog";
+import AIAssistantDialog from "@/components/ai/ai-assistant-dialog";
 import type { Complaint } from "@shared/schema";
 
 interface RecentComplaintsTableProps {
@@ -19,6 +25,11 @@ interface RecentComplaintsTableProps {
 
 export default function RecentComplaintsTable({ complaints = [] }: RecentComplaintsTableProps) {
   const { getBusinessDaysRemaining, getUrgencyLevel } = useBusinessDays();
+  const [, setLocation] = useLocation();
+
+  const [viewTarget, setViewTarget] = useState<Complaint | null>(null);
+  const [respondTarget, setRespondTarget] = useState<Complaint | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
 
   const getStatusBadge = (status: string) => {
     const statusLabels = {
@@ -36,7 +47,7 @@ export default function RecentComplaintsTable({ complaints = [] }: RecentComplai
     );
   };
 
-  const getUrgencyBadge = (dueDate: string) => {
+  const getUrgencyBadge = (dueDate: Date | string) => {
     const urgency = getUrgencyLevel(new Date(dueDate));
     const remaining = getBusinessDaysRemaining(new Date(dueDate));
 
@@ -67,17 +78,28 @@ export default function RecentComplaintsTable({ complaints = [] }: RecentComplai
         <div className="flex items-center justify-between">
           <CardTitle>Reclamaciones Recientes</CardTitle>
           <div className="flex items-center space-x-3">
-            <Button variant="outline" size="sm" className="text-purple-600">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-purple-600"
+              onClick={() => setAiOpen(true)}
+              data-testid="button-recent-ai"
+            >
               <span className="material-icons mr-2 text-sm">smart_toy</span>
               Asistente IA
             </Button>
-            <Button size="sm" className="btn-primary">
+            <Button
+              size="sm"
+              className="btn-primary"
+              onClick={() => setLocation('/reclamos')}
+              data-testid="button-view-all-complaints"
+            >
               Ver Todas
             </Button>
           </div>
         </div>
       </CardHeader>
-      
+
       <CardContent>
         {complaints.length === 0 ? (
           <div className="text-center py-8">
@@ -109,36 +131,38 @@ export default function RecentComplaintsTable({ complaints = [] }: RecentComplai
                         </div>
                       </div>
                     </TableCell>
-                    
+
                     <TableCell>
                       <Badge className={complaint.complaintType === 'reclamo' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}>
                         {COMPLAINT_TYPES[complaint.complaintType as keyof typeof COMPLAINT_TYPES]}
                       </Badge>
                     </TableCell>
-                    
+
                     <TableCell>
                       <div>
                         <div className="font-medium">{complaint.consumerFullName}</div>
                         <div className="text-sm text-gray-500">{complaint.consumerEmail}</div>
                       </div>
                     </TableCell>
-                    
+
                     <TableCell>{complaint.establishmentId}</TableCell>
-                    
+
                     <TableCell>
                       {getUrgencyBadge(complaint.dueDate)}
                     </TableCell>
-                    
+
                     <TableCell>
                       {getStatusBadge(complaint.status)}
                     </TableCell>
-                    
+
                     <TableCell>
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-1">
                         <Button
                           variant="ghost"
                           size="sm"
+                          title="Ver detalle"
                           data-testid={`button-view-${complaint.id}`}
+                          onClick={() => setViewTarget(complaint)}
                         >
                           <span className="material-icons text-sm">visibility</span>
                         </Button>
@@ -146,7 +170,9 @@ export default function RecentComplaintsTable({ complaints = [] }: RecentComplai
                           variant="ghost"
                           size="sm"
                           className="text-success"
+                          title="Responder"
                           data-testid={`button-respond-${complaint.id}`}
+                          onClick={() => setRespondTarget(complaint)}
                         >
                           <span className="material-icons text-sm">reply</span>
                         </Button>
@@ -154,7 +180,9 @@ export default function RecentComplaintsTable({ complaints = [] }: RecentComplai
                           variant="ghost"
                           size="sm"
                           className="text-purple-600"
+                          title="Asistente IA"
                           data-testid={`button-ai-${complaint.id}`}
+                          onClick={() => setAiOpen(true)}
                         >
                           <span className="material-icons text-sm">psychology</span>
                         </Button>
@@ -167,6 +195,24 @@ export default function RecentComplaintsTable({ complaints = [] }: RecentComplai
           </div>
         )}
       </CardContent>
+
+      {/* Ver detalle */}
+      <Dialog open={!!viewTarget} onOpenChange={(open) => !open && setViewTarget(null)}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogTitle>Reclamación N° {viewTarget?.correlativeNumber}</DialogTitle>
+          {viewTarget && <ComplaintDetail complaint={viewTarget} />}
+        </DialogContent>
+      </Dialog>
+
+      {/* Responder */}
+      <ComplaintResponseDialog
+        complaint={respondTarget}
+        open={!!respondTarget}
+        onOpenChange={(open) => !open && setRespondTarget(null)}
+      />
+
+      {/* Asistente IA */}
+      <AIAssistantDialog open={aiOpen} onOpenChange={setAiOpen} />
     </Card>
   );
 }

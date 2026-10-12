@@ -1,7 +1,61 @@
 import PDFDocument from 'pdfkit';
 import type { Complaint, Business, Establishment } from '@shared/schema';
 
+export interface ComplianceReportData {
+  ds011Status: boolean;
+  ds101Status: boolean;
+  ley29733Status: boolean;
+  nextActions: string[];
+  overdueItems: Array<{
+    complianceType: string;
+    status: string;
+    dueDate?: Date | string | null;
+  }>;
+}
+
+export interface RnpdActivity {
+  activityName: string;
+  purpose: string;
+  dataCategories: unknown;
+  dataSubjects: unknown;
+  legalBasis: string;
+  retentionPeriod: string;
+  securityMeasures?: unknown;
+}
+
+/** Joins a jsonb array (or string) column into a readable, comma separated list. */
+function toList(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.filter(Boolean).join(', ') || 'No especificado';
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value;
+  }
+  return 'No especificado';
+}
+
 class PDFService {
+  /**
+   * Shared boilerplate for the newer documents: collects the emitted chunks and
+   * resolves with the final buffer, rejecting on any rendering error.
+   */
+  private render(build: (doc: PDFKit.PDFDocument) => void): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      try {
+        const doc = new PDFDocument({ size: 'A4', margin: 50 });
+        const buffers: Buffer[] = [];
+
+        doc.on('data', buffers.push.bind(buffers));
+        doc.on('end', () => resolve(Buffer.concat(buffers)));
+
+        build(doc);
+        doc.end();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
   async generateComplaintConfirmation(
     complaint: Complaint, 
     business: Business, 
@@ -158,6 +212,171 @@ class PDFService {
       } catch (error) {
         reject(error);
       }
+    });
+  }
+
+  /**
+   * Compliance report PDF summarising the three legal pillars tracked by the
+   * platform (DS 011-2011-PCM, DS 101-2022-PCM, Ley 29733).
+   */
+  async generateComplianceReportPdf(report: ComplianceReportData, business: Business): Promise<Buffer> {
+    return this.render((doc) => {
+      doc.fontSize(16).font('Helvetica-Bold').text('REPORTE DE CUMPLIMIENTO LEGAL', { align: 'center' });
+      doc.moveDown();
+      doc.fontSize(10).font('Helvetica').text(`Empresa: ${business.businessName}`);
+      doc.text(`RUC: ${business.ruc}`);
+      doc.text(`Fecha de emisión: ${new Date().toLocaleDateString('es-PE')}`);
+      doc.moveDown(1.5);
+
+      const compliant = [report.ds011Status, report.ds101Status, report.ley29733Status].filter(Boolean).length;
+      doc.fontSize(12).font('Helvetica-Bold').text(`Cumplimiento general: ${Math.round((compliant / 3) * 100)}%`);
+      doc.moveDown();
+
+      const rows: Array<[string, boolean, string]> = [
+        ['DS 011-2011-PCM — Reglamento del Libro de Reclamaciones', report.ds011Status, 'Libro de Reclamaciones habilitado y publicado'],
+        ['DS 101-2022-PCM — Plazo de 15 días hábiles', report.ds101Status, 'Respuestas a reclamos dentro del plazo legal'],
+        ['Ley 29733 — Protección de Datos Personales', report.ley29733Status, 'Tratamiento de datos conforme a la normativa'],
+      ];
+
+      for (const [label, ok, description] of rows) {
+        doc.fontSize(11).font('Helvetica-Bold').text(`${ok ? '[X]' : '[ ]'} ${label}`);
+        doc.fontSize(9).font('Helvetica').fillColor('#555555').text(description);
+        doc.fillColor('black');
+        doc.moveDown(0.5);
+      }
+
+      doc.moveDown();
+      doc.fontSize(12).font('Helvetica-Bold').text('ACCIONES RECOMENDADAS:');
+      doc.fontSize(10).font('Helvetica');
+      if (report.nextActions.length === 0) {
+        doc.text('Sin acciones pendientes.');
+      } else {
+        for (const action of report.nextActions) {
+          doc.text(`- ${action}`);
+        }
+      }
+
+      if (report.overdueItems.length > 0) {
+        doc.moveDown();
+        doc.fontSize(12).font('Helvetica-Bold').text('ELEMENTOS VENCIDOS:');
+        doc.fontSize(10).font('Helvetica');
+        for (const item of report.overdueItems) {
+          doc.text(`- ${item.complianceType} (${item.status})`);
+        }
+      }
+
+      doc.moveDown(2);
+      doc.fontSize(8).font('Helvetica-Oblique').text(
+        `Documento generado automáticamente por LibroVirtual.pe el ${new Date().toLocaleString('es-PE')}`,
+        { align: 'center' },
+      );
+    });
+  }
+
+  /**
+   * Privacy policy draft compliant with Ley 29733 and its Reglamento DS 016-2024-JUS.
+   */
+  async generatePrivacyPolicy(business: Business): Promise<Buffer> {
+    return this.render((doc) => {
+      doc.fontSize(16).font('Helvetica-Bold').text('POLÍTICA DE PRIVACIDAD', { align: 'center' });
+      doc.moveDown();
+      doc.fontSize(10).font('Helvetica').text(`Proveedor: ${business.businessName}`);
+      doc.text(`RUC: ${business.ruc}`);
+      doc.text(`Domicilio: ${business.address}, ${business.distrito}, ${business.provincia}, ${business.departamento}`);
+      doc.moveDown(1.5);
+
+      const sections: Array<[string, string]> = [
+        [
+          '1. Marco normativo',
+          'La presente política se elabora conforme a la Ley N° 29733, Ley de Protección de Datos Personales, ' +
+            'y su Reglamento aprobado por DS N° 016-2024-JUS, vigente desde el 30 de marzo de 2025.',
+        ],
+        [
+          '2. Finalidad del tratamiento',
+          'Los datos personales consignados en el Libro de Reclamaciones son tratados con la única finalidad de ' +
+            'atender y dar respuesta a los reclamos y quejas formulados por los consumidores.',
+        ],
+        [
+          '3. Datos recopilados',
+          'Nombres y apellidos, tipo y número de documento de identidad, domicilio, teléfono, correo electrónico ' +
+            'y la información referida al bien o servicio contratado.',
+        ],
+        [
+          '4. Consentimiento',
+          'El titular otorga su consentimiento libre, previo, expreso e informado para el tratamiento de sus datos ' +
+            'al momento de registrar la reclamación, salvo en los supuestos de excepción previstos por ley.',
+        ],
+        [
+          '5. Plazo de conservación',
+          'Los datos se conservan durante el plazo legal requerido para la atención de reclamos y las obligaciones ' +
+            'de fiscalización posteriores, tras lo cual son eliminados o anonimizados.',
+        ],
+        [
+          '6. Derechos ARCO',
+          'El titular puede ejercer sus derechos de acceso, rectificación, cancelación y oposición (ARCO) ' +
+            'escribiendo al correo electrónico de contacto del proveedor.',
+        ],
+        [
+          '7. Seguridad',
+          'Se adoptan medidas técnicas y organizativas razonables para resguardar la confidencialidad, integridad ' +
+            'y disponibilidad de los datos personales.',
+        ],
+        [
+          '8. Transferencias',
+          'No se realizan transferencias de datos personales a terceros salvo obligación legal o autorización ' +
+            'expresa del titular.',
+        ],
+      ];
+
+      for (const [title, body] of sections) {
+        doc.fontSize(11).font('Helvetica-Bold').text(title);
+        doc.fontSize(10).font('Helvetica').text(body, { align: 'justify' });
+        doc.moveDown();
+      }
+
+      doc.moveDown();
+      doc.fontSize(8).font('Helvetica-Oblique').text(
+        `Documento generado automáticamente por LibroVirtual.pe el ${new Date().toLocaleString('es-PE')}`,
+        { align: 'center' },
+      );
+    });
+  }
+
+  /**
+   * Registro de Actividades de Tratamiento, required for the RNPD registration.
+   */
+  async generateRnpdRegister(activities: RnpdActivity[], business: Business): Promise<Buffer> {
+    return this.render((doc) => {
+      doc.fontSize(16).font('Helvetica-Bold').text('REGISTRO DE ACTIVIDADES DE TRATAMIENTO', { align: 'center' });
+      doc.moveDown();
+      doc.fontSize(10).font('Helvetica').text(`Titular del banco de datos: ${business.businessName}`);
+      doc.text(`RUC: ${business.ruc}`);
+      doc.text(`Fecha de emisión: ${new Date().toLocaleDateString('es-PE')}`);
+      doc.moveDown(1.5);
+
+      if (activities.length === 0) {
+        doc.fontSize(11).font('Helvetica').text(
+          'Aún no se han registrado actividades de tratamiento. Use el asistente RNPD para incorporarlas.',
+        );
+      }
+
+      activities.forEach((activity, index) => {
+        doc.fontSize(12).font('Helvetica-Bold').text(`${index + 1}. ${activity.activityName}`);
+        doc.fontSize(10).font('Helvetica');
+        doc.text(`Finalidad: ${activity.purpose}`);
+        doc.text(`Base legal: ${activity.legalBasis}`);
+        doc.text(`Categorías de datos: ${toList(activity.dataCategories)}`);
+        doc.text(`Titulares: ${toList(activity.dataSubjects)}`);
+        doc.text(`Plazo de conservación: ${activity.retentionPeriod}`);
+        doc.text(`Medidas de seguridad: ${toList(activity.securityMeasures)}`);
+        doc.moveDown();
+      });
+
+      doc.moveDown();
+      doc.fontSize(8).font('Helvetica-Oblique').text(
+        `Documento generado automáticamente por LibroVirtual.pe el ${new Date().toLocaleString('es-PE')}`,
+        { align: 'center' },
+      );
     });
   }
 

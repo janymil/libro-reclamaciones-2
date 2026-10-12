@@ -23,7 +23,9 @@ interface LoginData {
 export default function AuthPage() {
   // Check URL parameters to determine initial mode
   const urlParams = new URLSearchParams(window.location.search);
-  const initialMode = urlParams.get('mode') === 'register' ? 'register' : 'login';
+  // Acepta tanto `?modo=` (nuevo) como el antiguo `?mode=`
+  const requestedMode = urlParams.get('modo') ?? urlParams.get('mode');
+  const initialMode = requestedMode === 'registro' || requestedMode === 'register' ? 'register' : 'login';
   
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [, setLocation] = useLocation();
@@ -46,9 +48,9 @@ export default function AuthPage() {
   useEffect(() => {
     if (isAuthenticated && user) {
       if (!user.onboardingCompleted) {
-        setLocation('/onboarding');
+        setLocation('/registro');
       } else {
-        setLocation('/dashboard');
+        setLocation('/panel');
       }
     }
   }, [isAuthenticated, user, setLocation]);

@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import type { ActivityEntry, AuditLogEntry, SystemChange } from '@/lib/api-types';
+import { downloadCsv, todayStamp } from '@/lib/export';
 import AppLayout from '@/components/layout/app-layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,18 +16,29 @@ export default function History() {
   const [filterType, setFilterType] = useState('all');
   const [dateRange, setDateRange] = useState('30');
   const [searchTerm, setSearchTerm] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const { data: activityHistory, isLoading } = useQuery({
-    queryKey: ['/api/history/activity', filterType, dateRange, searchTerm],
+  const { data: activityHistory, isLoading } = useQuery<ActivityEntry[]>({
+    queryKey: [`/api/history/activity?${new URLSearchParams({ filterType, dateRange, searchTerm })}`],
   });
 
-  const { data: auditLogs } = useQuery({
-    queryKey: ['/api/history/audit', filterType, dateRange],
+  const { data: auditLogs } = useQuery<AuditLogEntry[]>({
+    queryKey: [`/api/history/audit?${new URLSearchParams({ filterType, dateRange })}`],
   });
 
-  const { data: systemChanges } = useQuery({
-    queryKey: ['/api/history/system-changes', dateRange],
+  const { data: systemChanges } = useQuery<SystemChange[]>({
+    queryKey: [`/api/history/system-changes?${new URLSearchParams({ dateRange })}`],
   });
+
+  const exportHistory = () => {
+    downloadCsv(`historial-${todayStamp()}`, (activityHistory ?? []).map((entry) => ({
+      Fecha: new Date(entry.timestamp).toLocaleString('es-PE'),
+      'Acción': entry.action,
+      'Descripción': entry.description,
+      Usuario: entry.username,
+      'Módulo': entry.module,
+    })));
+  };
 
   const getActionIcon = (action: string) => {
     switch (action.toLowerCase()) {
@@ -74,7 +87,7 @@ export default function History() {
               Registro detallado de actividades, cambios y eventos del sistema
             </p>
           </div>
-          <Button className="flex items-center gap-2" data-testid="button-export-history">
+          <Button className="flex items-center gap-2" onClick={exportHistory} data-testid="button-export-history">
             <Download className="h-4 w-4" />
             Exportar Historial
           </Button>
@@ -174,35 +187,57 @@ export default function History() {
                 ) : activityHistory?.length ? (
                   <div className="space-y-4">
                     {activityHistory.map((activity: any) => (
-                      <div key={activity.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
-                        <div className="flex items-center space-x-4">
-                          <div className="p-2 rounded-lg bg-gray-100">
-                            {getActionIcon(activity.action)}
-                          </div>
-                          <div>
-                            <h4 className="font-medium" data-testid={`activity-title-${activity.id}`}>
-                              {activity.description}
-                            </h4>
-                            <div className="flex items-center gap-4 text-sm text-gray-600">
-                              <span className="flex items-center gap-1">
-                                <User className="h-3 w-3" />
-                                {activity.username}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
-                                {formatRelativeTime(activity.createdAt)}
-                              </span>
+                      <div key={activity.id} className="border rounded-lg">
+                        <div className="flex items-center justify-between p-4 hover:bg-gray-50">
+                          <div className="flex items-center space-x-4">
+                            <div className="p-2 rounded-lg bg-gray-100">
+                              {getActionIcon(activity.action)}
+                            </div>
+                            <div>
+                              <h4 className="font-medium" data-testid={`activity-title-${activity.id}`}>
+                                {activity.description}
+                              </h4>
+                              <div className="flex items-center gap-4 text-sm text-gray-600">
+                                <span className="flex items-center gap-1">
+                                  <User className="h-3 w-3" />
+                                  {activity.username}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Clock className="h-3 w-3" />
+                                  {formatRelativeTime(activity.timestamp)}
+                                </span>
+                              </div>
                             </div>
                           </div>
+                          <div className="flex items-center space-x-2">
+                            <Badge className={getActionColor(activity.action)} data-testid={`activity-action-${activity.id}`}>
+                              {activity.action}
+                            </Badge>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setExpandedId(expandedId === activity.id ? null : activity.id)}
+                              data-testid={`button-view-${activity.id}`}
+                            >
+                              {expandedId === activity.id ? 'Ocultar' : 'Ver Detalles'}
+                            </Button>
+                          </div>
                         </div>
-                        <div className="flex items-center space-x-2">
-                          <Badge className={getActionColor(activity.action)} data-testid={`activity-action-${activity.id}`}>
-                            {activity.action}
-                          </Badge>
-                          <Button variant="outline" size="sm" data-testid={`button-view-${activity.id}`}>
-                            Ver Detalles
-                          </Button>
-                        </div>
+
+                        {expandedId === activity.id && (
+                          <div className="px-4 pb-4 text-sm text-gray-700 border-t pt-3 bg-gray-50" data-testid={`activity-detail-${activity.id}`}>
+                            <dl className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                              <div><dt className="text-gray-500 inline">Módulo: </dt><dd className="inline">{activity.module}</dd></div>
+                              <div><dt className="text-gray-500 inline">Acción: </dt><dd className="inline font-mono">{activity.action}</dd></div>
+                              <div><dt className="text-gray-500 inline">Usuario: </dt><dd className="inline">{activity.username}</dd></div>
+                              <div><dt className="text-gray-500 inline">Registro: </dt><dd className="inline font-mono text-xs">{activity.id}</dd></div>
+                              <div className="md:col-span-2">
+                                <dt className="text-gray-500 inline">Fecha exacta: </dt>
+                                <dd className="inline">{new Date(activity.timestamp).toLocaleString('es-PE')}</dd>
+                              </div>
+                            </dl>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -232,7 +267,7 @@ export default function History() {
                       <div key={log.id} className="p-4 border rounded-lg">
                         <div className="flex items-center justify-between mb-2">
                           <h4 className="font-medium" data-testid={`audit-title-${log.id}`}>
-                            {log.tableName} - {log.operation}
+                            {log.entityType} - {log.action}
                           </h4>
                           <span className="text-sm text-gray-500">
                             {new Date(log.timestamp).toLocaleString('es-PE')}

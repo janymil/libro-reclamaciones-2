@@ -34,7 +34,7 @@ class LegalComplianceService {
     // DS 101-2022-PCM - 15 días hábiles improrrogables
     const complaints = await storage.getComplaintsByBusiness(businessId);
     const overdueComplaints = complaints.filter(c => 
-      businessDayCalculator.isComplaintOverdue(c.submissionDate, c.responseDate)
+      businessDayCalculator.isComplaintOverdue(c.submissionDate, c.responseDate ?? undefined)
     );
     
     return {

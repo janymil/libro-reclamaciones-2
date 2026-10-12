@@ -3,29 +3,29 @@ import { cn } from "@/lib/utils";
 
 const navigation = [
   {
-    name: 'Dashboard',
-    href: '/',
+    name: 'Panel',
+    href: '/panel',
     icon: 'dashboard'
   },
   {
     name: 'Reclamos',
-    href: '/complaints',
+    href: '/reclamos',
     icon: 'assignment'
   },
   {
-    name: 'IA',
-    href: '/ai-assistant',
-    icon: 'smart_toy'
+    name: 'Libros',
+    href: '/libros',
+    icon: 'menu_book'
   },
   {
     name: 'Reportes',
-    href: '/reports',
+    href: '/reportes',
     icon: 'assessment'
   },
   {
-    name: 'Config',
-    href: '/settings',
-    icon: 'settings'
+    name: 'Mi Perfil',
+    href: '/perfil',
+    icon: 'account_circle'
   }
 ];
 

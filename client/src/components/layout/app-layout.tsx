@@ -1,4 +1,5 @@
 import { ReactNode } from "react";
+import { useLocation } from "wouter";
 import { useIsMobile } from "@/hooks/use-mobile";
 import Sidebar from "./sidebar";
 import Header from "./header";
@@ -13,6 +14,7 @@ interface AppLayoutProps {
 
 export default function AppLayout({ children, title, subtitle }: AppLayoutProps) {
   const isMobile = useIsMobile();
+  const [, setLocation] = useLocation();
 
   return (
     <div className="min-h-screen flex bg-surface">
@@ -31,9 +33,11 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
       {/* Mobile Navigation - Only shown on mobile */}
       {isMobile && <MobileNavigation />}
       
-      {/* Floating Action Button */}
+      {/* Floating Action Button - registrar una nueva reclamación */}
       <Button
         className="fixed bottom-20 lg:bottom-6 right-6 w-14 h-14 btn-primary rounded-full shadow-lg z-40"
+        onClick={() => setLocation("/reclamos?nuevo=1")}
+        title="Registrar nueva reclamación"
         data-testid="fab-add-complaint"
       >
         <span className="material-icons">add</span>

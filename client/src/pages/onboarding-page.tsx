@@ -46,9 +46,9 @@ export default function OnboardingPage() {
   // Redirect if not authenticated or onboarding already completed
   useEffect(() => {
     if (!isAuthenticated) {
-      setLocation('/auth');
+      setLocation('/acceso');
     } else if (user?.onboardingCompleted) {
-      setLocation('/dashboard');
+      setLocation('/panel');
     }
   }, [isAuthenticated, user, setLocation]);
 
@@ -152,7 +152,7 @@ export default function OnboardingPage() {
         title: "¡Configuración completada!",
         description: "Tu libro de reclamaciones está listo para usar",
       });
-      setLocation('/dashboard');
+      setLocation('/panel');
     },
     onError: (error: Error) => {
       toast({
@@ -212,8 +212,7 @@ export default function OnboardingPage() {
         .replace(/[^a-z0-9]/g, '-')
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, ''),
-      notificationEmail: user?.email || '',
-      websiteUrl: businessForm.website
+      notificationEmail: user?.email || ''
     }));
     
     setStep(2);

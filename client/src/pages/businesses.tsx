@@ -7,22 +7,25 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Plus, Building2, MapPin, Users, Settings } from 'lucide-react';
+import { Plus, Building2, MapPin, Users, Settings, Save } from 'lucide-react';
 import { insertBusinessSchema, type InsertBusiness } from '@shared/schema';
+import type { BusinessSummary } from '@/lib/api-types';
 import { useToast } from '@/hooks/use-toast';
 
 export default function Businesses() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [manageTarget, setManageTarget] = useState<BusinessSummary | null>(null);
+  const [manageForm, setManageForm] = useState<Partial<InsertBusiness>>({});
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: businesses, isLoading } = useQuery({
+  const { data: businesses, isLoading } = useQuery<BusinessSummary[]>({
     queryKey: ['/api/businesses'],
   });
 
@@ -31,14 +34,17 @@ export default function Businesses() {
       ruc: insertBusinessSchema.shape.ruc.min(11, 'RUC debe tener 11 dígitos'),
     })),
     defaultValues: {
-      name: '',
       ruc: '',
-      address: '',
+      businessName: '',
+      commercialName: '',
       phone: '',
-      email: '',
-      legalRepresentative: '',
-      businessSector: '',
-      subscriptionStatus: 'active',
+      address: '',
+      distrito: '',
+      provincia: '',
+      departamento: '',
+      website: '',
+      subscriptionPlan: 'basic',
+      isActive: true,
     },
   });
 
@@ -66,6 +72,44 @@ export default function Businesses() {
 
   const onSubmit = (data: InsertBusiness) => {
     createBusinessMutation.mutate(data);
+  };
+
+  const manageMutation = useMutation({
+    mutationFn: async () => {
+      if (!manageTarget) return null;
+      const response = await apiRequest('PATCH', `/api/businesses/${manageTarget.id}`, manageForm);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/businesses'] });
+      toast({
+        title: "Empresa actualizada",
+        description: "Los datos de la empresa se guardaron correctamente.",
+      });
+      setManageTarget(null);
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "No se pudieron guardar los cambios. Intente nuevamente.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const openManage = (business: BusinessSummary) => {
+    setManageTarget(business);
+    setManageForm({
+      businessName: business.businessName,
+      commercialName: business.commercialName ?? '',
+      phone: business.phone ?? '',
+      address: business.address,
+      distrito: business.distrito,
+      provincia: business.provincia,
+      departamento: business.departamento,
+      website: business.website ?? '',
+      isActive: business.isActive,
+    });
   };
 
   return (
@@ -99,7 +143,7 @@ export default function Businesses() {
                   <div className="grid grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
-                      name="name"
+                      name="businessName"
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>Razón Social</FormLabel>
@@ -147,7 +191,7 @@ export default function Businesses() {
                         <FormItem>
                           <FormLabel>Teléfono</FormLabel>
                           <FormControl>
-                            <Input placeholder="+51 999 999 999" {...field} data-testid="input-business-phone" />
+                            <Input placeholder="+51 999 999 999" {...field} value={field.value ?? ''} data-testid="input-business-phone" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -155,12 +199,12 @@ export default function Businesses() {
                     />
                     <FormField
                       control={form.control}
-                      name="email"
+                      name="commercialName"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Email</FormLabel>
+                          <FormLabel>Nombre Comercial</FormLabel>
                           <FormControl>
-                            <Input type="email" placeholder="contacto@empresa.com" {...field} data-testid="input-business-email" />
+                            <Input placeholder="Nombre comercial" {...field} value={field.value ?? ''} data-testid="input-business-commercial-name" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -171,12 +215,12 @@ export default function Businesses() {
                   <div className="grid grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
-                      name="legalRepresentative"
+                      name="distrito"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Representante Legal</FormLabel>
+                          <FormLabel>Distrito</FormLabel>
                           <FormControl>
-                            <Input placeholder="Nombre completo" {...field} data-testid="input-legal-representative" />
+                            <Input placeholder="Miraflores" {...field} data-testid="input-business-distrito" />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -184,25 +228,49 @@ export default function Businesses() {
                     />
                     <FormField
                       control={form.control}
-                      name="businessSector"
+                      name="provincia"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Sector Empresarial</FormLabel>
+                          <FormLabel>Provincia</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Lima" {...field} data-testid="input-business-provincia" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="departamento"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Departamento</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Lima" {...field} data-testid="input-business-departamento" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="subscriptionPlan"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Plan</FormLabel>
                           <Select onValueChange={field.onChange} defaultValue={field.value}>
                             <FormControl>
-                              <SelectTrigger data-testid="select-business-sector">
-                                <SelectValue placeholder="Seleccionar sector" />
+                              <SelectTrigger data-testid="select-business-plan">
+                                <SelectValue placeholder="Seleccionar plan" />
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              <SelectItem value="retail">Retail</SelectItem>
-                              <SelectItem value="services">Servicios</SelectItem>
-                              <SelectItem value="manufacturing">Manufactura</SelectItem>
-                              <SelectItem value="technology">Tecnología</SelectItem>
-                              <SelectItem value="healthcare">Salud</SelectItem>
-                              <SelectItem value="finance">Finanzas</SelectItem>
-                              <SelectItem value="education">Educación</SelectItem>
-                              <SelectItem value="other">Otro</SelectItem>
+                              <SelectItem value="basic">Básico</SelectItem>
+                              <SelectItem value="professional">Profesional</SelectItem>
+                              <SelectItem value="enterprise">Empresarial</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -210,6 +278,20 @@ export default function Businesses() {
                       )}
                     />
                   </div>
+
+                  <FormField
+                    control={form.control}
+                    name="website"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Sitio web (opcional)</FormLabel>
+                        <FormControl>
+                          <Input placeholder="https://empresa.pe" {...field} value={field.value ?? ''} data-testid="input-business-website" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
                   <div className="flex justify-end space-x-2 pt-4">
                     <Button
@@ -252,22 +334,22 @@ export default function Businesses() {
               </Card>
             ))
           ) : businesses?.length ? (
-            businesses.map((business: any) => (
+            businesses.map((business) => (
               <Card key={business.id} className="hover:shadow-lg transition-shadow">
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <div>
                       <CardTitle className="text-lg flex items-center gap-2" data-testid={`business-name-${business.id}`}>
                         <Building2 className="h-5 w-5" />
-                        {business.name}
+                        {business.businessName}
                       </CardTitle>
                       <CardDescription>RUC: {business.ruc}</CardDescription>
                     </div>
                     <Badge 
-                      variant={business.subscriptionStatus === 'active' ? 'default' : 'secondary'}
+                      variant={business.isActive ? 'default' : 'secondary'}
                       data-testid={`business-status-${business.id}`}
                     >
-                      {business.subscriptionStatus === 'active' ? 'Activo' : 'Inactivo'}
+                      {business.isActive ? 'Activo' : 'Inactivo'}
                     </Badge>
                   </div>
                 </CardHeader>
@@ -278,13 +360,18 @@ export default function Businesses() {
                   </div>
                   <div className="flex items-center gap-2 text-sm text-gray-600">
                     <Users className="h-4 w-4" />
-                    <span>{business.legalRepresentative}</span>
+                    <span>{business.userCount || 0} usuarios</span>
                   </div>
                   <div className="flex justify-between items-center pt-2">
                     <span className="text-sm font-medium text-blue-600">
                       {business.establishmentCount || 0} sucursales
                     </span>
-                    <Button variant="outline" size="sm" data-testid={`button-manage-${business.id}`}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openManage(business)}
+                      data-testid={`button-manage-${business.id}`}
+                    >
                       <Settings className="h-4 w-4 mr-1" />
                       Gestionar
                     </Button>
@@ -304,6 +391,81 @@ export default function Businesses() {
             </div>
           )}
         </div>
+        {/* Gestionar empresa */}
+        <Dialog open={!!manageTarget} onOpenChange={(open) => !open && setManageTarget(null)}>
+          <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Gestionar empresa</DialogTitle>
+              <DialogDescription>
+                Actualice los datos de {manageTarget?.businessName ?? 'la empresa'}.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="manage-business-name">Razón social</Label>
+                  <Input id="manage-business-name" value={manageForm.businessName ?? ''} onChange={(e) => setManageForm({ ...manageForm, businessName: e.target.value })} data-testid="input-manage-name" />
+                </div>
+                <div>
+                  <Label htmlFor="manage-commercial-name">Nombre comercial</Label>
+                  <Input id="manage-commercial-name" value={manageForm.commercialName ?? ''} onChange={(e) => setManageForm({ ...manageForm, commercialName: e.target.value })} data-testid="input-manage-commercial" />
+                </div>
+                <div>
+                  <Label htmlFor="manage-phone">Teléfono</Label>
+                  <Input id="manage-phone" value={manageForm.phone ?? ''} onChange={(e) => setManageForm({ ...manageForm, phone: e.target.value })} data-testid="input-manage-phone" />
+                </div>
+                <div>
+                  <Label htmlFor="manage-website">Sitio web</Label>
+                  <Input id="manage-website" value={manageForm.website ?? ''} onChange={(e) => setManageForm({ ...manageForm, website: e.target.value })} data-testid="input-manage-website" />
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="manage-address">Dirección</Label>
+                <Input id="manage-address" value={manageForm.address ?? ''} onChange={(e) => setManageForm({ ...manageForm, address: e.target.value })} data-testid="input-manage-address" />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <Label htmlFor="manage-distrito">Distrito</Label>
+                  <Input id="manage-distrito" value={manageForm.distrito ?? ''} onChange={(e) => setManageForm({ ...manageForm, distrito: e.target.value })} />
+                </div>
+                <div>
+                  <Label htmlFor="manage-provincia">Provincia</Label>
+                  <Input id="manage-provincia" value={manageForm.provincia ?? ''} onChange={(e) => setManageForm({ ...manageForm, provincia: e.target.value })} />
+                </div>
+                <div>
+                  <Label htmlFor="manage-departamento">Departamento</Label>
+                  <Input id="manage-departamento" value={manageForm.departamento ?? ''} onChange={(e) => setManageForm({ ...manageForm, departamento: e.target.value })} />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  id="manage-active"
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={manageForm.isActive ?? true}
+                  onChange={(e) => setManageForm({ ...manageForm, isActive: e.target.checked })}
+                />
+                <Label htmlFor="manage-active">Empresa activa</Label>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setManageTarget(null)}>
+                Cancelar
+              </Button>
+              <Button className="btn-primary" onClick={() => manageMutation.mutate()} disabled={manageMutation.isPending} data-testid="button-manage-save">
+                <Save className="h-4 w-4 mr-1" />
+                {manageMutation.isPending ? 'Guardando...' : 'Guardar cambios'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+
       </div>
     </AppLayout>
   );

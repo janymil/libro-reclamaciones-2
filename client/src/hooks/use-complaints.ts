@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import type { Complaint, InsertComplaint } from "@shared/schema";
+import type { Complaint, ComplaintSubmission } from "@shared/schema";
 
 interface ComplaintFilters {
   status?: string;
@@ -14,9 +14,11 @@ interface ComplaintFilters {
 interface DashboardMetrics {
   activeComplaints: number;
   urgentComplaints: number;
+  overdueComplaints: number;
   slaCompliance: number;
   resolvedThisMonth: number;
-  npsScore: number;
+  resolutionRate: number;
+  averageResponseTime: number;
   recentComplaints: Complaint[];
   urgentAlerts: Complaint[];
 }
@@ -81,7 +83,7 @@ export function useCreateComplaint() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: InsertComplaint) => {
+    mutationFn: async (data: ComplaintSubmission) => {
       const response = await apiRequest('POST', '/api/public/complaints', data);
       return response.json();
     },

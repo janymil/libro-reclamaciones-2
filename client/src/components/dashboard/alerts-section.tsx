@@ -1,5 +1,9 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import ComplaintDetail from "@/components/complaints/complaint-detail";
+import ComplaintResponseDialog from "@/components/complaints/complaint-response-dialog";
 import type { Complaint } from "@shared/schema";
 
 interface AlertsSectionProps {
@@ -7,6 +11,9 @@ interface AlertsSectionProps {
 }
 
 export default function AlertsSection({ alerts = [] }: AlertsSectionProps) {
+  const [viewTarget, setViewTarget] = useState<Complaint | null>(null);
+  const [respondTarget, setRespondTarget] = useState<Complaint | null>(null);
+
   if (alerts.length === 0) {
     return (
       <Card className="border-green-200 bg-green-50">
@@ -24,43 +31,71 @@ export default function AlertsSection({ alerts = [] }: AlertsSectionProps) {
   }
 
   return (
-    <Card className="border-red-200 bg-red-50" data-testid="alerts-section">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-lg font-semibold text-red-800">Alertas Urgentes</CardTitle>
-          <span className="material-icons text-red-600">warning</span>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          {alerts.map((alert) => (
-            <div
-              key={alert.id}
-              className="flex items-center justify-between bg-white rounded-lg p-4 border border-red-200"
-              data-testid={`alert-item-${alert.id}`}
-            >
-              <div className="flex items-center space-x-3">
-                <span className="material-icons text-red-600">timer</span>
-                <div>
-                  <p className="font-medium text-gray-900">
-                    Reclamo #{alert.correlativeNumber} vence {new Date(alert.dueDate) <= new Date() ? 'hoy' : 'mañana'}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    Establecimiento: {alert.establishmentId}
-                  </p>
+    <>
+      <Card className="border-red-200 bg-red-50" data-testid="alerts-section">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg font-semibold text-red-800">Alertas Urgentes</CardTitle>
+            <span className="material-icons text-red-600">warning</span>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {alerts.map((alert) => (
+              <div
+                key={alert.id}
+                className="flex items-center justify-between bg-white rounded-lg p-4 border border-red-200"
+                data-testid={`alert-item-${alert.id}`}
+              >
+                <div className="flex items-center space-x-3">
+                  <span className="material-icons text-red-600">timer</span>
+                  <div>
+                    <p className="font-medium text-gray-900">
+                      Reclamo #{alert.correlativeNumber} vence {new Date(alert.dueDate) <= new Date() ? 'hoy' : 'mañana'}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      Establecimiento: {alert.establishmentId}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setViewTarget(alert)}
+                    data-testid={`button-view-alert-${alert.id}`}
+                  >
+                    Ver
+                  </Button>
+                  <Button
+                    className="btn-primary"
+                    size="sm"
+                    onClick={() => setRespondTarget(alert)}
+                    data-testid={`button-review-${alert.id}`}
+                  >
+                    Revisar
+                  </Button>
                 </div>
               </div>
-              <Button
-                className="btn-primary"
-                size="sm"
-                data-testid={`button-review-${alert.id}`}
-              >
-                Revisar
-              </Button>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Ver detalle */}
+      <Dialog open={!!viewTarget} onOpenChange={(open) => !open && setViewTarget(null)}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogTitle>Reclamación N° {viewTarget?.correlativeNumber}</DialogTitle>
+          {viewTarget && <ComplaintDetail complaint={viewTarget} />}
+        </DialogContent>
+      </Dialog>
+
+      {/* Responder */}
+      <ComplaintResponseDialog
+        complaint={respondTarget}
+        open={!!respondTarget}
+        onOpenChange={(open) => !open && setRespondTarget(null)}
+      />
+    </>
   );
 }

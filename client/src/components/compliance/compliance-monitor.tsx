@@ -1,4 +1,9 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import RnpdAssistantDialog from "@/components/compliance/rnpd-assistant-dialog";
+import LegalDocumentsDialog from "@/components/compliance/legal-documents-dialog";
+import { useToast } from "@/hooks/use-toast";
+import { downloadBlob, todayStamp } from "@/lib/export";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +28,9 @@ interface ComplianceReport {
 }
 
 export default function ComplianceMonitor() {
+  const [rnpdOpen, setRnpdOpen] = useState(false);
+  const [documentsOpen, setDocumentsOpen] = useState(false);
+  const { toast } = useToast();
   const { data: report, isLoading, error } = useQuery({
     queryKey: ['/api/compliance/report'],
     queryFn: async () => {
@@ -92,6 +100,18 @@ export default function ComplianceMonitor() {
         {COMPLIANCE_STATUSES[status as keyof typeof COMPLIANCE_STATUSES] || status}
       </Badge>
     );
+  };
+
+  const downloadReport = async () => {
+    try {
+      const response = await fetch('/api/compliance/report/download', { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error('download failed');
+      }
+      downloadBlob(`reporte-cumplimiento-${todayStamp()}.pdf`, await response.blob());
+    } catch (error) {
+      toast({ title: "No se pudo generar el reporte", variant: "destructive" });
+    }
   };
 
   const complianceScore = getComplianceScore();
@@ -279,6 +299,7 @@ export default function ComplianceMonitor() {
               variant="outline"
               className="h-auto p-4 flex flex-col items-center space-y-2"
               data-testid="button-generate-report"
+              onClick={downloadReport}
             >
               <span className="material-icons text-blue-600">description</span>
               <div className="text-center">
@@ -291,6 +312,7 @@ export default function ComplianceMonitor() {
               variant="outline"
               className="h-auto p-4 flex flex-col items-center space-y-2"
               data-testid="button-rnpd-assistant"
+              onClick={() => setRnpdOpen(true)}
             >
               <span className="material-icons text-purple-600">assignment</span>
               <div className="text-center">
@@ -303,6 +325,7 @@ export default function ComplianceMonitor() {
               variant="outline"
               className="h-auto p-4 flex flex-col items-center space-y-2"
               data-testid="button-legal-documents"
+              onClick={() => setDocumentsOpen(true)}
             >
               <span className="material-icons text-green-600">gavel</span>
               <div className="text-center">
@@ -336,6 +359,13 @@ export default function ComplianceMonitor() {
           </div>
         </CardContent>
       </Card>
+      {/* Asistente RNPD: registro de actividades de tratamiento */}
+      <RnpdAssistantDialog open={rnpdOpen} onOpenChange={setRnpdOpen} />
+
+      {/* Documentos legales descargables */}
+      <LegalDocumentsDialog open={documentsOpen} onOpenChange={setDocumentsOpen} />
+
+
     </div>
   );
 }

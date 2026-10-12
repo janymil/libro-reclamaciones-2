@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { Business } from '@shared/schema';
+import type { CurrentUser, UserStats } from '@/lib/api-types';
 import { apiRequest } from '@/lib/queryClient';
 import AppLayout from '@/components/layout/app-layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -41,22 +43,26 @@ export default function Profile() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: user, isLoading } = useQuery({
+  const { data: user, isLoading } = useQuery<CurrentUser>({
     queryKey: ['/api/auth/user'],
   });
 
-  const { data: userStats } = useQuery({
+  const { data: userStats } = useQuery<UserStats>({
     queryKey: ['/api/users/stats'],
+  });
+
+  const { data: business } = useQuery<Business>({
+    queryKey: ['/api/businesses/current'],
   });
 
   const profileForm = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
     values: {
       email: user?.email || '',
-      phone: user?.phone || '',
+      phone: business?.phone || '',
       firstName: user?.firstName || '',
       lastName: user?.lastName || '',
-      address: user?.address || '',
+      address: business?.address || '',
     },
   });
 
@@ -157,14 +163,14 @@ export default function Profile() {
               <div className="flex justify-center mb-4">
                 <Avatar className="h-20 w-20">
                   <AvatarFallback className="text-lg">
-                    {getInitials(user?.firstName, user?.lastName, user?.username)}
+                    {getInitials(user?.firstName, user?.lastName)}
                   </AvatarFallback>
                 </Avatar>
               </div>
               <CardTitle data-testid="user-name">
                 {user?.firstName && user?.lastName 
                   ? `${user.firstName} ${user.lastName}`
-                  : user?.username || 'Usuario'
+                  : user?.email || 'Usuario'
                 }
               </CardTitle>
               <CardDescription className="flex items-center justify-center gap-2">
@@ -186,7 +192,7 @@ export default function Profile() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-600">Empresa</span>
-                <span className="text-sm font-medium">{user?.businessName || 'N/A'}</span>
+                <span className="text-sm font-medium">{business?.businessName || 'N/A'}</span>
               </div>
               <div className="flex items-center gap-2 text-sm text-gray-600">
                 <Calendar className="h-4 w-4" />

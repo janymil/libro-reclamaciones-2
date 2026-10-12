@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { BusinessSummary, UserSummary } from '@/lib/api-types';
 import { apiRequest } from '@/lib/queryClient';
 import AppLayout from '@/components/layout/app-layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -31,11 +32,11 @@ export default function UsersPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: users, isLoading } = useQuery({
+  const { data: users, isLoading } = useQuery<UserSummary[]>({
     queryKey: ['/api/users'],
   });
 
-  const { data: businesses } = useQuery({
+  const { data: businesses } = useQuery<BusinessSummary[]>({
     queryKey: ['/api/businesses'],
   });
 
@@ -222,9 +223,9 @@ export default function UsersPage() {
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {businesses?.map((business: any) => (
+                            {businesses?.map((business) => (
                               <SelectItem key={business.id} value={business.id}>
-                                {business.name}
+                                {business.businessName}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -282,14 +283,14 @@ export default function UsersPage() {
               </div>
             ) : users?.length ? (
               <div className="space-y-4">
-                {users.map((user: any) => (
+                {users.map((user) => (
                   <div key={user.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
                     <div className="flex items-center space-x-4">
                       <Avatar>
-                        <AvatarFallback>{getInitials(user.username)}</AvatarFallback>
+                        <AvatarFallback>{getInitials(`${user.firstName} ${user.lastName}`.trim() || user.email)}</AvatarFallback>
                       </Avatar>
                       <div>
-                        <h4 className="font-medium" data-testid={`user-name-${user.id}`}>{user.username}</h4>
+                        <h4 className="font-medium" data-testid={`user-name-${user.id}`}>{`${user.firstName} ${user.lastName}`.trim() || user.email}</h4>
                         <div className="flex items-center gap-2 text-sm text-gray-600">
                           <Mail className="h-3 w-3" />
                           <span>{user.email}</span>

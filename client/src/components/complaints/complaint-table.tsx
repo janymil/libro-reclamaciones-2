@@ -11,17 +11,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useComplaints } from "@/hooks/use-complaints";
 import { useBusinessDays } from "@/hooks/use-business-days";
+import { useToast } from "@/hooks/use-toast";
+import { downloadCsv, todayStamp } from "@/lib/export";
 import { COMPLAINT_STATUSES, COMPLAINT_TYPES, COMPLAINT_PRIORITIES } from "@/lib/constants";
+import ComplaintDetail from "@/components/complaints/complaint-detail";
+import ComplaintResponseDialog from "@/components/complaints/complaint-response-dialog";
+import ComplaintEditDialog from "@/components/complaints/complaint-edit-dialog";
+import AIAssistantDialog from "@/components/ai/ai-assistant-dialog";
 import type { Complaint } from "@shared/schema";
 
 interface ComplaintTableProps {
@@ -36,8 +36,14 @@ export default function ComplaintTable({ showFilters = true }: ComplaintTablePro
     search: "",
   });
 
+  const [viewTarget, setViewTarget] = useState<Complaint | null>(null);
+  const [respondTarget, setRespondTarget] = useState<Complaint | null>(null);
+  const [editTarget, setEditTarget] = useState<Complaint | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+
   const { data: complaints = [], isLoading, error } = useComplaints(filters);
   const { getBusinessDaysRemaining, getUrgencyLevel } = useBusinessDays();
+  const { toast } = useToast();
 
   const filteredComplaints = complaints.filter((complaint) => {
     if (filters.search) {
@@ -55,7 +61,7 @@ export default function ComplaintTable({ showFilters = true }: ComplaintTablePro
     const variants = {
       new: "status-new",
       in_progress: "status-in-progress",
-      responded: "status-responded", 
+      responded: "status-responded",
       resolved: "status-resolved",
       overdue: "status-overdue",
     };
@@ -82,7 +88,7 @@ export default function ComplaintTable({ showFilters = true }: ComplaintTablePro
     );
   };
 
-  const getUrgencyBadge = (dueDate: string) => {
+  const getUrgencyBadge = (dueDate: Date | string) => {
     const urgency = getUrgencyLevel(new Date(dueDate));
     const remaining = getBusinessDaysRemaining(new Date(dueDate));
 
@@ -105,6 +111,40 @@ export default function ComplaintTable({ showFilters = true }: ComplaintTablePro
         {labels[urgency]}
       </Badge>
     );
+  };
+
+  const exportComplaints = () => {
+    if (filteredComplaints.length === 0) {
+      toast({
+        title: "Nada que exportar",
+        description: "No hay reclamaciones que coincidan con los filtros aplicados.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    downloadCsv(
+      `reclamaciones-${todayStamp()}`,
+      filteredComplaints.map((complaint) => ({
+        'N° Correlativo': complaint.correlativeNumber,
+        Tipo: COMPLAINT_TYPES[complaint.complaintType as keyof typeof COMPLAINT_TYPES] || complaint.complaintType,
+        Consumidor: complaint.consumerFullName,
+        Documento: `${complaint.consumerDocumentType} ${complaint.consumerDocumentNumber}`,
+        Email: complaint.consumerEmail,
+        Teléfono: complaint.consumerPhone,
+        'Producto/Servicio': complaint.productServiceName,
+        Presentado: new Date(complaint.submissionDate).toLocaleDateString('es-PE'),
+        'Fecha límite': new Date(complaint.dueDate).toLocaleDateString('es-PE'),
+        Estado: COMPLAINT_STATUSES[complaint.status as keyof typeof COMPLAINT_STATUSES] || complaint.status,
+        Prioridad: COMPLAINT_PRIORITIES[complaint.priority as keyof typeof COMPLAINT_PRIORITIES] || complaint.priority,
+        Vencido: complaint.isOverdue ? 'Sí' : 'No',
+      })),
+    );
+
+    toast({
+      title: "Exportación lista",
+      description: `${filteredComplaints.length} reclamaciones exportadas a CSV.`,
+    });
   };
 
   if (isLoading) {
@@ -150,7 +190,7 @@ export default function ComplaintTable({ showFilters = true }: ComplaintTablePro
                   data-testid="input-search"
                 />
               </div>
-              
+
               <Select
                 value={filters.status}
                 onValueChange={(value) => setFilters({ ...filters, status: value })}
@@ -206,11 +246,20 @@ export default function ComplaintTable({ showFilters = true }: ComplaintTablePro
           <div className="flex items-center justify-between">
             <CardTitle>Reclamaciones ({filteredComplaints.length})</CardTitle>
             <div className="flex items-center space-x-2">
-              <Button variant="outline" size="sm" data-testid="button-export">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportComplaints}
+                data-testid="button-export"
+              >
                 <span className="material-icons mr-2 text-sm">download</span>
                 Exportar
               </Button>
-              <Button size="sm" data-testid="button-ai-assistant">
+              <Button
+                size="sm"
+                onClick={() => setAiOpen(true)}
+                data-testid="button-ai-assistant"
+              >
                 <span className="material-icons mr-2 text-sm">smart_toy</span>
                 Asistente IA
               </Button>
@@ -249,72 +298,64 @@ export default function ComplaintTable({ showFilters = true }: ComplaintTablePro
                           </div>
                         </div>
                       </TableCell>
-                      
+
                       <TableCell>
                         <Badge className={complaint.complaintType === 'reclamo' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}>
                           {COMPLAINT_TYPES[complaint.complaintType as keyof typeof COMPLAINT_TYPES]}
                         </Badge>
                       </TableCell>
-                      
+
                       <TableCell>
                         <div>
                           <div className="font-medium">{complaint.consumerFullName}</div>
                           <div className="text-sm text-gray-500">{complaint.consumerEmail}</div>
                         </div>
                       </TableCell>
-                      
+
                       <TableCell>{complaint.establishmentId}</TableCell>
-                      
+
                       <TableCell>
                         {getUrgencyBadge(complaint.dueDate)}
                       </TableCell>
-                      
+
                       <TableCell>
                         {getStatusBadge(complaint.status)}
                       </TableCell>
-                      
+
                       <TableCell>
                         {getPriorityBadge(complaint.priority)}
                       </TableCell>
-                      
-                      <TableCell>
-                        <div className="flex items-center space-x-2">
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                data-testid={`button-view-${complaint.id}`}
-                              >
-                                <span className="material-icons text-sm">visibility</span>
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-                              <DialogHeader>
-                                <DialogTitle>
-                                  Reclamación N° {complaint.correlativeNumber}
-                                </DialogTitle>
-                              </DialogHeader>
-                              <ComplaintDetail complaint={complaint} />
-                            </DialogContent>
-                          </Dialog>
 
+                      <TableCell>
+                        <div className="flex items-center space-x-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="Ver detalle"
+                            onClick={() => setViewTarget(complaint)}
+                            data-testid={`button-view-${complaint.id}`}
+                          >
+                            <span className="material-icons text-sm">visibility</span>
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"
                             className="text-success"
+                            title="Responder"
+                            onClick={() => setRespondTarget(complaint)}
                             data-testid={`button-respond-${complaint.id}`}
                           >
                             <span className="material-icons text-sm">reply</span>
                           </Button>
-
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="text-purple-600"
-                            data-testid={`button-ai-${complaint.id}`}
+                            className="text-blue-600"
+                            title="Editar estado y prioridad"
+                            onClick={() => setEditTarget(complaint)}
+                            data-testid={`button-edit-${complaint.id}`}
                           >
-                            <span className="material-icons text-sm">psychology</span>
+                            <span className="material-icons text-sm">edit</span>
                           </Button>
                         </div>
                       </TableCell>
@@ -326,127 +367,31 @@ export default function ComplaintTable({ showFilters = true }: ComplaintTablePro
           )}
         </CardContent>
       </Card>
-    </div>
-  );
-}
 
-// Complaint Detail Component
-function ComplaintDetail({ complaint }: { complaint: Complaint }) {
-  return (
-    <div className="space-y-6" data-testid="complaint-detail">
-      {/* Consumer Information */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Datos del Consumidor</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-sm font-medium text-gray-500">Nombre Completo</label>
-            <p>{complaint.consumerFullName}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-500">Documento</label>
-            <p>{complaint.consumerDocumentType} {complaint.consumerDocumentNumber}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-500">Teléfono</label>
-            <p>{complaint.consumerPhone}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-500">Email</label>
-            <p>{complaint.consumerEmail}</p>
-          </div>
-          <div className="col-span-2">
-            <label className="text-sm font-medium text-gray-500">Domicilio</label>
-            <p>{complaint.consumerAddress}</p>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Ver detalle */}
+      <Dialog open={!!viewTarget} onOpenChange={(open) => !open && setViewTarget(null)}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogTitle>Reclamación N° {viewTarget?.correlativeNumber}</DialogTitle>
+          {viewTarget && <ComplaintDetail complaint={viewTarget} />}
+        </DialogContent>
+      </Dialog>
 
-      {/* Product/Service Information */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Producto/Servicio</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-sm font-medium text-gray-500">Producto/Servicio</label>
-              <p>{complaint.productServiceName}</p>
-            </div>
-            {complaint.purchaseAmount && (
-              <div>
-                <label className="text-sm font-medium text-gray-500">Monto</label>
-                <p>S/ {complaint.purchaseAmount}</p>
-              </div>
-            )}
-            {complaint.receiptNumber && (
-              <div>
-                <label className="text-sm font-medium text-gray-500">N° Comprobante</label>
-                <p>{complaint.receiptNumber}</p>
-              </div>
-            )}
-            {complaint.purchaseDate && (
-              <div>
-                <label className="text-sm font-medium text-gray-500">Fecha de Compra</label>
-                <p>{new Date(complaint.purchaseDate).toLocaleDateString('es-PE')}</p>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      {/* Responder (flujo legal de 15 días hábiles) */}
+      <ComplaintResponseDialog
+        complaint={respondTarget}
+        open={!!respondTarget}
+        onOpenChange={(open) => !open && setRespondTarget(null)}
+      />
 
-      {/* Complaint Detail */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Detalle de la Reclamación</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-500">Tipo</label>
-              <p>
-                <Badge className={complaint.complaintType === 'reclamo' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}>
-                  {COMPLAINT_TYPES[complaint.complaintType as keyof typeof COMPLAINT_TYPES]}
-                </Badge>
-              </p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-500">Descripción</label>
-              <p className="whitespace-pre-wrap">{complaint.complaintDetail}</p>
-            </div>
-            {complaint.consumerRequest && (
-              <div>
-                <label className="text-sm font-medium text-gray-500">Pedido del Consumidor</label>
-                <p className="whitespace-pre-wrap">{complaint.consumerRequest}</p>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      {/* Editar estado/prioridad */}
+      <ComplaintEditDialog
+        complaint={editTarget}
+        open={!!editTarget}
+        onOpenChange={(open) => !open && setEditTarget(null)}
+      />
 
-      {/* Provider Response */}
-      {complaint.providerResponse && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Respuesta del Proveedor</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-gray-500">Respuesta</label>
-                <p className="whitespace-pre-wrap">{complaint.providerResponse}</p>
-              </div>
-              {complaint.responseDate && (
-                <div>
-                  <label className="text-sm font-medium text-gray-500">Fecha de Respuesta</label>
-                  <p>{new Date(complaint.responseDate).toLocaleDateString('es-PE')}</p>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* Asistente IA */}
+      <AIAssistantDialog open={aiOpen} onOpenChange={setAiOpen} />
     </div>
   );
 }
