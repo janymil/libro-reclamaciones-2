@@ -12,8 +12,8 @@ import {
 import { businessDayCalculator } from "../../../server/services/businessDayCalculator";
 import { formatCalendarDate } from "@shared/peru-holidays";
 
-/** Builds a date at UTC midnight so assertions are identical in every time zone. */
-const d = (iso: string): Date => new Date(`${iso}T00:00:00.000Z`);
+/** An instant at 10:00 in Peru on the given date (15:00 UTC). */
+const d = (iso: string): Date => new Date(`${iso}T15:00:00.000Z`);
 
 describe("document validators", () => {
   it("accepts an 11 digit RUC and rejects anything else", () => {

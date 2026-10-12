@@ -1,5 +1,6 @@
 import { storage } from "../storage";
 import { businessDayCalculator } from "./businessDayCalculator";
+import { shiftPeruCalendarDate } from "@shared/peru-time";
 
 interface ComplianceCheck {
   type: string;
@@ -119,8 +120,7 @@ class LegalComplianceService {
 
   async checkRetentionCompliance(businessId: string): Promise<ComplianceCheck> {
     // Retención de 2 años según DS 011-2011-PCM
-    const twoYearsAgo = new Date();
-    twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+    const twoYearsAgo = shiftPeruCalendarDate(new Date(), { years: -2 });
     
     const complaints = await storage.getComplaintsByBusiness(businessId);
     const oldComplaints = complaints.filter(c => c.submissionDate < twoYearsAgo);

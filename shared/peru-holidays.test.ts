@@ -12,8 +12,8 @@ import {
   isWeekend,
 } from "./peru-holidays";
 
-/** Builds a date at UTC midnight so assertions are identical in every time zone. */
-const d = (iso: string): Date => new Date(`${iso}T00:00:00.000Z`);
+/** An instant at 10:00 in Peru on the given date (15:00 UTC). */
+const d = (iso: string): Date => new Date(`${iso}T15:00:00.000Z`);
 
 describe("PERU_HOLIDAYS data", () => {
   it("stores every date as a plain YYYY-MM-DD calendar date", () => {
@@ -133,5 +133,47 @@ describe("countPeruBusinessDaysRemaining", () => {
 
   it("counts forward while time is left", () => {
     expect(countPeruBusinessDaysRemaining(d("2026-10-19"), d("2026-10-12"))).toBe(5);
+  });
+});
+
+describe("the Peru evening boundary (regression)", () => {
+  /**
+   * Complaints submitted between 19:00 and 23:59 Peru time used to be judged
+   * against the *next* day's date: the weekend check read the host's local day
+   * while the holiday check read the UTC date. Around a holiday that shifted the
+   * legally binding deadline by a business day.
+   */
+  const peruEvening = (iso: string): Date => new Date(`${iso}T20:00:00-05:00`);
+
+  it("still sees the Peru date on the evening before a holiday", () => {
+    // 20:00 on Wed 7 Oct 2026, when it is already Thu 8 Oct in UTC (Angamos).
+    const evening = peruEvening("2026-10-07");
+    expect(evening.toISOString()).toBe("2026-10-08T01:00:00.000Z");
+
+    expect(formatCalendarDate(evening)).toBe("2026-10-07");
+    expect(isPeruHoliday(evening)).toBe(false);
+    expect(isPeruBusinessDay(evening)).toBe(true);
+  });
+
+  it("still skips a holiday in the evening of the holiday itself", () => {
+    // 20:00 on Thu 8 Oct 2026 (Angamos), when it is already Fri 9 Oct in UTC.
+    const evening = peruEvening("2026-10-08");
+    expect(evening.toISOString()).toBe("2026-10-09T01:00:00.000Z");
+
+    expect(isPeruHoliday(evening)).toBe(true);
+    expect(isPeruBusinessDay(evening)).toBe(false);
+  });
+
+  it("gives an evening submission the same deadline as a morning one", () => {
+    const morning = new Date("2026-10-07T10:00:00-05:00");
+    const evening = peruEvening("2026-10-07");
+
+    expect(evening.getTime()).toBeGreaterThan(morning.getTime());
+
+    const morningDeadline = addPeruBusinessDays(morning, 15);
+    const eveningDeadline = addPeruBusinessDays(evening, 15);
+
+    expect(formatCalendarDate(eveningDeadline)).toBe("2026-10-29");
+    expect(formatCalendarDate(eveningDeadline)).toBe(formatCalendarDate(morningDeadline));
   });
 });

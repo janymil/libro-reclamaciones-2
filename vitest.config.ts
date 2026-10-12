@@ -26,9 +26,9 @@ export default defineConfig({
       "server/**/*.test.ts",
       "shared/**/*.test.ts",
     ],
-    // Business-day maths is calendar date based, so the suite must run in a fixed
-    // time zone to produce identical results on every developer machine and CI.
-    // `TZ` is also set in the `npm test` script; this keeps `npx vitest` correct too.
-    env: { TZ: "UTC" },
+    // The suite is deliberately NOT pinned to a time zone. Every date computation
+    // goes through `@shared/peru-time`, which resolves dates in `America/Lima` via
+    // Intl, so results must be identical on any machine and in CI. Pinning `TZ`
+    // would hide exactly the class of bug this suite exists to catch.
   },
 });

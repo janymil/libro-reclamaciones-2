@@ -5,6 +5,8 @@
  * Excel opens them correctly (accents, decimal commas).
  */
 
+import { formatCalendarDate } from "@shared/peru-time";
+
 function escapeCsvValue(value: unknown): string {
   if (value === null || value === undefined) return "";
   const text = typeof value === "object" ? JSON.stringify(value) : String(value);
@@ -42,7 +44,7 @@ export function downloadCsv(filename: string, rows: Array<Record<string, unknown
   downloadBlob(filename.endsWith(".csv") ? filename : `${filename}.csv`, blob);
 }
 
-/** Returns today's date as YYYY-MM-DD, for building file names. */
+/** Returns today's date in Peru as YYYY-MM-DD, for building file names. */
 export function todayStamp(): string {
-  return new Date().toISOString().slice(0, 10);
+  return formatCalendarDate(new Date());
 }

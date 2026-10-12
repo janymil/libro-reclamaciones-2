@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { z } from "zod";
 
+import { getPeruYear } from "@shared/peru-time";
 import { complaintSubmissionSchema, type InsertComplaint } from "@shared/schema";
 
 import { aiService } from "../services/aiService";
@@ -144,7 +145,7 @@ export function registerComplaintsRoutes(app: Express): void {
       }
       
       // Generate correlative number
-      const year = new Date().getFullYear();
+      const year = getPeruYear(new Date());
       const count = (await storage.getComplaintsByBusiness(data.businessId)).length + 1;
       const correlativeNumber = `${year}-${count.toString().padStart(4, '0')}`;
       

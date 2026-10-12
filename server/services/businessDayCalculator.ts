@@ -12,6 +12,7 @@ import {
   countPeruBusinessDaysRemaining,
   getPeruHolidaysForYear,
   isPeruBusinessDay,
+  subtractPeruBusinessDays,
   type PeruHoliday,
 } from "@shared/peru-holidays";
 
@@ -25,18 +26,7 @@ class BusinessDayCalculator {
   }
 
   subtractBusinessDays(startDate: Date, businessDays: number): Date {
-    let currentDate = new Date(startDate);
-    let daysSubtracted = 0;
-
-    while (daysSubtracted < businessDays) {
-      currentDate.setDate(currentDate.getDate() - 1);
-      
-      if (this.isBusinessDay(currentDate)) {
-        daysSubtracted++;
-      }
-    }
-
-    return currentDate;
+    return subtractPeruBusinessDays(startDate, businessDays);
   }
 
   getBusinessDaysBetween(startDate: Date, endDate: Date): number {

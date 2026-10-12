@@ -16,6 +16,12 @@
  * now derives from `PERU_HOLIDAYS` below.
  */
 
+import { formatCalendarDate, shiftPeruCalendarDate, toPeruCalendarDate } from "./peru-time";
+
+export { formatCalendarDate };
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
 export interface PeruHoliday {
   /** Calendar date as `YYYY-MM-DD` (a Peru calendar date, with no time component). */
   date: string;
@@ -89,32 +95,43 @@ export const PERU_HOLIDAY_DATES: readonly string[] = PERU_HOLIDAYS.map((holiday)
 const PERU_HOLIDAY_DATE_SET = new Set<string>(PERU_HOLIDAY_DATES);
 
 /**
- * Formats a `Date` as `YYYY-MM-DD` using its **UTC** calendar date.
+ * Weekend check for a Peru calendar date - a `Date` anchored at UTC midnight by
+ * `toPeruCalendarDate`.
  *
- * Note: `addBusinessDays` below advances dates with `setDate`, which operates in
- * the host's local time zone. Mixing a local-time step with a UTC-based format is
- * a pre-existing latent bug, so this helper deliberately reproduces the original
- * behaviour rather than silently shifting every legally binding deadline. Fixing
- * it is a separate, legal-sign-off decision.
+ * Unanchored instants are converted first, so weekends and holidays are judged in
+ * the same frame of reference. They previously disagreed: `isWeekend` read the
+ * host's local day-of-week while `isPeruHoliday` read the UTC date, so an instant
+ * late in the Peru evening could be "Friday" for one check and "Saturday" for the
+ * other, shifting a legally binding deadline by a day.
  */
-export function formatCalendarDate(date: Date): string {
-  return date.toISOString().split("T")[0];
-}
-
-/** True when `date` is a Saturday or Sunday (local time, as originally implemented). */
-export function isWeekend(date: Date): boolean {
-  const day = date.getDay();
+function isWeekendCalendarDate(calendarDate: Date): boolean {
+  const day = calendarDate.getUTCDay();
   return day === 0 || day === 6;
 }
 
-/** True when `date` is a Peruvian national holiday. */
-export function isPeruHoliday(date: Date): boolean {
-  return PERU_HOLIDAY_DATE_SET.has(formatCalendarDate(date));
+/** Holiday check for a Peru calendar date. */
+function isHolidayCalendarDate(calendarDate: Date): boolean {
+  return PERU_HOLIDAY_DATE_SET.has(calendarDate.toISOString().slice(0, 10));
 }
 
-/** True when `date` is a working day in Peru: neither a weekend nor a national holiday. */
+/** Working day check for a Peru calendar date. */
+function isBusinessCalendarDate(calendarDate: Date): boolean {
+  return !isWeekendCalendarDate(calendarDate) && !isHolidayCalendarDate(calendarDate);
+}
+
+/** True when the instant falls on a Saturday or Sunday in Peru. */
+export function isWeekend(date: Date): boolean {
+  return isWeekendCalendarDate(toPeruCalendarDate(date));
+}
+
+/** True when the instant falls on a Peruvian national holiday. */
+export function isPeruHoliday(date: Date): boolean {
+  return isHolidayCalendarDate(toPeruCalendarDate(date));
+}
+
+/** True when the instant falls on a working day in Peru: neither a weekend nor a holiday. */
 export function isPeruBusinessDay(date: Date): boolean {
-  return !isWeekend(date) && !isPeruHoliday(date);
+  return isBusinessCalendarDate(toPeruCalendarDate(date));
 }
 
 /** Every holiday declared for a given year. */
@@ -132,18 +149,43 @@ export function getPeruHolidaysForYear(year: number): PeruHoliday[] {
  * service and every client-side display.
  */
 export function addPeruBusinessDays(startDate: Date, businessDays: number): Date {
-  const currentDate = new Date(startDate);
+  const startCalendarDate = toPeruCalendarDate(startDate);
+  const cursor = new Date(startCalendarDate);
   let daysAdded = 0;
 
   while (daysAdded < businessDays) {
-    currentDate.setDate(currentDate.getDate() + 1);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
 
-    if (isPeruBusinessDay(currentDate)) {
+    if (isBusinessCalendarDate(cursor)) {
       daysAdded++;
     }
   }
 
-  return currentDate;
+  // Shift the original instant by whole days so the time of day is preserved.
+  const elapsedDays = Math.round((cursor.getTime() - startCalendarDate.getTime()) / MS_PER_DAY);
+  return shiftPeruCalendarDate(startDate, { days: elapsedDays });
+}
+
+/**
+ * Moves `startDate` back by `businessDays` Peruvian working days.
+ *
+ * The inverse of {@link addPeruBusinessDays}, with the same Peru calendar semantics.
+ */
+export function subtractPeruBusinessDays(startDate: Date, businessDays: number): Date {
+  const startCalendarDate = toPeruCalendarDate(startDate);
+  const cursor = new Date(startCalendarDate);
+  let daysRemoved = 0;
+
+  while (daysRemoved < businessDays) {
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+
+    if (isBusinessCalendarDate(cursor)) {
+      daysRemoved++;
+    }
+  }
+
+  const elapsedDays = Math.round((cursor.getTime() - startCalendarDate.getTime()) / MS_PER_DAY);
+  return shiftPeruCalendarDate(startDate, { days: elapsedDays });
 }
 
 /**
@@ -152,14 +194,15 @@ export function addPeruBusinessDays(startDate: Date, businessDays: number): Date
  * `startDate` is included when it is a working day; `endDate` is never included.
  */
 export function countPeruBusinessDaysBetween(startDate: Date, endDate: Date): number {
-  const currentDate = new Date(startDate);
+  const cursor = toPeruCalendarDate(startDate);
+  const endCalendarDate = toPeruCalendarDate(endDate);
   let businessDays = 0;
 
-  while (currentDate < endDate) {
-    if (isPeruBusinessDay(currentDate)) {
+  while (cursor < endCalendarDate) {
+    if (isBusinessCalendarDate(cursor)) {
       businessDays++;
     }
-    currentDate.setDate(currentDate.getDate() + 1);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
 
   return businessDays;

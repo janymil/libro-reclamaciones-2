@@ -12,6 +12,7 @@ import type {
 import { businessDayCalculator } from "../services/businessDayCalculator";
 import { complaintStorage } from "./complaint.storage";
 import { complianceStorage } from "./compliance.storage";
+import { startOfPeruMonth } from "@shared/peru-time";
 
 /** Data access for the "reporting" aggregate. */
 export const reportingStorage = {
@@ -38,10 +39,8 @@ export const reportingStorage = {
       ))
       .orderBy(asc(complaints.dueDate));
 
-    // Complaints resolved during the current month
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
+    // Complaints resolved during the current month (Peru calendar month)
+    const monthStart = startOfPeruMonth(new Date());
 
     const [resolvedThisMonthResult] = await db
       .select({ count: count() })
@@ -100,12 +99,9 @@ export const reportingStorage = {
   async getReportStats(businessId: string): Promise<ReportStats> {
     const stats = await complaintStorage.getComplaintStats(businessId);
 
-    const thisMonthStart = new Date();
-    thisMonthStart.setDate(1);
-    thisMonthStart.setHours(0, 0, 0, 0);
-
-    const lastMonthStart = new Date(thisMonthStart);
-    lastMonthStart.setMonth(lastMonthStart.getMonth() - 1);
+    const now = new Date();
+    const thisMonthStart = startOfPeruMonth(now);
+    const lastMonthStart = startOfPeruMonth(now, -1);
 
     const [thisMonthResult] = await db
       .select({ count: count() })
@@ -191,8 +187,8 @@ export const reportingStorage = {
 
     // Report on the last 6 months, most recent first
     for (let offset = 0; offset < 6; offset++) {
-      const start = new Date(now.getFullYear(), now.getMonth() - offset, 1);
-      const end = new Date(now.getFullYear(), now.getMonth() - offset + 1, 1);
+      const start = startOfPeruMonth(now, -offset);
+      const end = startOfPeruMonth(now, -offset + 1);
 
       const inMonth = rows.filter(row => {
         const submitted = new Date(row.submissionDate);
