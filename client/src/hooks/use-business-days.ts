@@ -1,49 +1,17 @@
-import { useMemo } from "react";
-import { PERUVIAN_HOLIDAYS_2024_2025 } from "@/lib/constants";
+import {
+  addPeruBusinessDays,
+  countPeruBusinessDaysRemaining,
+  isPeruBusinessDay,
+} from "@shared/peru-holidays";
 
 export function useBusinessDays() {
-  const holidays = useMemo(() => new Set(PERUVIAN_HOLIDAYS_2024_2025), []);
+  const isBusinessDay = (date: Date): boolean => isPeruBusinessDay(date);
 
-  const isBusinessDay = (date: Date): boolean => {
-    const day = date.getDay();
-    if (day === 0 || day === 6) return false; // Weekend
-    
-    const dateStr = date.toISOString().split('T')[0];
-    return !holidays.has(dateStr);
-  };
+  const addBusinessDays = (startDate: Date, businessDays: number): Date =>
+    addPeruBusinessDays(startDate, businessDays);
 
-  const addBusinessDays = (startDate: Date, businessDays: number): Date => {
-    let currentDate = new Date(startDate);
-    let daysAdded = 0;
-
-    while (daysAdded < businessDays) {
-      currentDate.setDate(currentDate.getDate() + 1);
-      
-      if (isBusinessDay(currentDate)) {
-        daysAdded++;
-      }
-    }
-
-    return currentDate;
-  };
-
-  const getBusinessDaysRemaining = (dueDate: Date, currentDate: Date = new Date()): number => {
-    if (dueDate <= currentDate) {
-      return 0;
-    }
-    
-    let count = 0;
-    let date = new Date(currentDate);
-    
-    while (date < dueDate) {
-      if (isBusinessDay(date)) {
-        count++;
-      }
-      date.setDate(date.getDate() + 1);
-    }
-    
-    return count;
-  };
+  const getBusinessDaysRemaining = (dueDate: Date, currentDate: Date = new Date()): number =>
+    countPeruBusinessDaysRemaining(dueDate, currentDate);
 
   const isOverdue = (dueDate: Date, currentDate: Date = new Date()): boolean => {
     return currentDate > dueDate;

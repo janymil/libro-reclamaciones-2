@@ -1,3 +1,5 @@
+import { PERU_HOLIDAY_DATES } from "@shared/peru-holidays";
+
 export const COMPLAINT_TYPES = {
   reclamo: 'Reclamo',
   queja: 'Queja'
@@ -38,37 +40,14 @@ export const COMPLIANCE_STATUSES = {
   not_applicable: 'No Aplica'
 } as const;
 
-export const PERUVIAN_HOLIDAYS_2024_2025 = [
-  // 2024
-  '2024-01-01', // Año Nuevo
-  '2024-03-28', // Jueves Santo
-  '2024-03-29', // Viernes Santo
-  '2024-05-01', // Día del Trabajador
-  '2024-06-29', // San Pedro y San Pablo
-  '2024-07-23', // Día del Trabajador
-  '2024-07-28', // Independencia del Perú
-  '2024-07-29', // Independencia del Perú
-  '2024-08-30', // Santa Rosa de Lima
-  '2024-10-08', // Combate de Angamos
-  '2024-11-01', // Todos los Santos
-  '2024-12-08', // Inmaculada Concepción
-  '2024-12-25', // Navidad
-  
-  // 2025
-  '2025-01-01', // Año Nuevo
-  '2025-04-17', // Jueves Santo
-  '2025-04-18', // Viernes Santo
-  '2025-05-01', // Día del Trabajador
-  '2025-06-29', // San Pedro y San Pablo
-  '2025-07-23', // Día del Trabajador
-  '2025-07-28', // Independencia del Perú
-  '2025-07-29', // Independencia del Perú
-  '2025-08-30', // Santa Rosa de Lima
-  '2025-10-08', // Combate de Angamos
-  '2025-11-01', // Todos los Santos
-  '2025-12-08', // Inmaculada Concepción
-  '2025-12-25', // Navidad
-];
+export const PERU_HOLIDAYS_2024_2026 = PERU_HOLIDAY_DATES;
+
+/**
+ * @deprecated Use {@link PERU_HOLIDAY_DATES} instead. Kept as an alias because
+ * the list now also covers 2026, so the old "2024_2025" name is misleading.
+ */
+export const PERUVIAN_HOLIDAYS_2024_2025 = PERU_HOLIDAY_DATES;
+
 
 export const LEGAL_RESPONSE_TIME_BUSINESS_DAYS = 15;
 

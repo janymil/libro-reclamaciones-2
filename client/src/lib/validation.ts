@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  addPeruBusinessDays,
+  countPeruBusinessDaysRemaining,
+  isPeruBusinessDay,
+} from "@shared/peru-holidays";
 
 // Validation schemas for forms
 
@@ -97,56 +102,25 @@ export function validatePhone(phone: string): boolean {
   return cleanPhone.length >= 7 && cleanPhone.length <= 15;
 }
 
-// Business day validation
+// Business day validation.
+//
+// Delegates to `@shared/peru-holidays`, the single source of truth also used by
+// the server's `businessDayCalculator`. The list that used to live here was
+// missing 2024-07-23 and 2025-07-23 and stopped at 2025, so the deadline this
+// module reported could disagree with the one the backend enforced.
 export function isBusinessDay(date: Date): boolean {
-  const day = date.getDay();
-  if (day === 0 || day === 6) return false; // Weekend
-  
-  const dateStr = date.toISOString().split('T')[0];
-  const holidays = [
-    // Add Peruvian holidays here
-    '2024-01-01', '2024-03-28', '2024-03-29', '2024-05-01',
-    '2024-06-29', '2024-07-28', '2024-07-29', '2024-08-30',
-    '2024-10-08', '2024-11-01', '2024-12-08', '2024-12-25',
-    '2025-01-01', '2025-04-17', '2025-04-18', '2025-05-01',
-    '2025-06-29', '2025-07-28', '2025-07-29', '2025-08-30',
-    '2025-10-08', '2025-11-01', '2025-12-08', '2025-12-25',
-  ];
-  
-  return !holidays.includes(dateStr);
+  return isPeruBusinessDay(date);
 }
 
+// Business day maths: delegates to `@shared/peru-holidays`, the same code the
+// server uses to compute the legally binding deadline. These wrappers are kept
+// so existing form components keep their imports.
 export function addBusinessDays(startDate: Date, businessDays: number): Date {
-  let currentDate = new Date(startDate);
-  let daysAdded = 0;
-
-  while (daysAdded < businessDays) {
-    currentDate.setDate(currentDate.getDate() + 1);
-    
-    if (isBusinessDay(currentDate)) {
-      daysAdded++;
-    }
-  }
-
-  return currentDate;
+  return addPeruBusinessDays(startDate, businessDays);
 }
 
 export function getBusinessDaysRemaining(dueDate: Date, currentDate: Date = new Date()): number {
-  if (dueDate <= currentDate) {
-    return 0;
-  }
-  
-  let count = 0;
-  let date = new Date(currentDate);
-  
-  while (date < dueDate) {
-    if (isBusinessDay(date)) {
-      count++;
-    }
-    date.setDate(date.getDate() + 1);
-  }
-  
-  return count;
+  return countPeruBusinessDaysRemaining(dueDate, currentDate);
 }
 
 export type ComplaintFormData = z.infer<typeof complaintFormSchema>;

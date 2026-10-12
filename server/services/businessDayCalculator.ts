@@ -1,76 +1,27 @@
 // Business day calculator for Peru
-// Excludes weekends and Peruvian national holidays
+// Excludes weekends and Peruvian national holidays.
+//
+// The holiday data itself lives in `@shared/peru-holidays`, which is also used by
+// the client (public complaint form, deadline badges). Keeping a single copy means
+// the deadline shown to a consumer can never disagree with the deadline the
+// backend enforces.
 
-interface Holiday {
-  date: string; // YYYY-MM-DD format
-  name: string;
-}
+import {
+  addPeruBusinessDays,
+  countPeruBusinessDaysBetween,
+  countPeruBusinessDaysRemaining,
+  getPeruHolidaysForYear,
+  isPeruBusinessDay,
+  type PeruHoliday,
+} from "@shared/peru-holidays";
 
 class BusinessDayCalculator {
-  // 2024-2025 Peruvian national holidays
-  private holidays: Holiday[] = [
-    // 2024
-    { date: '2024-01-01', name: 'Año Nuevo' },
-    { date: '2024-03-28', name: 'Jueves Santo' },
-    { date: '2024-03-29', name: 'Viernes Santo' },
-    { date: '2024-05-01', name: 'Día del Trabajador' },
-    { date: '2024-06-29', name: 'San Pedro y San Pablo' },
-    { date: '2024-07-23', name: 'Día del Trabajador' },
-    { date: '2024-07-28', name: 'Independencia del Perú' },
-    { date: '2024-07-29', name: 'Independencia del Perú' },
-    { date: '2024-08-30', name: 'Santa Rosa de Lima' },
-    { date: '2024-10-08', name: 'Combate de Angamos' },
-    { date: '2024-11-01', name: 'Todos los Santos' },
-    { date: '2024-12-08', name: 'Inmaculada Concepción' },
-    { date: '2024-12-25', name: 'Navidad' },
-    
-    // 2025
-    { date: '2025-01-01', name: 'Año Nuevo' },
-    { date: '2025-04-17', name: 'Jueves Santo' },
-    { date: '2025-04-18', name: 'Viernes Santo' },
-    { date: '2025-05-01', name: 'Día del Trabajador' },
-    { date: '2025-06-29', name: 'San Pedro y San Pablo' },
-    { date: '2025-07-23', name: 'Día del Trabajador' },
-    { date: '2025-07-28', name: 'Independencia del Perú' },
-    { date: '2025-07-29', name: 'Independencia del Perú' },
-    { date: '2025-08-30', name: 'Santa Rosa de Lima' },
-    { date: '2025-10-08', name: 'Combate de Angamos' },
-    { date: '2025-11-01', name: 'Todos los Santos' },
-    { date: '2025-12-08', name: 'Inmaculada Concepción' },
-    { date: '2025-12-25', name: 'Navidad' },
-  ];
-
-  private formatDate(date: Date): string {
-    return date.toISOString().split('T')[0];
-  }
-
-  private isWeekend(date: Date): boolean {
-    const day = date.getDay();
-    return day === 0 || day === 6; // Sunday or Saturday
-  }
-
-  private isHoliday(date: Date): boolean {
-    const dateStr = this.formatDate(date);
-    return this.holidays.some(holiday => holiday.date === dateStr);
-  }
-
   isBusinessDay(date: Date): boolean {
-    return !this.isWeekend(date) && !this.isHoliday(date);
+    return isPeruBusinessDay(date);
   }
 
   addBusinessDays(startDate: Date, businessDays: number): Date {
-    let currentDate = new Date(startDate);
-    let daysAdded = 0;
-
-    while (daysAdded < businessDays) {
-      currentDate.setDate(currentDate.getDate() + 1);
-      
-      if (this.isBusinessDay(currentDate)) {
-        daysAdded++;
-      }
-    }
-
-    return currentDate;
+    return addPeruBusinessDays(startDate, businessDays);
   }
 
   subtractBusinessDays(startDate: Date, businessDays: number): Date {
@@ -89,25 +40,11 @@ class BusinessDayCalculator {
   }
 
   getBusinessDaysBetween(startDate: Date, endDate: Date): number {
-    let currentDate = new Date(startDate);
-    let businessDays = 0;
-
-    while (currentDate < endDate) {
-      if (this.isBusinessDay(currentDate)) {
-        businessDays++;
-      }
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
-
-    return businessDays;
+    return countPeruBusinessDaysBetween(startDate, endDate);
   }
 
   getRemainingBusinessDays(dueDate: Date, currentDate: Date = new Date()): number {
-    if (dueDate <= currentDate) {
-      return 0;
-    }
-    
-    return this.getBusinessDaysBetween(currentDate, dueDate);
+    return countPeruBusinessDaysRemaining(dueDate, currentDate);
   }
 
   // Check if a complaint is overdue according to DS 101-2022-PCM (15 business days)
@@ -140,8 +77,8 @@ class BusinessDayCalculator {
   }
 
   // Get all holidays for a given year
-  getHolidaysForYear(year: number): Holiday[] {
-    return this.holidays.filter(holiday => holiday.date.startsWith(year.toString()));
+  getHolidaysForYear(year: number): PeruHoliday[] {
+    return getPeruHolidaysForYear(year);
   }
 
   // Calculate ARCO request deadline (typically 10-15 business days for different request types)
