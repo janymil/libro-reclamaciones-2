@@ -98,7 +98,13 @@ export interface ReportStats {
   complaintsGrowth: number;
   averageResponseTime: number;
   resolutionRate: number;
+  /** Share of complaints answered within the 15 business days of DS 101-2022-PCM. null = no data. */
+  slaOnTimeRate: number | null;
+  answeredComplaints: number;
+  overdueComplaints: number;
   complianceRate: number;
+  /** Paperwork checklist (RNPD, privacy policy, DS 011/101) - not a deadline metric. */
+  formalComplianceRate: number;
 }
 
 export interface MonthlyReport {

@@ -14,6 +14,7 @@ import type {
   ReincidenceReport,
 } from "./types";
 import { businessDayCalculator } from "../services/businessDayCalculator";
+import { summarizeSla, averageResponseBusinessDays } from "../services/complaintSlaService";
 
 /** Data access for the "complaint" aggregate. */
 export const complaintStorage = {
@@ -133,61 +134,29 @@ export const complaintStorage = {
       .where(eq(complaints.businessId, businessId))
       .groupBy(complaints.status);
 
-    const overdueCount = await db
-      .select({ count: count() })
-      .from(complaints)
-      .where(and(
-        eq(complaints.businessId, businessId),
-        eq(complaints.isOverdue, true)
-      ));
-
     const statusMap = statusCounts.reduce((acc, { status, count }) => {
       acc[status] = count;
       return acc;
     }, {} as Record<string, number>);
 
     const total = totalResult[0]?.count || 0;
-    const overdue = overdueCount[0]?.count || 0;
     const resolved = statusMap['resolved'] || 0;
 
-    // Answered complaints, used for the SLA and average-response metrics
-    const answered = await db
+    // Complaint-handling compliance (15 business days) and the average response
+    // time come from the shared SLA helper so the dashboard, the reports page
+    // and the API always agree - and, crucially, "nothing answered yet" is
+    // never reported as 100% compliant.
+    const slaRows = await db
       .select({
         submissionDate: complaints.submissionDate,
         responseDate: complaints.responseDate,
         dueDate: complaints.dueDate,
+        isOverdue: complaints.isOverdue,
       })
       .from(complaints)
-      .where(and(
-        eq(complaints.businessId, businessId),
-        isNotNull(complaints.responseDate)
-      ));
+      .where(eq(complaints.businessId, businessId));
 
-    // SLA compliance = share of answered complaints answered within the legal
-    // deadline (15 business days), i.e. response date on or before the due date.
-    const answeredOnTime = answered.filter(
-      complaint =>
-        complaint.responseDate &&
-        complaint.dueDate &&
-        new Date(complaint.responseDate) <= new Date(complaint.dueDate)
-    ).length;
-
-    const slaCompliance = answered.length > 0
-      ? (answeredOnTime / answered.length) * 100
-      : 100;
-
-    const avgResponseTime = answered.length > 0
-      ? Math.round(
-          (answered.reduce(
-            (sum, complaint) =>
-              sum + businessDayCalculator.getBusinessDaysBetween(
-                complaint.submissionDate,
-                complaint.responseDate as Date
-              ),
-            0
-          ) / answered.length) * 10
-        ) / 10
-      : 0;
+    const sla = summarizeSla(slaRows);
 
     return {
       total,
@@ -195,9 +164,10 @@ export const complaintStorage = {
       inProgress: statusMap['in_progress'] || 0,
       responded: statusMap['responded'] || 0,
       resolved,
-      overdue,
-      avgResponseTime,
-      slaCompliance: Math.round(slaCompliance),
+      overdue: sla.overdue,
+      answered: sla.answered,
+      avgResponseTime: averageResponseBusinessDays(slaRows),
+      slaCompliance: sla.onTimeRate ?? 0,
     };
   },
 

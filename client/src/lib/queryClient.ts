@@ -1,7 +1,44 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-async function throwIfResNotOk(res: Response) {
+/**
+ * Whether a 401 from this URL must NOT trigger the "session expired" flow.
+ *
+ * - /api/auth/*   : a failed login/register is handled by the login page itself.
+ * - /api/public/* : the consumer portal is anonymous by design.
+ * - /api/v1/*     : authenticated by API key, not by session.
+ */
+function isAnonymousByDesign(url: string): boolean {
+  return (
+    url.startsWith("/api/auth/") ||
+    url.startsWith("/api/public/") ||
+    url.startsWith("/api/v1/")
+  );
+}
+
+let sessionExpiryHandled = false;
+
+/**
+ * A 401 on a private endpoint means the session is gone (expired, revoked,
+ * cleared cookies, or the app restarted with a new session cookie name).
+ *
+ * Without this the user keeps staring at a page full of "Error al cargar…"
+ * panels while the header shows a half-empty profile. Instead: drop the cached
+ * user and send them to the login page once, with a short explanation.
+ */
+export function handleSessionExpired(): void {
+  if (typeof window === "undefined" || sessionExpiryHandled) return;
+  if (window.location.pathname.startsWith("/auth")) return;
+
+  sessionExpiryHandled = true;
+  queryClient.setQueryData(["/api/auth/user"], null);
+  window.location.assign("/auth?expired=1");
+}
+
+async function throwIfResNotOk(res: Response, url: string) {
   if (!res.ok) {
+    if (res.status === 401 && !isAnonymousByDesign(url)) {
+      handleSessionExpired();
+    }
     const text = (await res.text()) || res.statusText;
     throw new Error(`${res.status}: ${text}`);
   }
@@ -19,7 +56,7 @@ export async function apiRequest(
     credentials: "include",
   });
 
-  await throwIfResNotOk(res);
+  await throwIfResNotOk(res, url);
   return res;
 }
 
@@ -29,15 +66,18 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(queryKey.join("/") as string, {
+    const url = queryKey.join("/") as string;
+    const res = await fetch(url, {
       credentials: "include",
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
+      // The identity query itself: report "anonymous". Private pages always
+      // hit at least one other endpoint, which is what triggers the redirect.
       return null;
     }
 
-    await throwIfResNotOk(res);
+    await throwIfResNotOk(res, url);
     return await res.json();
   };
 

@@ -3,6 +3,7 @@ import { eq, and, desc, asc, count, gte, lte, lt, or, isNotNull } from "drizzle-
 import {
   complaints,
 } from "@shared/schema";
+import type { ComplianceTracking } from "@shared/schema";
 import type {
   DashboardMetrics,
   ComplianceReport,
@@ -70,21 +71,28 @@ export const reportingStorage = {
 
   async generateComplianceReport(businessId: string): Promise<ComplianceReport> {
     const tracking = await complianceStorage.getComplianceTracking(businessId);
-    
-    const ds011Status = tracking.some(t => t.complianceType === 'ds_011_2011_pcm' && t.status === 'compliant');
-    const ds101Status = tracking.some(t => t.complianceType === 'ds_101_2022_pcm' && t.status === 'compliant');
-    const ley29733Status = tracking.some(t => t.complianceType === 'ley_29733' && t.status === 'compliant');
-    
-    const overdueItems = tracking.filter(t => 
-      t.status !== 'compliant' && 
-      t.dueDate && 
+
+    const statusOf = (type: string): ComplianceTracking['status'] | null => {
+      const item = tracking.find(t => t.complianceType === type);
+      return item ? item.status : null;
+    };
+
+    const ds011Status = statusOf('ds_011_2011_pcm') === 'compliant';
+    const ds101Status = statusOf('ds_101_2022_pcm') === 'compliant';
+    const ley29733Status = statusOf('ley_29733') === 'compliant';
+
+    const overdueItems = tracking.filter(t =>
+      t.status !== 'compliant' &&
+      t.dueDate &&
       new Date(t.dueDate) < new Date()
     );
-    
+
+    // Guidance only; none of these is a hardcoded "deadline" any more (the
+    // previous copy carried a stale fixed date that would always look overdue).
     const nextActions = [
-      !ley29733Status ? 'Registro RNPD - Vence 30/03/2025' : null,
-      'Actualizar Política de Privacidad',
-      'Capacitación derechos ARCO'
+      !ley29733Status ? 'Registrar/actualizar el banco de datos personales ante la autoridad' : null,
+      'Actualizar la Política de Privacidad y su fecha de vigencia',
+      'Capacitación anual en derechos ARCO del personal',
     ].filter(Boolean) as string[];
 
     return {
@@ -127,48 +135,37 @@ export const reportingStorage = {
       ? Math.round(((thisMonth - lastMonth) / lastMonth) * 100)
       : (thisMonth > 0 ? 100 : 0);
 
-    // Average response time, measured in business days (Peruvian calendar)
-    const responded = await db
-      .select({
-        submissionDate: complaints.submissionDate,
-        responseDate: complaints.responseDate,
-      })
-      .from(complaints)
-      .where(and(
-        eq(complaints.businessId, businessId),
-        isNotNull(complaints.responseDate)
-      ));
-
-    const averageResponseTime = responded.length > 0
-      ? Math.round(
-          (responded.reduce(
-            (total, complaint) =>
-              total + businessDayCalculator.getBusinessDaysBetween(
-                complaint.submissionDate,
-                complaint.responseDate as Date
-              ),
-            0
-          ) / responded.length) * 10
-        ) / 10
-      : 0;
-
+    // Average response time and the complaint-handling compliance both come
+    // from getComplaintStats (single source of truth: complaintSlaService).
     const resolutionRate = stats.total > 0
       ? Math.round(((stats.resolved + stats.responded) / stats.total) * 100)
       : 0;
 
+    // The formal-obligations checklist is reported SEPARATELY: it describes
+    // paperwork (RNPD, privacy policy...) and must never be presented as a
+    // deadline metric. "Cumplimiento legal" on the reports page is the share of
+    // complaints answered within the 15 business days of DS 101-2022-PCM.
     const compliance = await reportingStorage.generateComplianceReport(businessId);
-    const compliantCount = [
+    const formalChecks = [
       compliance.ds011Status,
       compliance.ds101Status,
       compliance.ley29733Status,
-    ].filter(Boolean).length;
+    ];
+    const formalComplianceRate = Math.round(
+      (formalChecks.filter(Boolean).length / formalChecks.length) * 100,
+    );
 
     return {
       totalComplaints: stats.total,
       complaintsGrowth,
-      averageResponseTime,
+      averageResponseTime: stats.avgResponseTime,
       resolutionRate,
-      complianceRate: Math.round((compliantCount / 3) * 100),
+      // null = "sin datos" (no complaints yet), which is NOT the same as 0%.
+      slaOnTimeRate: stats.total > 0 ? stats.slaCompliance : null,
+      answeredComplaints: stats.answered,
+      overdueComplaints: stats.overdue,
+      complianceRate: stats.total > 0 ? stats.slaCompliance : 0,
+      formalComplianceRate,
     };
   },
 

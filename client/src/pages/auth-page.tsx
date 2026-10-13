@@ -117,6 +117,15 @@ export default function AuthPage() {
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-[#5c5246]">{TITLES[mode].subtitle}</p>
 
+            {mode === 'login' && urlParams.get('expired') === '1' && (
+              <div
+                className="mt-4 rounded-xl border border-[#c02b0a]/25 bg-[#c02b0a]/5 px-4 py-3 text-sm leading-relaxed text-[#1b1611]"
+                data-testid="notice-session-expired"
+              >
+                Tu sesión finalizó o el servidor se reinició. Inicia sesión nuevamente para continuar.
+              </div>
+            )}
+
             <div className="mt-8">
               {mode === 'register' && (
                 <form onSubmit={handleRegister} className="space-y-4">

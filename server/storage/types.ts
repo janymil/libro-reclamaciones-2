@@ -190,7 +190,10 @@ export interface ComplaintStats {
   responded: number;
   resolved: number;
   overdue: number;
+  /** Complaints with a provider response. */
+  answered: number;
   avgResponseTime: number;
+  /** Share of complaints answered within the legal deadline (15 business days). */
   slaCompliance: number;
 }
 
@@ -317,7 +320,20 @@ export interface ReportStats {
   complaintsGrowth: number;
   averageResponseTime: number;
   resolutionRate: number;
+  /**
+   * Complaint-handling compliance: share of complaints answered within the 15
+   * business days of DS 101-2022-PCM. null = no complaints (no data), which is
+   * deliberately different from 0%.
+   */
+  slaOnTimeRate: number | null;
+  /** Complaints with a provider response. */
+  answeredComplaints: number;
+  /** Complaints past the legal deadline without a response. */
+  overdueComplaints: number;
+  /** Same as slaOnTimeRate, as a plain number (0 when there is no data). */
   complianceRate: number;
+  /** Paperwork checklist (RNPD, privacy policy, DS 011/101) - NOT a deadline metric. */
+  formalComplianceRate: number;
 }
 
 export interface MonthlyReport {

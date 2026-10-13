@@ -72,13 +72,36 @@ export default function Reports() {
     queryKey: ['/api/compliance/report'],
   });
 
+  // ---- Complaint-handling compliance (DS 101-2022-PCM: 15 business days) ----
+  // Derived from the real complaint dates, never from the paperwork checklist,
+  // and never rendered through a falsy fallback (0% must never print as 100%).
+  const slaRate = reportStats?.slaOnTimeRate ?? null;
+  const answeredCount = reportStats?.answeredComplaints ?? 0;
+  const totalCount = reportStats?.totalComplaints ?? 0;
+  const overdueCount = reportStats?.overdueComplaints ?? 0;
+  const hasComplaints = totalCount > 0;
+  const deadlineComplianceOk = hasComplaints && overdueCount === 0 && slaRate === 100;
+  const slaCaption = !hasComplaints
+    ? 'Aún no hay reclamaciones registradas'
+    : `${answeredCount} de ${totalCount} respondidas · ${overdueCount} vencida(s) sin respuesta`;
+  const slaTone = !hasComplaints
+    ? { dot: 'bg-gray-400', text: 'text-gray-500' }
+    : overdueCount > 0
+      ? { dot: 'bg-red-500', text: 'text-red-600' }
+      : slaRate === 100
+        ? { dot: 'bg-green-500', text: 'text-green-600' }
+        : { dot: 'bg-amber-500', text: 'text-amber-600' };
+
   const exportSummary = () => {
     downloadCsv(`reporte-general-${todayStamp()}`, [{
       'Total de reclamaciones': reportStats?.totalComplaints ?? 0,
       'Variación vs mes anterior (%)': reportStats?.complaintsGrowth ?? 0,
       'Tiempo promedio de respuesta (días hábiles)': reportStats?.averageResponseTime ?? 0,
       'Tasa de resolución (%)': reportStats?.resolutionRate ?? 0,
-      'Cumplimiento legal (%)': reportStats?.complianceRate ?? 0,
+      'Cumplimiento de plazo 15 días hábiles (%)': reportStats?.slaOnTimeRate ?? 'Sin datos',
+      'Respondidas': reportStats?.answeredComplaints ?? 0,
+      'Vencidas sin respuesta': reportStats?.overdueComplaints ?? 0,
+      'Obligaciones formales registradas (%)': reportStats?.formalComplianceRate ?? 0,
     }]);
   };
 
@@ -123,9 +146,12 @@ export default function Reports() {
 
   const exportAudit = () => {
     downloadCsv(`auditoria-cumplimiento-${todayStamp()}`, [
-      { Norma: 'DS 011-2011-PCM (Reglamento del Libro)', Estado: compliance?.ds011Status ? 'Conforme' : 'Pendiente' },
-      { Norma: 'DS 101-2022-PCM (15 días hábiles)', Estado: compliance?.ds101Status ? 'Conforme' : 'Pendiente' },
-      { Norma: 'Ley 29733 (Protección de Datos)', Estado: compliance?.ley29733Status ? 'Conforme' : 'Pendiente' },
+      { Norma: 'DS 011-2011-PCM (Reglamento del Libro)', Estado: compliance?.ds011Status ? 'Conforme (checklist)' : 'Pendiente (checklist)' },
+      // Derived from the real complaint dates, never from the paperwork checklist.
+      { Norma: 'DS 101-2022-PCM (respuestas en 15 días hábiles)', Estado: deadlineComplianceOk ? 'Conforme' : 'Incumplido' },
+      { Norma: '  · Reclamaciones vencidas sin respuesta', Estado: String(reportStats?.overdueComplaints ?? 0) },
+      { Norma: '  · Respondidas dentro del plazo', Estado: `${reportStats?.answeredComplaints ?? 0} de ${reportStats?.totalComplaints ?? 0}` },
+      { Norma: 'Ley 29733 (Protección de Datos)', Estado: compliance?.ley29733Status ? 'Conforme (checklist)' : 'Pendiente (checklist)' },
       ...(compliance?.nextActions ?? []).map((action: string) => ({ Norma: 'Acción pendiente', Estado: action })),
     ]);
   };
@@ -197,15 +223,15 @@ export default function Reports() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Cumplimiento Legal</CardTitle>
-              <div className="h-4 w-4 rounded-full bg-green-500" />
+              <CardTitle className="text-sm font-medium">Cumplimiento de Plazo (SLA)</CardTitle>
+              <div className={`h-4 w-4 rounded-full ${slaTone.dot}`} />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600" data-testid="stat-compliance">
-                {isLoading ? '...' : reportStats?.complianceRate || '100'}%
+              <div className={`text-2xl font-bold ${slaTone.text}`} data-testid="stat-compliance">
+                {isLoading ? '...' : hasComplaints ? `${slaRate ?? 0}%` : 'Sin datos'}
               </div>
-              <p className="text-xs text-muted-foreground">
-                DS 011-2011-PCM conforme
+              <p className="text-xs text-muted-foreground" data-testid="stat-compliance-caption">
+                {slaCaption} · plazo legal 15 días hábiles
               </p>
             </CardContent>
           </Card>
@@ -322,7 +348,9 @@ export default function Reports() {
                 <div className="space-y-3">
                   {[
                     { label: 'DS 011-2011-PCM - Libro de Reclamaciones', ok: compliance?.ds011Status },
-                    { label: 'DS 101-2022-PCM - Plazos de Respuesta', ok: compliance?.ds101Status },
+                    // Deadline compliance is computed from the real complaints, not
+                    // from the manual checklist (which says nothing about dates).
+                    { label: 'DS 101-2022-PCM - Respuestas en 15 días hábiles', ok: deadlineComplianceOk },
                     { label: 'Ley 29733 - Protección de Datos', ok: compliance?.ley29733Status },
                   ].map(({ label, ok }) => (
                     <div
@@ -336,6 +364,10 @@ export default function Reports() {
                     </div>
                   ))}
                 </div>
+                <p className="text-xs text-muted-foreground" data-testid="legal-deadline-source">
+                  El estado de plazos se calcula con las fechas reales de sus reclamaciones: {slaCaption}
+                  {' '}· Obligaciones formales registradas (checklist): {reportStats?.formalComplianceRate ?? 0}%
+                </p>
                 <Button className="w-full" onClick={exportAudit} data-testid="button-audit-report">
                   Generar Reporte de Auditoría
                 </Button>
