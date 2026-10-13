@@ -3,8 +3,10 @@ import { z } from "zod";
 
 import {
   businessProfileSchema,
+  forgotPasswordSchema,
   insertLibroConfigurationSchema,
   loginSchema as authLoginSchema,
+  resetPasswordSchema,
   userRegistrationSchema,
 } from "@shared/schema";
 
@@ -12,8 +14,18 @@ import { authService } from "../services/authService";
 import { provisionDefaultEstablishment } from "../services/establishmentProvisioning";
 import { newBusinessTrialDefaults } from "../services/subscriptionService";
 import { storage } from "../storage";
-import { authLimiter, registerLimiter } from "../middleware/rateLimits";
+import { authLimiter, passwordResetLimiter, registerLimiter } from "../middleware/rateLimits";
 import { requireAuth } from "../middleware/requireAuth";
+
+/**
+ * The one and only answer the forgot-password endpoint ever returns.
+ *
+ * Returning it for unknown addresses, deactivated accounts and delivery failures
+ * alike is what stops the endpoint from being used to discover which emails have
+ * accounts (account enumeration).
+ */
+const FORGOT_PASSWORD_RESPONSE =
+  "Si el correo está registrado, recibirás un enlace para restablecer tu contraseña.";
 
 /**
  * Registration, login, logout and onboarding completion.
@@ -105,6 +117,59 @@ export function registerAuthRoutes(app: Express): void {
       }
       res.json({ message: "Sesión cerrada exitosamente" });
     });
+  });
+
+  // ---- Self-service password recovery --------------------------------------
+
+  // Step 1: request a reset link. Always answers 200 with the same body whether
+  // or not the address exists (see FORGOT_PASSWORD_RESPONSE).
+  app.post('/api/auth/forgot-password', passwordResetLimiter, async (req, res) => {
+    try {
+      const { email } = forgotPasswordSchema.parse(req.body);
+      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const userAgent = req.get('User-Agent') || '';
+
+      await authService.requestPasswordReset(email, ipAddress, userAgent);
+
+      res.json({ message: FORGOT_PASSWORD_RESPONSE });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          message: "Datos inválidos",
+          errors: error.errors,
+        });
+      }
+      console.error('Forgot password error:', error);
+      // Deliberately the same success-shaped answer: a failure here must not
+      // reveal whether the address is registered.
+      res.json({ message: FORGOT_PASSWORD_RESPONSE });
+    }
+  });
+
+  // Step 2: consume the token from the email link and set the new password.
+  app.post('/api/auth/reset-password', passwordResetLimiter, async (req, res) => {
+    try {
+      const { token, password } = resetPasswordSchema.parse(req.body);
+      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const userAgent = req.get('User-Agent') || '';
+
+      const result = await authService.resetPassword(token, password, ipAddress, userAgent);
+
+      if (!result.success) {
+        return res.status(400).json({ message: result.message });
+      }
+
+      res.json({ message: result.message });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          message: "Datos inválidos",
+          errors: error.errors,
+        });
+      }
+      console.error('Reset password error:', error);
+      res.status(500).json({ message: "No se pudo restablecer la contraseña" });
+    }
   });
 
   // Get current user (protected)

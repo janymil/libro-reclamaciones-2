@@ -17,6 +17,7 @@ import Profile from "@/pages/profile";
 import History from "@/pages/history";
 import QrCodePage from "@/pages/qr-code";
 import PublicPortal from "@/pages/public-portal";
+import ResetPasswordPage from "@/pages/reset-password";
 import Compliance from "@/pages/compliance";
 import AssistantPage from "@/pages/assistant";
 import SubscriptionPage from "@/pages/subscription";
@@ -37,6 +38,9 @@ function Router() {
           sus reclamos sin necesidad de iniciar sesión. */}
       <Route path="/libro/:slug" component={PublicPortal} />
 
+      {/* Paso 2 de la recuperación de contraseña: el enlace del correo apunta aquí.
+          Va antes de `/acceso` para que la ruta exacta gane siempre. */}
+      <Route path="/acceso/restablecer-password" component={ResetPasswordPage} />
       <Route path="/acceso" component={AuthPage} />
       <Route path="/registro" component={OnboardingPage} />
       <Route path="/panel" component={Dashboard} />

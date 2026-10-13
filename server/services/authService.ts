@@ -14,6 +14,8 @@ const SALT_ROUNDS = 14; // Bank-level security
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MINUTES = 30;
 const PASSWORD_LENGTH = 12;
+/** Lifetime of a password-reset link (the email says "1 hora"). */
+const PASSWORD_RESET_TTL_MINUTES = 60;
 
 export class AuthService {
   
@@ -352,14 +354,99 @@ export class AuthService {
   }
 
   /**
-   * Generate password reset token (for future use)
+   * Issues a single-use reset token for an existing account (internal).
+   *
+   * 32 bytes from the CSPRNG = 256 bits, so the token is not guessable; it
+   * expires one hour after issue.
    */
-  async generatePasswordResetToken(email: string): Promise<string> {
+  private async generatePasswordResetToken(email: string): Promise<string> {
     const token = randomBytes(32).toString('hex');
-    const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-    
+    const expires = new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000);
+
     await storage.setPasswordResetToken(email, token, expires);
     return token;
+  }
+
+  /**
+   * Step 1 of self-service password recovery: email a reset link.
+   *
+   * NEVER reports whether the address exists. Answering differently for known
+   * and unknown emails would turn the endpoint into an account-enumeration
+   * oracle, so a miss is a silent no-op that is still audited. Delivery and
+   * storage failures are swallowed for the same reason: the caller's response
+   * must not depend on the account's existence.
+   */
+  async requestPasswordReset(email: string, ipAddress: string, userAgent: string): Promise<void> {
+    try {
+      const user = await storage.getUserByEmail(email);
+
+      // Deactivated accounts get no reset link: otherwise a suspended user could
+      // regain access without an administrator re-enabling the account.
+      if (user && user.isActive) {
+        const token = await this.generatePasswordResetToken(user.email);
+        await emailService.sendPasswordReset(user.email, user.firstName, token);
+      }
+
+      await this.logAuthEvent('password_reset_requested', email, true, ipAddress, userAgent, user?.id);
+    } catch (error) {
+      console.error('[auth] password reset request failed:', error);
+      await this.logAuthEvent(
+        'password_reset_error',
+        email,
+        false,
+        ipAddress,
+        userAgent,
+        undefined,
+        error instanceof Error ? error.message : 'unknown_error',
+      );
+    }
+  }
+
+  /**
+   * Step 2: consume the token and set the new password.
+   *
+   * The token is single-use (cleared in the same UPDATE that writes the hash)
+   * and expires one hour after issue. A successful reset also clears the
+   * lockout, so a user who forgot the password *after* being locked out is not
+   * left stranded.
+   */
+  async resetPassword(
+    token: string,
+    newPassword: string,
+    ipAddress: string,
+    userAgent: string,
+  ): Promise<{ success: boolean; message: string }> {
+    const user = await storage.getUserByPasswordResetToken(token);
+
+    if (!user || !user.passwordResetExpires || user.passwordResetExpires.getTime() < Date.now()) {
+      await this.logAuthEvent(
+        'password_reset_failed',
+        user?.email ?? 'unknown',
+        false,
+        ipAddress,
+        userAgent,
+        user?.id,
+        'invalid_or_expired_token',
+      );
+      return {
+        success: false,
+        message: 'El enlace de restablecimiento no es válido o ha expirado.',
+      };
+    }
+
+    const hashedPassword = await this.hashPassword(newPassword);
+    await storage.completePasswordReset(user.id, hashedPassword);
+
+    await this.logAuthEvent(
+      'password_reset_success',
+      user.email,
+      true,
+      ipAddress,
+      userAgent,
+      user.id,
+    );
+
+    return { success: true, message: 'Contraseña actualizada. Ya puedes iniciar sesión.' };
   }
 
   /**

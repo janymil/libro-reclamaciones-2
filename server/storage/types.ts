@@ -49,6 +49,13 @@ export interface IStorage {
   lockUserAccount(userId: string, lockUntil: Date): Promise<void>;
   updateLastLogin(userId: string): Promise<void>;
   setPasswordResetToken(email: string, token: string, expires: Date): Promise<void>;
+  /** Resolves the account owning a non-expired reset token (or undefined). */
+  getUserByPasswordResetToken(token: string): Promise<User | undefined>;
+  /**
+   * Atomically sets the new password hash and clears the reset token, its
+   * expiry and any lockout — so the token can never be replayed.
+   */
+  completePasswordReset(userId: string, hashedPassword: string): Promise<void>;
   getFailedLoginAttempts(email: string, ipAddress: string, since: Date): Promise<number>;
   
   // Auth audit logging

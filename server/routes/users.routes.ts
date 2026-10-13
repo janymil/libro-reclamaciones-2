@@ -2,12 +2,11 @@ import type { Express } from "express";
 import bcrypt from "bcrypt";
 import { z } from "zod";
 
+import { MIN_PASSWORD_LENGTH } from "@shared/schema";
 import { storage } from "../storage";
 import { requireAuth, requireNonDemo, requireAdmin } from "../middleware/requireAuth";
 import { enforceQuota } from "../services/subscriptionService";
 import { getManageableBusinessIds } from "../services/tenantAccess";
-
-const MIN_PASSWORD_LENGTH = 8;
 
 // Whitelisted input for team-member creation. The target business is optional
 // (defaults to the caller's active tenant) and is ALWAYS validated server-side

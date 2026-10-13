@@ -722,6 +722,31 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Contraseña requerida"),
 });
 
+/**
+ * Minimum password length, shared by every entry point that sets a password
+ * (team-member creation, change-password, password reset) so the rule cannot
+ * drift between them.
+ */
+export const MIN_PASSWORD_LENGTH = 8;
+
+/** Step 1 of password recovery: request a reset link. */
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().email("Email inválido").max(255),
+});
+
+/** Step 2 of password recovery: consume the token and set the new password. */
+export const resetPasswordSchema = z.object({
+  token: z
+    .string()
+    .trim()
+    .min(16, "Token inválido")
+    .max(255, "Token inválido"),
+  password: z
+    .string()
+    .min(MIN_PASSWORD_LENGTH, `La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres`)
+    .max(200),
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -779,3 +804,5 @@ export type ApiKeyPublic = Omit<ApiKey, "keyHash">;
 
 export type UserRegistration = z.infer<typeof userRegistrationSchema>;
 export type LoginData = z.infer<typeof loginSchema>;
+export type ForgotPasswordData = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordData = z.infer<typeof resetPasswordSchema>;

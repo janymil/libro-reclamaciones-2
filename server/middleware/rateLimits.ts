@@ -111,3 +111,19 @@ export const apiV1Limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+/**
+ * Self-service password recovery (Phase 0).
+ *
+ * Used by BOTH `/api/auth/forgot-password` and `/api/auth/reset-password`.
+ * Unauthenticated by definition, and the request leg sends an email to an
+ * address the caller supplies — so without a limit it doubles as an email-bomb
+ * relay and an account-enumeration probe. Tighten it more than login.
+ */
+export const passwordResetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Maximum 10 reset requests/confirmations per window per IP
+  message: { message: "Demasiadas solicitudes. Intenta en 15 minutos." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});

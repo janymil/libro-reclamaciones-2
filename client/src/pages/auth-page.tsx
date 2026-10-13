@@ -6,8 +6,9 @@ import { useAuth } from "@/hooks/use-auth";
 import { Link, useLocation } from "wouter";
 import { Loader2, Mail, UserPlus, LogIn, ShieldCheck, Timer, LockKeyhole, ArrowLeft } from "lucide-react";
 import { BrandMark, StampMark, HojaDocument } from "@/components/landing/brand";
+import { apiRequest } from "@/lib/queryClient";
 
-type AuthMode = 'login' | 'register' | 'email-sent';
+type AuthMode = 'login' | 'register' | 'email-sent' | 'forgot-password';
 
 interface RegisterData {
   firstName: string;
@@ -36,6 +37,10 @@ const TITLES: Record<AuthMode, { title: string; subtitle: string }> = {
   "email-sent": {
     title: "Revisa tu correo",
     subtitle: "Te enviamos la contraseña de acceso.",
+  },
+  "forgot-password": {
+    title: "Recupera tu acceso",
+    subtitle: "Te enviaremos un enlace para crear una contraseña nueva.",
   },
 };
 
@@ -71,6 +76,13 @@ export default function AuthPage() {
   const [registerForm, setRegisterForm] = useState<RegisterData>({ firstName: '', lastName: '', email: '' });
   const [loginForm, setLoginForm] = useState<LoginData>({ email: '', password: '' });
 
+  // Password recovery (self-service). `forgotSent` is intentionally sticky: the
+  // endpoint answers identically for known and unknown addresses, so there is
+  // nothing more to reveal on the follow-up screen.
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotSent, setForgotSent] = useState(false);
+  const [isSendingReset, setIsSendingReset] = useState(false);
+
   // Redirect authenticated users
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -86,6 +98,21 @@ export default function AuthPage() {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     loginMutation.mutate(loginForm);
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSendingReset(true);
+    try {
+      await apiRequest("POST", "/api/auth/forgot-password", { email: forgotEmail });
+    } catch {
+      // The endpoint answers 200 even for unknown addresses, so a throw here can
+      // only mean transport trouble or rate limiting. Either way the user sees
+      // the same neutral notice.
+    } finally {
+      setIsSendingReset(false);
+      setForgotSent(true);
+    }
   };
 
   return (
@@ -265,6 +292,21 @@ export default function AuthPage() {
                     <Button
                       type="button"
                       variant="link"
+                      onClick={() => {
+                        setForgotSent(false);
+                        setMode('forgot-password');
+                      }}
+                      data-testid="link-forgot-password"
+                      className="text-sm text-[#5c5246] hover:text-[#c02b0a]"
+                    >
+                      ¿Olvidaste tu contraseña?
+                    </Button>
+                  </div>
+
+                  <div className="text-center">
+                    <Button
+                      type="button"
+                      variant="link"
                       onClick={() => setMode('register')}
                       data-testid="link-register"
                       className="text-sm text-[#5c5246] hover:text-[#c02b0a]"
@@ -273,6 +315,89 @@ export default function AuthPage() {
                     </Button>
                   </div>
                 </form>
+              )}
+
+              {mode === 'forgot-password' && (
+                <div>
+                  {forgotSent ? (
+                    <div className="text-center">
+                      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#1e6b4a]/10">
+                        <Mail className="h-8 w-8 text-[#1e6b4a]" aria-hidden="true" />
+                      </div>
+                      <p
+                        className="mt-5 text-sm leading-relaxed text-[#5c5246]"
+                        data-testid="notice-forgot-sent"
+                      >
+                        Si el correo está registrado, recibirás un enlace para restablecer tu
+                        contraseña. Revisa también la carpeta de spam.
+                      </p>
+                      <Button
+                        onClick={() => setMode('login')}
+                        variant="outline"
+                        className="mt-6 w-full rounded-full border-[#1b1611]/25 bg-transparent font-semibold text-[#1b1611] hover:bg-[#1b1611] hover:text-[#f7f2e8]"
+                        data-testid="button-back-to-login"
+                      >
+                        <LogIn className="mr-2 h-4 w-4" />
+                        Volver a iniciar sesión
+                      </Button>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleForgotPassword} className="space-y-4">
+                      <p className="text-sm leading-relaxed text-[#5c5246]">
+                        Escribe tu email y te enviaremos un enlace para crear una contraseña nueva.
+                      </p>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="forgotEmail" className="text-sm font-medium text-[#1b1611]">
+                          Email
+                        </Label>
+                        <Input
+                          id="forgotEmail"
+                          data-testid="input-forgotEmail"
+                          type="email"
+                          value={forgotEmail}
+                          onChange={(e) => setForgotEmail(e.target.value)}
+                          required
+                          autoComplete="email"
+                          spellCheck={false}
+                          placeholder="tu@email.com…"
+                          className={inputCls}
+                        />
+                      </div>
+
+                      <Button
+                        type="submit"
+                        className="h-12 w-full rounded-full bg-[#1b1611] text-base font-semibold text-[#f7f2e8] hover:bg-black"
+                        disabled={isSendingReset}
+                        data-testid="button-send-reset"
+                      >
+                        {isSendingReset ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Enviando…
+                          </>
+                        ) : (
+                          <>
+                            <Mail className="mr-2 h-4 w-4" />
+                            Enviar enlace
+                          </>
+                        )}
+                      </Button>
+
+                      <div className="text-center">
+                        <Button
+                          type="button"
+                          variant="link"
+                          onClick={() => setMode('login')}
+                          data-testid="link-back-to-login"
+                          className="text-sm text-[#5c5246] hover:text-[#c02b0a]"
+                        >
+                          Volver a iniciar sesión
+                        </Button>
+                      </div>
+                    </form>
+                  )}
+                </div>
               )}
 
               {mode === 'email-sent' && (

@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { eq, and, count, gte, sql } from "drizzle-orm";
 import {
+  type User,
   type LoginAttempt,
   type InsertLoginAttempt,
   type AuthAuditLog,
@@ -94,6 +95,35 @@ export const authStorage = {
       .values(loginAttemptData)
       .returning();
     return loginAttempt;
+  },
+
+  /**
+   * Resolves the account that owns a password-reset token. The caller must still
+   * check `passwordResetExpires`; this lookup is by token only.
+   */
+  async getUserByPasswordResetToken(token: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.passwordResetToken, token));
+    return user;
+  },
+
+  /**
+   * Password-reset completion: stores the new hash and clears the token, its
+   * expiry and any lockout in ONE statement. Doing it atomically means the token
+   * cannot be replayed even if two confirmations race, and a user who was locked
+   * out before resetting is not left locked out afterwards.
+   */
+  async completePasswordReset(userId: string, hashedPassword: string): Promise<void> {
+    await db
+      .update(users)
+      .set({
+        password: hashedPassword,
+        passwordResetToken: null,
+        passwordResetExpires: null,
+        failedLoginAttempts: 0,
+        accountLockedUntil: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
   },
 
   // Libro configuration for onboarding step 2
