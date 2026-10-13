@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import type { SendMailOptions, Transporter } from 'nodemailer';
 import type { Complaint } from '@shared/schema';
 
 interface EmailConfig {
@@ -44,7 +45,7 @@ function renderFooter(customization?: EmailCustomization): string {
 }
 
 export class EmailService {
-  private transporter: nodemailer.Transporter;
+  private transporter: Transporter;
 
   constructor() {
     const hasSmtpCredentials = Boolean(process.env.SMTP_USER && process.env.SMTP_PASSWORD);
@@ -62,7 +63,7 @@ export class EmailService {
 
       this.transporter = {
         ...captureTransport,
-        sendMail: async (mailOptions: nodemailer.SendMailOptions) => {
+        sendMail: async (mailOptions: SendMailOptions) => {
           const info = await captureTransport.sendMail(mailOptions);
           console.log(
             `\n========== [email:dev] ${mailOptions.subject} ==========\n` +
@@ -72,7 +73,7 @@ export class EmailService {
           );
           return info;
         },
-      } as unknown as nodemailer.Transporter;
+      } as unknown as Transporter;
 
       return;
     }
