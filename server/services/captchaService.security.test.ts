@@ -63,6 +63,17 @@ describe("CAPTCHA single-use enforcement", () => {
     expect(verifyCaptcha(second.token, solve(second.question)).ok).toBe(true);
   });
 
+  it("issues a distinct token for every challenge", () => {
+    // Regression: the token used to be a pure function of (answer, expiry), so
+    // two challenges issued in the same millisecond with the same sum were
+    // byte-identical - consuming one silently invalidated the other.
+    const tokens = new Set<string>();
+    for (let i = 0; i < 500; i++) {
+      tokens.add(issueCaptcha().token);
+    }
+    expect(tokens.size).toBe(500);
+  });
+
   it("still rejects a tampered token after consumption", () => {
     const challenge = issueCaptcha();
     consumeCaptchaToken(challenge.token);

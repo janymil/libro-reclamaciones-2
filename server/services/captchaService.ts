@@ -94,10 +94,15 @@ export function issueCaptcha(): CaptchaChallenge {
   const answer = a + b;
   const expires = Date.now() + CHALLENGE_TTL_MS;
 
-  // The token carries the answer + expiry base64url-encoded, HMAC-signed over
-  // the *encoded* payload (exactly what verifyCaptcha re-computes). base64url
-  // never contains a '.', so splitting the token is unambiguous.
-  const encodedPayload = Buffer.from(`${answer}.${expires}`).toString("base64url");
+  // The token carries the answer + expiry + a random nonce, base64url-encoded and
+  // HMAC-signed over the *encoded* payload (exactly what verifyCaptcha
+  // re-computes). base64url never contains a '.', so splitting is unambiguous.
+  //
+  // The nonce is load-bearing: without it the token is a pure function of
+  // (answer, expiry), so two challenges issued in the same millisecond with the
+  // same sum are byte-identical and consuming one would invalidate the other.
+  const nonce = crypto.randomBytes(9).toString("base64url");
+  const encodedPayload = Buffer.from(`${answer}.${expires}.${nonce}`).toString("base64url");
   const token = `${encodedPayload}.${sign(encodedPayload)}`;
 
   return {
