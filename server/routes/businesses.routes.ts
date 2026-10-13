@@ -1,12 +1,14 @@
 import type { Express } from "express";
 import { z } from "zod";
 
-import { insertBusinessSchema } from "@shared/schema";
+import { businessProfileSchema, businessUpdateSchema } from "@shared/schema";
 import { PLANS, checkQuota } from "@shared/plans";
 
 import { storage } from "../storage";
-import { requireAuth, requireNonDemo } from "../middleware/requireAuth";
+import { requireAuth, requireNonDemo, requireAdmin } from "../middleware/requireAuth";
 import { enforceQuota, newBusinessTrialDefaults } from "../services/subscriptionService";
+import { provisionDefaultEstablishment } from "../services/establishmentProvisioning";
+import { getManageableBusinessIds } from "../services/tenantAccess";
 
 /**
  * Business records: read the current tenant, list, create and update.
@@ -29,9 +31,21 @@ export function registerBusinessesRoutes(app: Express): void {
 
   app.get('/api/businesses', requireAuth, async (req: any, res) => {
     try {
-      const businesses = await storage.getAllBusinesses();
+      // Only the businesses this login may manage: its active tenant plus any
+      // multi-RUC access grants. Returning every tenant would leak other
+      // companies' RUC/address to any authenticated user.
+      const access = await storage.getUserBusinessAccess(req.user.id);
+      const allowed = new Set(access.map((entry) => entry.businessId));
+      if (req.user.businessId) {
+        allowed.add(req.user.businessId);
+      }
+
+      const businesses = (await storage.getAllBusinesses()).filter((business) =>
+        allowed.has(business.id),
+      );
       res.json(businesses);
     } catch (error) {
+      console.error('Error fetching businesses:', error);
       res.status(500).json({ message: "Failed to fetch businesses" });
     }
   });
@@ -39,9 +53,12 @@ export function registerBusinessesRoutes(app: Express): void {
   // Register another RUC under the same login (Phase 2.7). The plan's
   // multi-business quota applies, every new business starts its own 7-day
   // trial, and the creator gets an access grant for the switcher.
-  app.post('/api/businesses', requireAuth, requireNonDemo, async (req: any, res) => {
+  app.post('/api/businesses', requireAuth, requireAdmin, requireNonDemo, async (req: any, res) => {
     try {
-      const businessData = insertBusinessSchema.parse(req.body);
+      // Only the legal identity fields are accepted: plan, subscription state
+      // and isActive are server-assigned (trial defaults below) - the client
+      // must not mint itself a paid plan or skip the trial lifecycle.
+      const businessData = businessProfileSchema.parse(req.body);
 
       // Quota: businesses manageable from this login. Users without an active
       // business yet are starting their first one, so the esencial limit
@@ -70,6 +87,10 @@ export function registerBusinessesRoutes(app: Express): void {
         role: 'admin',
       });
 
+      // Every business needs at least one establishment to use the Libro de
+      // Reclamaciones; give the new RUC a default sucursal.
+      await provisionDefaultEstablishment(business);
+
       res.status(201).json(business);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -81,14 +102,25 @@ export function registerBusinessesRoutes(app: Express): void {
   });
 
   // Update a business ("Gestionar" on Empresas)
-  app.patch('/api/businesses/:id', requireAuth, async (req: any, res) => {
+  app.patch('/api/businesses/:id', requireAuth, requireAdmin, async (req: any, res) => {
     try {
+      // Cross-tenant guard: the caller may only touch a tenant it manages
+      // (its active business or an explicit multi-RUC grant). Previously any
+      // authenticated user could rewrite ANY company's data - or flip its
+      // subscriptionPlan to corporativo for free.
+      const allowed = await getManageableBusinessIds(req.user);
+      if (!allowed.has(req.params.id)) {
+        return res.status(404).json({ message: "Empresa no encontrada" });
+      }
+
       const business = await storage.getBusiness(req.params.id);
       if (!business) {
         return res.status(404).json({ message: "Empresa no encontrada" });
       }
 
-      const data = insertBusinessSchema.partial().parse(req.body);
+      // Whitelisted profile fields only: RUC, plan and subscription lifecycle
+      // can never be changed through this endpoint.
+      const data = businessUpdateSchema.parse(req.body);
       const updated = await storage.updateBusiness(req.params.id, data);
       res.json(updated);
     } catch (error) {

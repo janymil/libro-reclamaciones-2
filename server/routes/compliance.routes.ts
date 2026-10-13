@@ -5,7 +5,7 @@ import { insertDataProcessingActivitySchema } from "@shared/schema";
 
 import { pdfService } from "../services/pdfService";
 import { storage } from "../storage";
-import { requireAuth } from "../middleware/requireAuth";
+import { requireAuth, requireAdmin } from "../middleware/requireAuth";
 
 /**
  * Legal compliance reporting and the RNPD activity register.
@@ -43,7 +43,8 @@ export function registerComplianceRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/data-processing-activities', requireAuth, async (req: any, res) => {
+  // The RNPD register is a legal declaration of the business: admin only.
+  app.post('/api/data-processing-activities', requireAuth, requireAdmin, async (req: any, res) => {
     try {
       const data = insertDataProcessingActivitySchema.parse({
         ...req.body,

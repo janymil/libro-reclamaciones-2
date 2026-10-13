@@ -6,10 +6,11 @@ import { complaintSubmissionSchema, type InsertComplaint } from "@shared/schema"
 import { emailService } from "../services/emailService";
 import { similarityService } from "../services/similarityService";
 import { storage } from "../storage";
-import { requireAuth } from "../middleware/requireAuth";
+import { requireAuth, requireStaff } from "../middleware/requireAuth";
+import { publicComplaintLimiter } from "../middleware/rateLimits";
 import { intakeComplaint, IntakeError } from "../services/complaintIntakeService";
 import { enforceQuota } from "../services/subscriptionService";
-import { verifyCaptcha, isHoneypotTriggered } from "../services/captchaService";
+import { verifyCaptcha, isHoneypotTriggered, consumeCaptchaToken } from "../services/captchaService";
 import { buildExpedienteZip } from "../services/expedienteService";
 
 // Whitelisted fields a business user can change on an existing complaint.
@@ -82,20 +83,31 @@ export function registerComplaintsRoutes(app: Express): void {
     }
   });
 
-  app.patch('/api/complaints/:id', requireAuth, async (req: any, res) => {
+  app.patch('/api/complaints/:id', requireAuth, requireStaff, async (req: any, res) => {
     try {
       const complaint = await storage.getComplaint(req.params.id);
-      
+
       if (!complaint || complaint.businessId !== req.user.businessId) {
         return res.status(404).json({ message: "Complaint not found" });
       }
-      
+
       const complaintUpdates = complaintUpdateSchema.safeParse(req.body);
       if (!complaintUpdates.success) {
         return res.status(400).json({ message: "Datos inválidos", errors: complaintUpdates.error.errors });
       }
 
       const updates: Partial<InsertComplaint> = { ...complaintUpdates.data };
+
+      // Cross-tenant relationship defense: the assignee must be an active
+      // member of THIS business. Assigning another tenant's user would leak
+      // the complaint (incl. consumer contact data) through that user's SLA
+      // reminder/escalation emails and notifications.
+      if (updates.assignedToUserId) {
+        const assignee = await storage.getUserById(updates.assignedToUserId);
+        if (!assignee || !assignee.isActive || assignee.businessId !== complaint.businessId) {
+          return res.status(400).json({ message: "El usuario asignado no pertenece a su empresa" });
+        }
+      }
 
       // If providing a response, set response date and update status
       if (updates.providerResponse) {
@@ -203,7 +215,7 @@ export function registerComplaintsRoutes(app: Express): void {
   // Phase 1.5: every submission must pass the math CAPTCHA and leave the
   // honeypot field empty; the rate limits in middleware/rateLimits.ts still
   // apply. Phase 2.6: the business's monthly complaint quota is enforced.
-  app.post('/api/public/complaints', async (req, res) => {
+  app.post('/api/public/complaints', publicComplaintLimiter, async (req, res) => {
     try {
       const data = complaintSubmissionSchema.parse(req.body);
 
@@ -226,6 +238,9 @@ export function registerComplaintsRoutes(app: Express): void {
       }
 
       const { complaint } = await intakeComplaint(data);
+
+      // The challenge is single-use: burn it now that it produced a record.
+      consumeCaptchaToken(req.body.captchaToken);
 
       res.json({
         success: true,

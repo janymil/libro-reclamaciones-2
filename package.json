@@ -10,6 +10,8 @@
     "check": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "verify": "npm run check && npm test",
+    "audit:security": "npm audit --omit=dev --audit-level=high",
     "db:push": "drizzle-kit push",
     "db:apply": "node --env-file=.env scripts/apply-sql.mjs",
     "db:backup": "node --env-file=.env scripts/backup-tables.mjs",

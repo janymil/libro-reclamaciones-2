@@ -47,9 +47,34 @@ touching one small file.
 - `npm test` - Vitest suite (Peruvian business-day maths, form validation, AI fallbacks,
   CAPTCHA signing, retention cutoff, quotas, expediente/CSV generation, attachments)
 - `npm run build` - production client bundle plus the bundled server
+- `npm run verify` - `check` + `test` in one go (use this before every deploy)
+- `npm run audit:security` - production dependency audit (fails on high+ severity)
 - `npm run db:apply -- migrations/0003_compliance_commercial.sql` - applies the
   additive compliance/commercial migration (idempotent, `IF NOT EXISTS` throughout);
   local PGlite databases get it automatically from `migrations/`.
+
+### Security model (read before changing auth or tenant code)
+- **Tenant = `businesses` row (RUC).** The only trusted tenant source is
+  `req.user.businessId`, resolved from the session by `requireAuth`. Never accept a
+  `businessId` from the body/query without checking it against
+  `getManageableBusinessIds(user)` (server/services/tenantAccess.ts).
+- **Roles** are enforced server-side by `requireRole`/`requireAdmin`/`requireStaff`
+  (server/middleware/requireAuth.ts): `admin` = tenant administration (users, business
+  profile, plan, establishments, integrations, RNPD register); `user` = complaint
+  handling (complaints, attachments, books); `viewer` = read-only (no mutations).
+  Client buttons are cosmetic - the server is authoritative.
+- **Public intake** (`POST /api/public/complaints`) accepts only consumer fields:
+  `complaintSubmissionSchema` strips status/priority/assignee/provider response/AI and
+  retention fields. The CAPTCHA is single-use (consumed when a complaint is created).
+- **Sessions**: `SESSION_SECRET` is required in production (the server refuses to boot
+  without it); cookie `lv.sid`, `httpOnly`, `sameSite=lax`, `secure` in production, and
+  the session id is regenerated on login.
+- **Manual migration**: `migrations/manual/0004_tenant_integrity_hardening.sql` adds the
+  unique `(business_id, correlative_number)` index (plus a commented RLS template). It is
+  intentionally outside the drizzle journal, so it only runs when applied by hand.
+- **Security logging**: 401/403 responses on `/api` are logged as one JSON line tagged
+  `[security]` with method/path/status/userId/role only - no bodies, query strings or
+  emails (server/middleware/securityLog.ts). Alert on bursts of these.
 
 ### Database Design
 The system uses a multi-tenant PostgreSQL database with the following core entities:

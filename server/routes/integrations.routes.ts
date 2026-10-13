@@ -2,10 +2,10 @@ import type { Express } from "express";
 import { z } from "zod";
 
 import { storage } from "../storage";
-import { requireAuth, requireNonDemo } from "../middleware/requireAuth";
+import { requireAuth, requireNonDemo, requireAdmin } from "../middleware/requireAuth";
 import { hasFeature } from "../services/subscriptionService";
 import { generateApiKey, generateWebhookSecret } from "../storage/integration.storage";
-import { signPayload } from "../services/webhookService";
+import { signPayload, isSafeWebhookUrl } from "../services/webhookService";
 
 /**
  * Integrations (Phase 3.12): API keys, outgoing webhooks and the embeddable
@@ -57,7 +57,8 @@ export function registerIntegrationsRoutes(app: Express): void {
     }
   });
 
-  app.delete('/api/api-keys/:id', requireAuth, async (req: any, res) => {
+  // Revoking a key is an admin action (it kills a CRM/ERP integration).
+  app.delete('/api/api-keys/:id', requireAuth, requireAdmin, async (req: any, res) => {
     try {
       const revoked = await storage.revokeApiKey(req.params.id, req.user.businessId);
       if (!revoked) {
@@ -101,6 +102,15 @@ export function registerIntegrationsRoutes(app: Express): void {
         events: z.array(z.string()).default(['complaint.created']),
       }).parse(req.body);
 
+      // SSRF guard: the endpoint is fetched by this server, so it must be a
+      // public http(s) destination - never the internal network or metadata
+      // service of the hosting platform.
+      if (!isSafeWebhookUrl(url)) {
+        return res.status(400).json({
+          message: "La URL del webhook debe ser un destino público (http/https) accesible desde Internet.",
+        });
+      }
+
       const secret = generateWebhookSecret();
       const webhook = await storage.createWebhook({
         businessId: req.user.businessId,
@@ -120,7 +130,7 @@ export function registerIntegrationsRoutes(app: Express): void {
     }
   });
 
-  app.delete('/api/webhooks/:id', requireAuth, async (req: any, res) => {
+  app.delete('/api/webhooks/:id', requireAuth, requireAdmin, async (req: any, res) => {
     try {
       const deleted = await storage.deleteWebhook(req.params.id, req.user.businessId);
       if (!deleted) {

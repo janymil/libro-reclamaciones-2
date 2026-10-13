@@ -83,6 +83,29 @@ export const attachmentUpload = multer({
 });
 
 /**
+ * Constant-time comparison of the consumer's document number against the one
+ * stored on the complaint (the upload authorization "secret").
+ *
+ * Length is compared first because timingSafeEqual throws on unequal lengths;
+ * doing it on digests would be nicer, but the length of a DNI/passport is not
+ * meaningful to protect here.
+ */
+export function documentMatches(provided: unknown, expected: string): boolean {
+  if (typeof provided !== "string" || typeof expected !== "string") {
+    return false;
+  }
+
+  const given = Buffer.from(provided.trim(), "utf8");
+  const wanted = Buffer.from(expected, "utf8");
+
+  if (given.length === 0 || given.length !== wanted.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(given, wanted);
+}
+
+/**
  * Resolves the absolute path of a stored attachment, guarding against path
  * traversal (the stored file name must live inside the uploads root).
  */

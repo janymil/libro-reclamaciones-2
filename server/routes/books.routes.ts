@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { storage } from "../storage";
 import { pdfService } from "../services/pdfService";
-import { requireAuth } from "../middleware/requireAuth";
+import { requireAuth, requireStaff } from "../middleware/requireAuth";
 
 /**
  * Libro de Reclamaciones books, their PDF export and settings.
@@ -19,7 +19,7 @@ export function registerBooksRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/books', requireAuth, async (req: any, res) => {
+  app.post('/api/books', requireAuth, requireStaff, async (req: any, res) => {
     try {
       const { establishmentId, bookType, description } = req.body;
 
@@ -82,7 +82,7 @@ export function registerBooksRoutes(app: Express): void {
   });
 
   // Update a book ("Gestionar" on Libros)
-  app.patch('/api/books/:id', requireAuth, async (req: any, res) => {
+  app.patch('/api/books/:id', requireAuth, requireStaff, async (req: any, res) => {
     try {
       const books = await storage.getBooks(req.user.businessId);
       const book = books.find(b => b.id === req.params.id);

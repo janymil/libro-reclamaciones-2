@@ -1,8 +1,12 @@
 import type { Express } from "express";
 
+import { rucLookupLimiter } from "./middleware/rateLimits";
+
 export function setupRUCLookup(app: Express) {
-  // RUC lookup proxy endpoint (to avoid CORS issues)
-  app.get('/api/lookup-ruc/:ruc', async (req, res) => {
+  // RUC lookup proxy endpoint (to avoid CORS issues). Unauthenticated by
+  // design (it is used on the public registration form) but rate-limited so
+  // the server cannot be abused as a free relay against the SUNAT API.
+  app.get('/api/lookup-ruc/:ruc', rucLookupLimiter, async (req, res) => {
     try {
       const { ruc } = req.params;
       

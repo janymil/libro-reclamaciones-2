@@ -36,7 +36,9 @@ export function registerPublicRoutes(app: Express): void {
           whatsappNumber: config.whatsappNumber,
           websiteUrl: config.websiteUrl,
           logoUrl: config.logoUrl,
-          notificationEmail: config.notificationEmail,
+          // NOTE: the business's notification inbox is deliberately NOT exposed
+          // publicly any more - it is internal contact data that only enabled
+          // scraping/spam. The consumer-facing portal never displayed it.
           // Per-business branding and confirmation text (Phase 2.8)
           brandColor: config.brandColor,
           confirmationMessage: config.confirmationMessage,

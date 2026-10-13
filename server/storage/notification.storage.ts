@@ -35,10 +35,18 @@ export const notificationStorage = {
     return notification;
   },
 
-  async markNotificationAsRead(id: string): Promise<void> {
-    await db
+  /**
+   * Marks a notification read. The businessId is mandatory: without it any
+   * authenticated user could flip the read state of another tenant's
+   * notifications (cross-tenant IDOR). Returns false when the notification
+   * does not belong to the tenant.
+   */
+  async markNotificationAsRead(id: string, businessId: string): Promise<boolean> {
+    const rows = await db
       .update(notifications)
       .set({ isRead: true })
-      .where(eq(notifications.id, id));
+      .where(and(eq(notifications.id, id), eq(notifications.businessId, businessId)))
+      .returning({ id: notifications.id });
+    return rows.length > 0;
   },
 };

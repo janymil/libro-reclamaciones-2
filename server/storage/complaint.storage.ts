@@ -82,6 +82,25 @@ export const complaintStorage = {
       .orderBy(desc(complaints.createdAt));
   },
 
+  /**
+   * Whether a complaint already uses this correlative number inside a tenant.
+   *
+   * Used by the intake flow to pick a free folio: the correlative is a legal
+   * identifier (DS 011-2011-PCM), so two complaints of the same business must
+   * never share one even when two submissions land at the same moment.
+   */
+  async complaintCorrelativeExists(businessId: string, correlativeNumber: string): Promise<boolean> {
+    const [row] = await db
+      .select({ id: complaints.id })
+      .from(complaints)
+      .where(and(
+        eq(complaints.businessId, businessId),
+        eq(complaints.correlativeNumber, correlativeNumber),
+      ))
+      .limit(1);
+    return Boolean(row);
+  },
+
   async createComplaint(complaintData: InsertComplaint): Promise<Complaint> {
     const [complaint] = await db
       .insert(complaints)

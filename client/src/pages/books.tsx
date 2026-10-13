@@ -55,7 +55,7 @@ export default function Books() {
 
   const createBookMutation = useMutation({
     mutationFn: async (data: CreateBook) => {
-      return apiRequest('/api/books', 'POST', data);
+      return apiRequest('POST', '/api/books', data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/books'] });

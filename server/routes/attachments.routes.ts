@@ -1,12 +1,13 @@
 import type { Express, Request, Response, NextFunction } from "express";
 
 import { storage } from "../storage";
-import { requireAuth } from "../middleware/requireAuth";
-import { uploadLimiter } from "../middleware/rateLimits";
+import { requireAuth, requireStaff } from "../middleware/requireAuth";
+import { evidenceUploadLimiter, uploadLimiter } from "../middleware/rateLimits";
 import {
   attachmentUpload,
   readAttachment,
   resolveMimeType,
+  documentMatches,
   MAX_FILE_SIZE_BYTES,
   ALLOWED_MIME_TYPES,
 } from "../services/attachmentService";
@@ -47,6 +48,9 @@ export function registerAttachmentsRoutes(app: Express): void {
   // Consumer-side upload, right after the complaint is registered
   app.post(
     '/api/public/complaints/:id/attachments',
+    // Per-complaint ceiling first (rejects early, before any file is written),
+    // then the per-IP one, then multer.
+    evidenceUploadLimiter,
     uploadLimiter,
     uploadFiles,
     async (req, res) => {
@@ -56,9 +60,9 @@ export function registerAttachmentsRoutes(app: Express): void {
           return res.status(404).json({ message: "Reclamación no encontrada" });
         }
 
-        // Knowledge check: the document number of the consumer who filed it
-        const documentNumber = String(req.body?.documento ?? '').trim();
-        if (!documentNumber || documentNumber !== complaint.consumerDocumentNumber) {
+        // Knowledge check: the document number of the consumer who filed it.
+        // Compared in constant time so the endpoint is not a timing oracle.
+        if (!documentMatches(req.body?.documento, complaint.consumerDocumentNumber)) {
           return res.status(403).json({ message: "No autorizado para adjuntar archivos a esta reclamación" });
         }
 
@@ -154,8 +158,9 @@ export function registerAttachmentsRoutes(app: Express): void {
     }
   });
 
-  // Staff: remove an attachment (soft delete; the file is unlinked)
-  app.delete('/api/attachments/:id', requireAuth, async (req: any, res) => {
+  // Staff: remove an attachment (soft delete; the file is unlinked).
+  // requireStaff: read-only viewers must not destroy legal evidence.
+  app.delete('/api/attachments/:id', requireAuth, requireStaff, async (req: any, res) => {
     try {
       const attachment = await storage.getAttachment(req.params.id);
       if (!attachment || attachment.deletedAt) {

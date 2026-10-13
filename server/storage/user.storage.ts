@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { eq, and, asc, count } from "drizzle-orm";
+import { eq, and, asc, count, inArray } from "drizzle-orm";
 import {
   type User,
   type InsertUser,
@@ -57,6 +57,11 @@ export const userStorage = {
 
   // Auth security operations
 
+  /**
+   * INTERNAL use only (background jobs, quota counting). Never expose the
+   * result through an HTTP handler: it spans every tenant. HTTP handlers must
+   * use getUsersByBusinessIds with the caller's allowed tenant set.
+   */
   async getAllUsers(): Promise<UserWithBusiness[]> {
     return await db
       .select({
@@ -77,6 +82,37 @@ export const userStorage = {
       })
       .from(users)
       .leftJoin(businesses, eq(users.businessId, businesses.id))
+      .orderBy(asc(users.firstName), asc(users.lastName));
+  },
+
+  /**
+   * Tenant-scoped user listing: only users whose active business is one of
+   * the given ids (the caller's active tenant plus its multi-RUC grants).
+   */
+  async getUsersByBusinessIds(businessIds: string[]): Promise<UserWithBusiness[]> {
+    if (businessIds.length === 0) {
+      return [];
+    }
+    return await db
+      .select({
+        id: users.id,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        role: users.role,
+        businessId: users.businessId,
+        isActive: users.isActive,
+        isEmailVerified: users.isEmailVerified,
+        onboardingStep: users.onboardingStep,
+        onboardingCompleted: users.onboardingCompleted,
+        lastLoginAt: users.lastLoginAt,
+        createdAt: users.createdAt,
+        updatedAt: users.updatedAt,
+        businessName: businesses.businessName,
+      })
+      .from(users)
+      .leftJoin(businesses, eq(users.businessId, businesses.id))
+      .where(inArray(users.businessId, businessIds))
       .orderBy(asc(users.firstName), asc(users.lastName));
   },
 

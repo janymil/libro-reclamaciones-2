@@ -15,6 +15,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Plus, Users, Mail, Shield, MoreVertical, UserCheck, UserX } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { z } from 'zod';
 
 const createUserSchema = z.object({
@@ -31,6 +32,13 @@ export default function UsersPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // User administration is an admin-only capability server-side
+  // (POST /api/users, PATCH /api/users/:id/status). Non-admins see the roster
+  // read-only instead of buttons that would answer 403.
+  const { user: currentUser } = useAuth();
+  const isAdmin = currentUser?.role === 'admin';
+  const adminOnlyHint = 'Solo un administrador puede gestionar usuarios';
 
   const { data: users, isLoading } = useQuery<UserSummary[]>({
     queryKey: ['/api/users'],
@@ -53,7 +61,7 @@ export default function UsersPage() {
 
   const createUserMutation = useMutation({
     mutationFn: async (data: CreateUser) => {
-      return apiRequest('/api/users', 'POST', data);
+      return apiRequest('POST', '/api/users', data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users'] });
@@ -75,7 +83,7 @@ export default function UsersPage() {
 
   const toggleUserStatusMutation = useMutation({
     mutationFn: async ({ userId, isActive }: { userId: string; isActive: boolean }) => {
-      return apiRequest(`/api/users/${userId}/status`, 'PATCH', { isActive });
+      return apiRequest('PATCH', `/api/users/${userId}/status`, { isActive });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users'] });
@@ -131,7 +139,12 @@ export default function UsersPage() {
           </div>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button className="flex items-center gap-2" data-testid="button-add-user">
+              <Button
+                className="flex items-center gap-2"
+                data-testid="button-add-user"
+                disabled={!isAdmin}
+                title={isAdmin ? undefined : adminOnlyHint}
+              >
                 <Plus className="h-4 w-4" />
                 Nuevo Usuario
               </Button>
@@ -313,6 +326,8 @@ export default function UsersPage() {
                         <Button
                           variant="outline"
                           size="sm"
+                          disabled={!isAdmin || user.id === currentUser?.id}
+                          title={isAdmin ? undefined : adminOnlyHint}
                           onClick={() => toggleUserStatusMutation.mutate({
                             userId: user.id,
                             isActive: !user.isActive
@@ -334,7 +349,7 @@ export default function UsersPage() {
                 <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">No hay usuarios registrados</h3>
                 <p className="text-gray-600 mb-4">Comience agregando usuarios al sistema.</p>
-                <Button onClick={() => setIsDialogOpen(true)} data-testid="button-add-first-user">
+                <Button onClick={() => setIsDialogOpen(true)} disabled={!isAdmin} title={isAdmin ? undefined : adminOnlyHint} data-testid="button-add-first-user">
                   <Plus className="h-4 w-4 mr-2" />
                   Agregar Primer Usuario
                 </Button>

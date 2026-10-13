@@ -3,7 +3,7 @@ import type { Express } from "express";
 import { insertEstablishmentSchema } from "@shared/schema";
 
 import { storage } from "../storage";
-import { requireAuth } from "../middleware/requireAuth";
+import { requireAuth, requireAdmin } from "../middleware/requireAuth";
 import { enforceQuota } from "../services/subscriptionService";
 
 /**
@@ -21,7 +21,8 @@ export function registerEstablishmentsRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/establishments', requireAuth, async (req: any, res) => {
+  // Sucursales are tenant configuration: admin only (viewer/user get 403).
+  app.post('/api/establishments', requireAuth, requireAdmin, async (req: any, res) => {
     try {
       const data = insertEstablishmentSchema.parse({
         ...req.body,

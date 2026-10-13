@@ -17,6 +17,7 @@ import { Plus, Building2, MapPin, Users, Settings, Save } from 'lucide-react';
 import { insertBusinessSchema, type InsertBusiness } from '@shared/schema';
 import type { BusinessSummary } from '@/lib/api-types';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function Businesses() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -24,6 +25,12 @@ export default function Businesses() {
   const [manageForm, setManageForm] = useState<Partial<InsertBusiness>>({});
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Creating and editing a tenant is admin-only server-side
+  // (POST /api/businesses, PATCH /api/businesses/:id).
+  const { user: currentUser } = useAuth();
+  const isAdmin = currentUser?.role === 'admin';
+  const adminOnlyHint = 'Solo un administrador puede gestionar empresas';
 
   const { data: businesses, isLoading } = useQuery<BusinessSummary[]>({
     queryKey: ['/api/businesses'],
@@ -50,7 +57,7 @@ export default function Businesses() {
 
   const createBusinessMutation = useMutation({
     mutationFn: async (data: InsertBusiness) => {
-      return apiRequest('/api/businesses', 'POST', data);
+      return apiRequest('POST', '/api/businesses', data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/businesses'] });
@@ -126,7 +133,12 @@ export default function Businesses() {
           </div>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button className="flex items-center gap-2" data-testid="button-add-business">
+              <Button
+                className="flex items-center gap-2"
+                data-testid="button-add-business"
+                disabled={!isAdmin}
+                title={isAdmin ? undefined : adminOnlyHint}
+              >
                 <Plus className="h-4 w-4" />
                 Nueva Empresa
               </Button>
@@ -370,6 +382,8 @@ export default function Businesses() {
                       variant="outline"
                       size="sm"
                       onClick={() => openManage(business)}
+                      disabled={!isAdmin}
+                      title={isAdmin ? undefined : adminOnlyHint}
                       data-testid={`button-manage-${business.id}`}
                     >
                       <Settings className="h-4 w-4 mr-1" />
@@ -384,7 +398,7 @@ export default function Businesses() {
               <Building2 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No hay empresas registradas</h3>
               <p className="text-gray-600 mb-4">Comience registrando su primera empresa en el sistema.</p>
-              <Button onClick={() => setIsDialogOpen(true)} data-testid="button-add-first-business">
+              <Button onClick={() => setIsDialogOpen(true)} disabled={!isAdmin} title={isAdmin ? undefined : adminOnlyHint} data-testid="button-add-first-business">
                 <Plus className="h-4 w-4 mr-2" />
                 Registrar Primera Empresa
               </Button>

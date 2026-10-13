@@ -2,13 +2,15 @@ import type { Express } from "express";
 import { z } from "zod";
 
 import {
-  insertBusinessSchema,
+  businessProfileSchema,
   insertLibroConfigurationSchema,
   loginSchema as authLoginSchema,
   userRegistrationSchema,
 } from "@shared/schema";
 
 import { authService } from "../services/authService";
+import { provisionDefaultEstablishment } from "../services/establishmentProvisioning";
+import { newBusinessTrialDefaults } from "../services/subscriptionService";
 import { storage } from "../storage";
 import { authLimiter, registerLimiter } from "../middleware/rateLimits";
 import { requireAuth } from "../middleware/requireAuth";
@@ -60,12 +62,17 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(401).json({ message: result.message });
       }
 
-      // Set session
+      // Rotate the session id on privilege change: without regeneration an
+      // attacker who planted a session id before login (fixation) would keep
+      // it valid afterwards.
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((err) => (err ? reject(err) : resolve()));
+      });
       (req.session as any).userId = result.user!.id;
-      
-      res.json({ 
+
+      res.json({
         user: result.user,
-        message: result.message 
+        message: result.message
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -81,11 +88,14 @@ export function registerAuthRoutes(app: Express): void {
 
   // Logout
   app.post('/api/auth/logout', async (req: any, res) => {
-    if (req.session.userId && req.user) {
+    if (req.session.userId) {
       const ipAddress = req.ip || req.connection.remoteAddress || '';
       const userAgent = req.get('User-Agent') || '';
-      
-      await authService.logoutUser(req.session.userId, req.user.email, ipAddress, userAgent);
+
+      // req.user is not populated here (no requireAuth on this route), so
+      // resolve the account for the audit trail before destroying the session.
+      const user = await storage.getUserById(req.session.userId).catch(() => undefined);
+      await authService.logoutUser(req.session.userId, user?.email ?? 'unknown', ipAddress, userAgent);
     }
 
     req.session.destroy((err: any) => {
@@ -186,12 +196,17 @@ export function registerAuthRoutes(app: Express): void {
       }
 
       const { businessData, libroData } = req.body;
-      
-      // Validate business data
-      const validBusinessData = insertBusinessSchema.parse(businessData);
+
+      // Validate business data. Only the legal identity fields are accepted:
+      // the subscription plan/status/lifecycle are server-assigned, otherwise
+      // a new signup could grant itself a paid plan or skip the trial.
+      const validBusinessData = businessProfileSchema.parse(businessData);
 
       // Create business first so the libro configuration can reference it
-      const business = await storage.createBusiness(validBusinessData);
+      const business = await storage.createBusiness({
+        ...validBusinessData,
+        ...newBusinessTrialDefaults(),
+      });
 
       // Validate libro configuration data (businessId is injected from the new business)
       const validLibroData = insertLibroConfigurationSchema.parse({
@@ -208,6 +223,12 @@ export function registerAuthRoutes(app: Express): void {
       });
 
       const libroConfig = await storage.createLibroConfiguration(validLibroData);
+
+      // Every business needs at least one establishment so the public portal
+      // has a "lugar" to file against. Online stores get a virtual channel
+      // instead of a physical sucursal (DS 011-2011-PCM: selling over the
+      // Internet requires the book be reachable from that medium).
+      await provisionDefaultEstablishment(business, validLibroData.businessType);
 
       res.json({
         message: "Onboarding completado exitosamente",

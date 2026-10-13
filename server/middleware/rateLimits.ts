@@ -46,11 +46,59 @@ export const uploadLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+/**
+ * Second, per-complaint ceiling for the public evidence upload.
+ *
+ * The upload is authorized only by the consumer's document number, so a single
+ * complaint id must not become an oracle for brute-forcing document numbers:
+ * the limit is keyed on the complaint id, counting attempts from any source
+ * (the per-IP limiter above stays active too).
+ */
+export const evidenceUploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Maximum 10 upload attempts per complaint per window
+  keyGenerator: (req: any) => `evidence:${req.params?.id ?? 'unknown'}`,
+  message: { message: "Demasiados intentos de subida para esta reclamación. Intenta en 15 minutos." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // CAPTCHA challenge issuance (Phase 1.5): cheap but unauthenticated.
 export const captchaLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,
   message: { message: "Demasiadas solicitudes de captcha. Intenta en 15 minutos." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Public complaint submission: the math CAPTCHA slows bots down but its
+// stateless token can be reused inside its 10-minute window, so the endpoint
+// itself is throttled too.
+export const publicComplaintLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // Maximum 20 complaint submissions per window per IP
+  message: { message: "Demasiadas reclamaciones desde esta conexión. Intenta en 15 minutos." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Public ARCO (data-rights) intake: unauthenticated, so throttle it like the
+// complaint form to prevent spam and notification flooding.
+export const arcoLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  message: { message: "Demasiadas solicitudes. Intenta en 15 minutos." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Unauthenticated proxy to the third-party SUNAT RUC lookup: without a limit
+// anyone could abuse this server as a free relay against that service.
+export const rucLookupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30,
+  message: { error: 'rate_limited', message: "Demasiadas consultas. Intenta en 15 minutos." },
   standardHeaders: true,
   legacyHeaders: false,
 });

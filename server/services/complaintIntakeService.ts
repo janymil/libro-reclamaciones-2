@@ -36,6 +36,44 @@ export class IntakeError extends Error {
   }
 }
 
+/**
+ * Picks the first free correlative number (`YYYY-NNNN`) for a tenant.
+ *
+ * The previous implementation used `complaintCount + 1` directly, so two
+ * concurrent submissions could be handed the same folio - a duplicate legal
+ * identifier in the Libro. Here the candidate sequence is probed for
+ * availability and advanced until a free slot is found.
+ *
+ * (A database unique constraint on (business_id, correlative_number) plus
+ * retry-on-conflict is the complementary hardening; it needs a reviewed
+ * migration, see migrations/manual/0004_tenant_integrity_hardening.sql.)
+ */
+export async function nextCorrelativeNumber(
+  year: number,
+  startingSequence: number,
+  isTaken: (correlativeNumber: string) => Promise<boolean>,
+  maxAttempts: number = 200,
+): Promise<string> {
+  let sequence = Number.isFinite(startingSequence) && startingSequence > 0
+    ? Math.floor(startingSequence)
+    : 1;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const candidate = `${year}-${sequence.toString().padStart(4, '0')}`;
+    if (!(await isTaken(candidate))) {
+      return candidate;
+    }
+    sequence += 1;
+  }
+
+  // Pathological (200 consecutive folios taken): refuse rather than issue a
+  // duplicate correlative. The consumer can retry immediately.
+  throw new IntakeError(
+    "No se pudo asignar un número correlativo libre en este momento. Intente nuevamente.",
+    503,
+  );
+}
+
 export async function intakeComplaint(data: ComplaintSubmission): Promise<IntakeResult> {
   const business = await storage.getBusiness(data.businessId);
   const establishment = await storage.getEstablishment(data.establishmentId);
@@ -44,10 +82,14 @@ export async function intakeComplaint(data: ComplaintSubmission): Promise<Intake
     throw new IntakeError("Empresa o establecimiento no encontrado", 404);
   }
 
-  // Correlative number: year + running count
+  // Correlative number: year + first free running sequence for this tenant.
   const year = getPeruYear(new Date());
-  const count = (await storage.getComplaintsByBusiness(data.businessId)).length + 1;
-  const correlativeNumber = `${year}-${count.toString().padStart(4, '0')}`;
+  const existingCount = (await storage.getComplaintsByBusiness(data.businessId)).length;
+  const correlativeNumber = await nextCorrelativeNumber(
+    year,
+    existingCount + 1,
+    (candidate) => storage.complaintCorrelativeExists(data.businessId, candidate),
+  );
 
   // 15-business-day legal deadline (Peru calendar, holidays included)
   const dueDate = businessDayCalculator.addBusinessDays(new Date(), 15);

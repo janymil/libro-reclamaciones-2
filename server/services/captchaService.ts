@@ -15,6 +15,69 @@ const CHALLENGE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const SECRET =
   process.env.SESSION_SECRET || "captcha-dev-secret-change-me";
 
+/**
+ * Single-use tracking for issued challenges.
+ *
+ * The token is stateless (HMAC over answer + expiry), so without this a bot
+ * could solve one challenge and replay the same token for its entire 10-minute
+ * window. Consumed tokens are remembered until shortly after their own expiry,
+ * then dropped.
+ *
+ * Limitation (documented, not hidden): the store is per-process in memory. On
+ * a horizontally scaled deployment each instance keeps its own set, so a token
+ * solved against instance A could still be replayed once on instance B. The
+ * per-IP rate limit on the intake endpoint remains the backstop; moving this to
+ * a shared store (Postgres/Redis) is the next step if the app scales out.
+ */
+const USED_TOKEN_TTL_MS = CHALLENGE_TTL_MS + 60 * 1000;
+const MAX_TRACKED_TOKENS = 10_000;
+const usedTokens = new Map<string, number>();
+
+function sweepUsedTokens(now: number): void {
+  for (const [token, expiresAt] of usedTokens) {
+    if (expiresAt <= now) {
+      usedTokens.delete(token);
+    }
+  }
+}
+
+/** Marks a challenge as consumed so it can never be replayed. */
+export function consumeCaptchaToken(token: unknown): void {
+  if (typeof token !== "string" || token.length === 0) {
+    return;
+  }
+
+  const now = Date.now();
+  sweepUsedTokens(now);
+
+  // Bound the memory footprint: if the map is still full of live entries,
+  // evict the oldest ones (insertion order is preserved by Map).
+  while (usedTokens.size >= MAX_TRACKED_TOKENS) {
+    const oldest = usedTokens.keys().next();
+    if (oldest.done) break;
+    usedTokens.delete(oldest.value);
+  }
+
+  usedTokens.set(token, now + USED_TOKEN_TTL_MS);
+}
+
+function isTokenConsumed(token: string): boolean {
+  const expiresAt = usedTokens.get(token);
+  if (expiresAt === undefined) {
+    return false;
+  }
+  if (expiresAt <= Date.now()) {
+    usedTokens.delete(token);
+    return false;
+  }
+  return true;
+}
+
+/** Test-only helper: clears the single-use registry. */
+export function resetConsumedCaptchaTokens(): void {
+  usedTokens.clear();
+}
+
 export interface CaptchaChallenge {
   token: string;
   question: string;
@@ -64,6 +127,12 @@ export function verifyCaptcha(token: unknown, answer: unknown): CaptchaVerificat
   const b = Buffer.from(expected);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
     return { ok: false, reason: "Captcha inválido" };
+  }
+
+  // Single-use: a challenge that already produced a complaint cannot be
+  // replayed for another one.
+  if (isTokenConsumed(token)) {
+    return { ok: false, reason: "Este captcha ya fue utilizado. Resuelva uno nuevo." };
   }
 
   const payload = Buffer.from(encodedPayload, "base64url").toString("utf8");

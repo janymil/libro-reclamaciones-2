@@ -1,5 +1,5 @@
 import bcrypt from 'bcrypt';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import { storage } from '../storage';
 import { emailService } from './emailService';
 import type { 
@@ -18,26 +18,36 @@ const PASSWORD_LENGTH = 12;
 export class AuthService {
   
   /**
-   * Generate a secure random password
+   * Generate a secure random password.
+   *
+   * Uses crypto.randomInt (CSPRNG). The previous implementation used
+   * Math.random(), which is not cryptographically secure: initial passwords
+   * are emailed to new users, so predictability here means account takeover.
    */
   private generateSecurePassword(): string {
-    const length = PASSWORD_LENGTH;
     const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
-    let password = '';
-    
+    const pick = (pool: string) => pool[randomInt(pool.length)];
+
     // Ensure at least one of each type
-    password += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)]; // uppercase
-    password += 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]; // lowercase  
-    password += '0123456789'[Math.floor(Math.random() * 10)]; // number
-    password += '!@#$%^&*'[Math.floor(Math.random() * 8)]; // special
-    
+    const chars = [
+      pick('ABCDEFGHIJKLMNOPQRSTUVWXYZ'), // uppercase
+      pick('abcdefghijklmnopqrstuvwxyz'), // lowercase
+      pick('0123456789'), // number
+      pick('!@#$%^&*'), // special
+    ];
+
     // Fill remaining length
-    for (let i = password.length; i < length; i++) {
-      password += charset[Math.floor(Math.random() * charset.length)];
+    while (chars.length < PASSWORD_LENGTH) {
+      chars.push(pick(charset));
     }
-    
-    // Shuffle the password
-    return password.split('').sort(() => 0.5 - Math.random()).join('');
+
+    // Fisher-Yates shuffle with the CSPRNG (the old sort(() => 0.5 - Math.random())
+    // was both biased and non-cryptographic)
+    for (let i = chars.length - 1; i > 0; i--) {
+      const j = randomInt(i + 1);
+      [chars[i], chars[j]] = [chars[j], chars[i]];
+    }
+    return chars.join('');
   }
 
   /**

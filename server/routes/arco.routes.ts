@@ -5,6 +5,7 @@ import { insertArcoRequestSchema } from "@shared/schema";
 import { businessDayCalculator } from "../services/businessDayCalculator";
 import { storage } from "../storage";
 import { requireAuth } from "../middleware/requireAuth";
+import { arcoLimiter } from "../middleware/rateLimits";
 
 /**
  * ARCO requests (Ley 29733 personal data rights).
@@ -21,18 +22,30 @@ export function registerArcoRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/arco-requests', async (req, res) => {
+  // Public intake (unauthenticated by design): rate-limited, and the target
+  // business must exist and be active - otherwise anyone could attach PII
+  // requests (and in-app notifications) to arbitrary or nonexistent tenants.
+  app.post('/api/arco-requests', arcoLimiter, async (req, res) => {
     try {
-      const data = insertArcoRequestSchema.parse(req.body);
-      
+      // Only the requester's own fields: status/response/dueDate are managed
+      // by the business and the server, never by the public caller.
+      const data = insertArcoRequestSchema
+        .omit({ status: true, response: true, responseDate: true, dueDate: true })
+        .parse(req.body);
+
+      const business = await storage.getBusiness(data.businessId);
+      if (!business || !business.isActive) {
+        return res.status(404).json({ message: "Empresa no encontrada" });
+      }
+
       // Calculate due date based on request type (typically 10-20 business days)
       const dueDate = businessDayCalculator.addBusinessDays(new Date(), 15);
-      
+
       const request = await storage.createArcoRequest({
         ...data,
         dueDate,
       });
-      
+
       // Notify business
       await storage.createNotification({
         businessId: data.businessId,
@@ -42,8 +55,14 @@ export function registerArcoRoutes(app: Express): void {
         relatedEntityType: 'arco_request',
         relatedEntityId: request.id,
       });
-      
-      res.json(request);
+
+      // Minimal acknowledgement: do not echo the full PII record back.
+      res.status(201).json({
+        id: request.id,
+        requestType: request.requestType,
+        status: request.status,
+        dueDate: request.dueDate,
+      });
     } catch (error) {
       console.error('Error creating ARCO request:', error);
       res.status(500).json({ message: "Failed to create ARCO request" });

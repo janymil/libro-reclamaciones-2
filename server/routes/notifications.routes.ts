@@ -20,7 +20,12 @@ export function registerNotificationsRoutes(app: Express): void {
 
   app.patch('/api/notifications/:id/read', requireAuth, async (req: any, res) => {
     try {
-      await storage.markNotificationAsRead(req.params.id);
+      // Tenant-scoped: the update only applies when the notification belongs
+      // to the caller's business (cross-tenant IDOR defense).
+      const updated = await storage.markNotificationAsRead(req.params.id, req.user.businessId);
+      if (!updated) {
+        return res.status(404).json({ message: "Notificación no encontrada" });
+      }
       res.json({ success: true });
     } catch (error) {
       console.error('Error marking notification as read:', error);

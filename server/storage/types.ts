@@ -78,6 +78,8 @@ export interface IStorage {
   findComplaintByCorrelative(businessId: string, correlativeNumber: string, documentNumber: string): Promise<Complaint | undefined>;
   getComplaintsByBusiness(businessId: string, filters?: ComplaintFilters): Promise<Complaint[]>;
   getComplaintsByEstablishment(establishmentId: string): Promise<Complaint[]>;
+  /** Tenant-scoped uniqueness probe for the legal correlative number. */
+  complaintCorrelativeExists(businessId: string, correlativeNumber: string): Promise<boolean>;
   createComplaint(complaint: InsertComplaint): Promise<Complaint>;
   updateComplaint(id: string, updates: Partial<InsertComplaint>): Promise<Complaint>;
   getComplaintStats(businessId: string): Promise<ComplaintStats>;
@@ -138,7 +140,7 @@ export interface IStorage {
   // Notification operations
   getNotifications(businessId: string, userId?: string): Promise<Notification[]>;
   createNotification(notification: InsertNotification): Promise<Notification>;
-  markNotificationAsRead(id: string): Promise<void>;
+  markNotificationAsRead(id: string, businessId: string): Promise<boolean>;
   
   // Analytics and reporting
   getDashboardMetrics(businessId: string): Promise<DashboardMetrics>;
@@ -147,7 +149,10 @@ export interface IStorage {
   getMonthlyReports(businessId: string): Promise<MonthlyReport[]>;
 
   // User administration
+  /** INTERNAL use only - spans every tenant. Never return over HTTP. */
   getAllUsers(): Promise<UserWithBusiness[]>;
+  /** Tenant-scoped listing for HTTP handlers. */
+  getUsersByBusinessIds(businessIds: string[]): Promise<UserWithBusiness[]>;
   getUserStats(userId: string): Promise<UserStats>;
   updateUserStatus(id: string, isActive: boolean): Promise<User>;
   updateUserProfile(id: string, data: UpdateUserProfileData): Promise<User>;
@@ -233,7 +238,8 @@ export interface UpdateUserProfileData {
   email?: string;
   firstName?: string;
   lastName?: string;
-  phone?: string;
+  /** null clears the value on the business record. */
+  phone?: string | null;
   address?: string;
 }
 

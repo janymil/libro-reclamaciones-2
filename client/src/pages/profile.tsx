@@ -77,7 +77,7 @@ export default function Profile() {
 
   const updateProfileMutation = useMutation({
     mutationFn: async (data: ProfileForm) => {
-      return apiRequest('/api/users/profile', 'PATCH', data);
+      return apiRequest('PATCH', '/api/users/profile', data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/auth/user'] });
@@ -97,7 +97,7 @@ export default function Profile() {
 
   const changePasswordMutation = useMutation({
     mutationFn: async (data: PasswordForm) => {
-      return apiRequest('/api/users/change-password', 'POST', data);
+      return apiRequest('POST', '/api/users/change-password', data);
     },
     onSuccess: () => {
       toast({
