@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 
 import { applySecurityMiddleware } from "./middleware/security";
+import { registerHealthRoutes } from "./routes/health.routes";
 import { registerAuthRoutes } from "./routes/auth.routes";
 import { registerDashboardRoutes } from "./routes/dashboard.routes";
 import { registerBusinessesRoutes } from "./routes/businesses.routes";
@@ -34,6 +35,10 @@ import { registerDocumentsRoutes } from "./routes/documents.routes";
  */
 export async function registerRoutes(app: Express): Promise<Server> {
   applySecurityMiddleware(app);
+
+  // Probes first: they must stay reachable (and unauthenticated) even if a
+  // feature module below fails to register.
+  registerHealthRoutes(app);
 
   registerAuthRoutes(app);
   registerDashboardRoutes(app);
