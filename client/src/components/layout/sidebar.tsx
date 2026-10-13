@@ -69,7 +69,7 @@ const navigationSections: NavigationSection[] = [
         icon: 'menu_book'
       },
       {
-        name: 'Código QR',
+        name: 'QR y enlace web',
         href: '/codigo-qr',
         icon: 'qr_code_2'
       },

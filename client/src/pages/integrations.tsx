@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import LibroWebLinkCard from "@/components/libro/libro-web-link-card";
 import {
   useApiKeys,
   useCreateApiKey,
@@ -37,6 +38,7 @@ export default function IntegrationsPage() {
   return (
     <AppLayout title="Integraciones" subtitle="API, webhooks y widget para su negocio">
       <div className="max-w-4xl mx-auto space-y-8">
+        <LibroWebLinkCard />
         {/* Widget */}
         <Card>
           <CardHeader>

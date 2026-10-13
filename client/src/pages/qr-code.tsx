@@ -1,5 +1,6 @@
 import AppLayout from "@/components/layout/app-layout";
 import LibroQrCard from "@/components/libro/libro-qr-card";
+import LibroWebLinkCard from "@/components/libro/libro-web-link-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function QrCodePage() {
@@ -7,6 +8,8 @@ export default function QrCodePage() {
     <AppLayout title="Código QR" subtitle="Difunda su Libro de Reclamaciones virtual">
       <div className="space-y-6">
         <LibroQrCard />
+
+        <LibroWebLinkCard />
 
         <Card>
           <CardHeader>
