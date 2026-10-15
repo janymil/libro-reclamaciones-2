@@ -7,6 +7,7 @@ import { useReincidenceReport, useAbusiveClauses } from '@/hooks/use-complaints'
 import type { Complaint } from '@shared/schema';
 import AppLayout from '@/components/layout/app-layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import PlanGate from '@/components/plan/plan-gate';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -158,6 +159,11 @@ export default function Reports() {
 
   return (
     <AppLayout>
+      <PlanGate
+        feature="reports"
+        title="Reportes y estadísticas"
+        description="Cumplimiento, tendencias, reincidencia y exportación SIREC / INDECOPI de su libro."
+      >
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
@@ -522,6 +528,7 @@ export default function Reports() {
           </TabsContent>
         </Tabs>
       </div>
+      </PlanGate>
     </AppLayout>
   );
 }

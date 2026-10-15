@@ -126,5 +126,46 @@ export const authStorage = {
       .where(eq(users.id, userId));
   },
 
+  // Email verification ("confirma tu correo")
+
+  async setEmailVerificationToken(userId: string, token: string, expires: Date): Promise<void> {
+    await db
+      .update(users)
+      .set({
+        emailVerificationToken: token,
+        emailVerificationExpires: expires,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  },
+
+  /**
+   * Resolves the account owning an email-verification token. The caller must
+   * still check `emailVerificationExpires`; this lookup is by token only.
+   */
+  async getUserByEmailVerificationToken(token: string): Promise<User | undefined> {
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.emailVerificationToken, token));
+    return user;
+  },
+
+  /**
+   * Marks the mailbox as confirmed and clears the token in ONE statement, so a
+   * link cannot be replayed and a concurrent double-click cannot half-apply.
+   */
+  async completeEmailVerification(userId: string): Promise<void> {
+    await db
+      .update(users)
+      .set({
+        isEmailVerified: true,
+        emailVerificationToken: null,
+        emailVerificationExpires: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  },
+
   // Libro configuration for onboarding step 2
 };

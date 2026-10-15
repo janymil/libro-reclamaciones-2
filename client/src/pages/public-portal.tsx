@@ -19,6 +19,7 @@ interface PublicLibro {
     websiteUrl: string | null;
     brandColor?: string | null;
     confirmationMessage?: string | null;
+    allowedComplaintTypes?: Array<"reclamo" | "queja">;
   };
   business: {
     id: string;
@@ -217,6 +218,7 @@ export default function PublicPortal() {
                       name: selectedEstablishment.name,
                       address: selectedEstablishment.address,
                     }}
+                    allowedComplaintTypes={data.libro.allowedComplaintTypes}
                     onSuccess={(result) => {
                       setSubmitted({
                         correlativeNumber: result.correlativeNumber,

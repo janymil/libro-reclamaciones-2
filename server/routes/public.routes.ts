@@ -1,5 +1,6 @@
 import type { Express } from "express";
 
+import { getAllowedComplaintTypes, getEffectivePlan } from "@shared/plans";
 import { storage } from "../storage";
 import { captchaLimiter } from "../middleware/rateLimits";
 import { issueCaptcha } from "../services/captchaService";
@@ -42,6 +43,9 @@ export function registerPublicRoutes(app: Express): void {
           // Per-business branding and confirmation text (Phase 2.8)
           brandColor: config.brandColor,
           confirmationMessage: config.confirmationMessage,
+          // Which complaint types this business's plan accepts, so the public
+          // form can hide "Queja" on the Gratis plan instead of failing on submit.
+          allowedComplaintTypes: getAllowedComplaintTypes(getEffectivePlan(business)),
         },
         business: {
           id: business.id,

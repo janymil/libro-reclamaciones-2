@@ -2,6 +2,7 @@ import type { Express } from "express";
 
 import { storage } from "../storage";
 import { requireAuth } from "../middleware/requireAuth";
+import { hasFeature } from "../services/subscriptionService";
 
 /**
  * Activity, audit trail and system change history.
@@ -24,6 +25,13 @@ export function registerHistoryRoutes(app: Express): void {
 
   app.get('/api/history/audit', requireAuth, async (req: any, res) => {
     try {
+      if (!(await hasFeature(req.user.businessId, 'auditLog'))) {
+        return res.status(402).json({
+          message: "El registro de auditoría está disponible en el plan Empresarial. Mejore su plan en \"Plan y Cuotas\".",
+          code: "plan_upgrade_required",
+        });
+      }
+
       const { filterType, dateRange } = req.query;
       const auditLogs = await storage.getAuditLogs(req.user.businessId, {
         filterType: filterType as string,

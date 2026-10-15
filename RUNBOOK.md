@@ -114,6 +114,8 @@ npm run build          # client bundle + bundled server
 npm run audit:security # production dependencies, fails on high+
 ```
 
+Then apply any pending manual migration (§7) before starting the new version.
+
 Then: deploy → `curl /health` → `curl /ready` → confirm the error tracker is receiving
 events → smoke-test login and one public complaint submission.
 
@@ -122,7 +124,70 @@ checklist is enforced automatically for anything merged to `main`.
 
 ---
 
-## 6. Password recovery support notes
+## 6. Onboarding, email verification and access requests
+
+Registered by `POST /api/auth/register` (step 1: account + emailed password and confirmation
+link) and finished by `POST /api/auth/complete-onboarding` (step 2: business + Libro + first
+establishment).
+
+**The step-2 write is one transaction.** `storage.completeOnboarding` creates the tenant, the
+access grant, the Libro configuration and the default establishment, and flags the user as
+onboarded only as its last statement. Either the account is fully usable or nothing changed -
+a failure returns
+`500 {"code":"onboarding_failed","message":"...no se guardaron..."}` and the wizard can simply
+be retried. Two situations that used to be permanent dead ends are now recoverable:
+
+| Situation | Response | What to do |
+|---|---|---|
+| A previous attempt already created the tenant for this RUC | `200`, `"resumed": true` | nothing - the retry finishes the Libro and establishment |
+| The RUC belongs to another account | `409 {"code":"ruc_already_registered"}` | the client offers *Solicitar acceso* |
+| The public URL is taken | `409 {"code":"slug_taken"}` | choose another URL in step 2 |
+| Already configured | `409 {"code":"already_onboarded"}` | go to `/panel` |
+
+**Access requests.** `POST /api/businesses/access-requests { ruc, message? }` records the
+request and emails the tenant's administrators; `GET /api/businesses/access-requests` lists the
+incoming ones for the caller's tenants, `.../mine` lists the ones the caller sent, and
+`POST /api/businesses/access-requests/:id/approve|reject` decides. Only an administrator of the
+affected tenant can decide (anything else is a 404), nobody can approve their own request, and
+a request that was already decided answers `409 already_decided`.
+
+**Email verification.** `users.is_email_verified` is now set by something real:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/auth/verify-email { token }` | consumes the link from the welcome (or resend) email |
+| `POST /api/auth/resend-verification` | issues a fresh link for the signed-in account |
+| Page `/acceso/verificar-email?token=…` | the page the email links to |
+| Banner in the panel | shown while the address is unconfirmed (hidden for demo accounts) |
+
+Tokens live 24 hours, are replaced on every resend, and are cleared in the same UPDATE that
+sets the flag. A URL whose token was already used answers
+`400 {"verified":false,"message":"...no es válido o ya fue usado."}` rather than confirming
+twice. Accounts created before this feature ships stay `false` on purpose - the banner invites
+them to confirm (or to reset their password, which confirms it) - because "verified" must keep
+meaning "a human confirmed this mailbox".
+
+---
+
+## 7. Manual migrations (schema)
+
+`migrations/manual/*.sql` are **not** applied automatically (see the header of each file).
+Run them deliberately, in order, against every environment:
+
+```powershell
+npm run db:apply -- migrations/manual/0006_business_access_requests.sql   # access-request table
+npm run db:apply -- migrations/manual/0007_users_role_default.sql         # users.role DEFAULT/NOT NULL
+```
+
+`0007` repairs a real outage on databases created from the legacy schema: there `users.role`
+had no `DEFAULT` and was nullable, so every new signup was inserted with `role NULL` and got
+`403` from every admin-only endpoint (users, businesses, plan, integrations, access requests).
+The application now also sets `role: 'admin'` explicitly at signup, so the migration is the
+backstop rather than the only defence.
+
+---
+
+## 8. Password recovery support notes
 
 Self-service recovery is now live end to end:
 

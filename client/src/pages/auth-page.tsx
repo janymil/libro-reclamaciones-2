@@ -6,7 +6,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Link, useLocation } from "wouter";
 import { Loader2, Mail, UserPlus, LogIn, ShieldCheck, Timer, LockKeyhole, ArrowLeft } from "lucide-react";
 import { BrandMark, StampMark, HojaDocument } from "@/components/landing/brand";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, apiErrorMessage } from "@/lib/queryClient";
 
 type AuthMode = 'login' | 'register' | 'email-sent' | 'forgot-password';
 
@@ -32,7 +32,7 @@ const TITLES: Record<AuthMode, { title: string; subtitle: string }> = {
   },
   register: {
     title: "Crea tu cuenta empresarial",
-    subtitle: "7 días de prueba gratis. Sin tarjeta de crédito.",
+    subtitle: "15 días de prueba gratis. Sin tarjeta de crédito.",
   },
   "email-sent": {
     title: "Revisa tu correo",
@@ -76,6 +76,10 @@ export default function AuthPage() {
   const [registerForm, setRegisterForm] = useState<RegisterData>({ firstName: '', lastName: '', email: '' });
   const [loginForm, setLoginForm] = useState<LoginData>({ email: '', password: '' });
 
+  // Shown inline (not only as a toast) because the most common failure - "ese
+  // email ya tiene una cuenta" - needs a way forward, not a disappearing notice.
+  const [registerError, setRegisterError] = useState<string | null>(null);
+
   // Password recovery (self-service). `forgotSent` is intentionally sticky: the
   // endpoint answers identically for known and unknown addresses, so there is
   // nothing more to reveal on the follow-up screen.
@@ -92,7 +96,11 @@ export default function AuthPage() {
 
   const handleRegister = (e: React.FormEvent) => {
     e.preventDefault();
-    registerMutation.mutate(registerForm, { onSuccess: () => setMode('email-sent') });
+    setRegisterError(null);
+    registerMutation.mutate(registerForm, {
+      onSuccess: () => setMode('email-sent'),
+      onError: (error) => setRegisterError(apiErrorMessage(error)),
+    });
   };
 
   const handleLogin = (e: React.FormEvent) => {
@@ -156,6 +164,27 @@ export default function AuthPage() {
             <div className="mt-8">
               {mode === 'register' && (
                 <form onSubmit={handleRegister} className="space-y-4">
+                  {registerError && (
+                    <div
+                      className="rounded-xl border border-[#c02b0a]/25 bg-[#c02b0a]/5 px-4 py-3 text-sm leading-relaxed text-[#1b1611]"
+                      data-testid="notice-register-error"
+                      role="alert"
+                    >
+                      <p>{registerError}</p>
+                      <button
+                        type="button"
+                        className="mt-2 font-semibold text-[#c02b0a] underline underline-offset-2"
+                        onClick={() => {
+                          setLoginForm((prev) => ({ ...prev, email: registerForm.email }));
+                          setRegisterError(null);
+                          setMode('login');
+                        }}
+                        data-testid="button-register-error-login"
+                      >
+                        Iniciar sesión con este email
+                      </button>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="firstName" className="text-sm font-medium text-[#1b1611]">Nombre</Label>
@@ -226,7 +255,10 @@ export default function AuthPage() {
                     <Button
                       type="button"
                       variant="link"
-                      onClick={() => setMode('login')}
+                      onClick={() => {
+                        setLoginForm((prev) => ({ ...prev, email: registerForm.email }));
+                        setMode('login');
+                      }}
                       data-testid="link-login"
                       className="text-sm text-[#5c5246] hover:text-[#c02b0a]"
                     >

@@ -111,6 +111,10 @@ npm ci → npm run check → npm test → npm run build → npm run audit:securi
 
 ### 2.7 Payments are absent — decide how customers actually pay
 
+> **Status: implemented (Phase 2.7).** The section below is kept as the original
+> assessment; see `shared/payments.ts` and `server/services/paymentGateway.ts`
+> for what shipped.
+
 There is **no** Stripe / MercadoPago / Culqi / Niubiz / PayPal anywhere in `package.json`
 or the server. `shared/plans.ts` defines Esencial/Profesional/Corporativo and quotas are
 enforced, and there's a 7-day trial — but **plan changes do not collect money**. If
@@ -240,7 +244,7 @@ Status of each P0 blocker after the remediation pass.
 | 2.4 Monitoring / probes | 🟡 **Partially fixed** | `GET /health` (liveness) and `GET /ready` (real `select 1`, answers 503 when the DB is down) added; `/api/status` no longer hard-codes `database: 'operational'`. Error tracking, uptime monitoring and alerting are still to be wired — RUNBOOK.md §3. |
 | 2.5 Backups | 🟡 **Partially fixed** | `scripts/restore-tables.mjs` + `npm run db:restore` added, with a documented drill. The drill itself still needs to be run once against a scratch database — RUNBOOK.md §4. |
 | 2.6 CI | ✅ **Fixed** | `.github/workflows/ci.yml` runs `check → test → build → audit:security` on every push to `main` and every pull request. |
-| 2.7 Payments | ⬜ **Open** | Still undecided: no payment gateway is integrated. |
+| 2.7 Payments | ✅ **Implemented** | Peruvian-first payment layer, **with recurring billing**. `shared/payments.ts` is the provider catalog (Mercado Pago wired for both one-off charges and subscriptions; Culqi/Niubiz/Izipay catalogued with their requirements), prices are handled as integer céntimos, and a plan is applied only by a confirmed payment. `POST /api/payments/checkout` creates a Mercado Pago **subscription** (preapproval) by default, so monthly/yearly plans renew without anyone sending a reminder; `subscriptions` holds the authorisation and each charge lands in `payments` linked to it (migrations `0004_payments.sql`, `0005_subscriptions.sql`). `POST /api/payments/webhook/:provider` settles everything and always re-reads the authoritative state from the provider API instead of trusting the webhook body — an unknown charge is matched to its agreement through `external_reference`, so renewals work even when only the `payment` topic arrives. `POST /api/payments/subscription/cancel` stops future charges while the already-paid period keeps running. The old no-charge `POST /api/subscription` answers 402 unless `PAYMENTS_ALLOW_FREE_PLAN_CHANGE=true`. Transferencia/Yape directo works with no credentials (an admin confirms in `/pagos`). **Remaining:** paste `MERCADOPAGO_ACCESS_TOKEN` (test first, `MERCADOPAGO_SANDBOX=true`) and register `{APP_URL}/api/payments/webhook/mercadopago` for the events `payment`, `subscription_preapproval` and `subscription_authorized_payment`. Covered by `shared/payments.test.ts`, `server/services/paymentGateway.test.ts`, `server/services/paymentService.test.ts`, `server/routes/paymentsIsolation.test.ts` and `server/routes/subscription.routes.test.ts`. |
 
 Also cleaned up in this pass: `MIN_PASSWORD_LENGTH` is now defined once in
 `@shared/schema.ts` instead of being duplicated in `server/routes/users.routes.ts`.

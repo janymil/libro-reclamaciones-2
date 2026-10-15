@@ -9,6 +9,8 @@ import type { PlanDefinition } from "@shared/plans";
 
 export interface SubscriptionUsage {
   complaintsThisMonth: number;
+  /** Lifetime complaints (the Gratis quota is a total, not monthly). */
+  complaintsTotal: number;
   users: number;
   establishments: number;
   businesses: number;
@@ -53,19 +55,8 @@ export function useSubscription() {
   });
 }
 
-export function useChangePlan() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async ({ plan, period }: { plan: string; period: 'monthly' | 'annual' }) => {
-      const response = await apiRequest('POST', '/api/subscription', { plan, period });
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/subscription'] });
-    },
-  });
-}
+// The old "change the plan for free" mutation is gone: a plan is now activated
+// by a confirmed payment (see use-payments.ts → useStartCheckout).
 
 // ---- Multi-RUC switcher (Phase 2.7) ------------------------------------------
 

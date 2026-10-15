@@ -1,7 +1,7 @@
 import { createContext, ReactNode, useContext } from "react";
 import { useQuery, useMutation, UseMutationResult } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, apiErrorMessage } from "@/lib/queryClient";
 
 interface User {
   id: string;
@@ -12,6 +12,10 @@ interface User {
   onboardingCompleted: boolean;
   onboardingStep: number;
   businessId?: string;
+  /** Confirmed mailbox (see /acceso/verificar-email). */
+  isEmailVerified: boolean;
+  /** Shared, publicly known account: no tenant administration. */
+  isDemo?: boolean;
   createdAt: string;
 }
 
@@ -79,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     onError: (error: Error) => {
       toast({
         title: "Error al iniciar sesión",
-        description: error.message,
+        description: apiErrorMessage(error),
         variant: "destructive",
       });
     },
@@ -97,12 +101,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         description: data.message,
       });
     },
-    onError: (error: Error) => {
-      toast({
-        title: "Error al crear cuenta",
-        description: error.message,
-        variant: "destructive",
-      });
+    onError: () => {
+      // Deliberately silent: /acceso renders this failure inline, next to the
+      // form (notice-register-error), where it can offer the way forward -
+      // "sign in" or "reset your password" - instead of vanishing in a toast.
     },
   });
 

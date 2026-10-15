@@ -109,6 +109,11 @@ const navigationSections: NavigationSection[] = [
         icon: 'workspace_premium'
       },
       {
+        name: 'Pagos',
+        href: '/pagos',
+        icon: 'receipt_long'
+      },
+      {
         name: 'Historial',
         href: '/historial',
         icon: 'history'

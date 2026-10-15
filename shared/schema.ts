@@ -69,8 +69,8 @@ export const businesses = pgTable("businesses", {
   departamento: varchar("departamento", { length: 100 }).notNull(),
   website: varchar("website", { length: 255 }),
   isActive: boolean("is_active").notNull().default(true),
-  subscriptionPlan: varchar("subscription_plan", { length: 50 }).notNull().default("esencial"),
-  // Commercial lifecycle: 7-day trial, then the plan's quotas apply.
+  subscriptionPlan: varchar("subscription_plan", { length: 50 }).notNull().default("gratis"),
+  // Commercial lifecycle: trial, then the plan's quotas apply.
   // trialing | active | past_due | canceled | trial_ended
   subscriptionStatus: varchar("subscription_status", { length: 30 }).notNull().default("trialing"),
   trialEndsAt: timestamp("trial_ends_at"),
@@ -392,6 +392,42 @@ export const userBusinessAccess = pgTable("user_business_access", {
   index("idx_user_business_access_user_id").on(table.userId),
 ]);
 
+/**
+ * Requests from a login that needs access to a business it does not own.
+ *
+ * The dead end this replaces: `POST /api/businesses` answers 409 when the RUC
+ * already exists, which is correct (a RUC must not be duplicated) but leaves the
+ * real cases stranded - the accountant of a client, staff turnover, a partner
+ * who is not the person who first registered the empresa.
+ *
+ * `uq_business_access_request_pair` allows at most one row per (business,
+ * requester, status), so a rejected request can be re-sent later (new pending
+ * row) while a pending one can never be duplicated.
+ */
+export const businessAccessRequests = pgTable("business_access_requests", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessId: uuid("business_id").notNull(),
+  requesterUserId: uuid("requester_user_id").notNull(),
+  // Snapshot of the requester identity: the request must stay readable even if
+  // the account is later renamed or deactivated.
+  requesterEmail: varchar("requester_email", { length: 255 }).notNull(),
+  requesterName: text("requester_name"),
+  message: text("message"),
+  status: varchar("status", { length: 20 }).notNull().default("pending"), // pending | approved | rejected
+  decidedByUserId: uuid("decided_by_user_id"),
+  decidedAt: timestamp("decided_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  unique("uq_business_access_request_pair").on(
+    table.businessId,
+    table.requesterUserId,
+    table.status,
+  ),
+  index("idx_business_access_requests_business").on(table.businessId),
+  index("idx_business_access_requests_requester").on(table.requesterUserId),
+]);
+
 // API keys for the public REST API (/api/v1, CRM/ERP integrations).
 export const apiKeys = pgTable("api_keys", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -418,6 +454,84 @@ export const webhooks = pgTable("webhooks", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
   index("idx_webhooks_business_id").on(table.businessId),
+]);
+
+// Payment attempts against the SaaS subscription (Phase 2.7).
+//
+// One row = one checkout attempt for one plan/period. The provider only ever
+// sees our own `reference` (safe to print on a receipt) and `amountCents`;
+// `providerRef` holds the PSP-side id (preference / order / charge) used to
+// reconcile the webhook that reports the final outcome. Money is stored in
+// integer céntimos - never a float.
+export const payments = pgTable("payments", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessId: uuid("business_id").notNull(),
+  userId: uuid("user_id"), // who started the checkout
+  provider: varchar("provider", { length: 30 }).notNull(), // mercadopago | culqi | manual | niubiz | izipay
+  method: varchar("method", { length: 30 }), // tarjeta | yape | plin | efectivo | transferencia
+  providerRef: varchar("provider_ref", { length: 120 }), // PSP-side id (preference / order / charge)
+  reference: varchar("reference", { length: 40 }).notNull(), // LV-XXXXXX, shown to the customer
+  planId: varchar("plan_id", { length: 30 }).notNull(),
+  period: varchar("period", { length: 20 }).notNull(), // monthly | annual
+  amountCents: integer("amount_cents").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("PEN"),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  redirectUrl: text("redirect_url"), // where the customer must go to pay (PSP checkout)
+  failureReason: text("failure_reason"),
+  raw: jsonb("raw"), // sanitized provider payload (never card data)
+  paidAt: timestamp("paid_at"),
+  confirmedByUserId: uuid("confirmed_by_user_id"), // set when an admin confirms a manual payment
+  // Set when this charge came from a recurring agreement (renewal ledger).
+  subscriptionId: uuid("subscription_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  unique("uq_payments_reference").on(table.reference),
+  index("idx_payments_business_id").on(table.businessId),
+  index("idx_payments_provider_ref").on(table.provider, table.providerRef),
+  index("idx_payments_subscription_id").on(table.subscriptionId),
+]);
+
+/**
+ * Recurring agreement with a provider (Mercado Pago "Suscripciones").
+ *
+ * One row = the customer's authorisation for the provider to charge them again
+ * every period, i.e. the thing that turns this from "sold once" into "sold
+ * every month". The individual charges do NOT live here: each one lands in
+ * `payments` with `subscriptionId` pointing back at this row, so the billing
+ * history stays a plain list of payments.
+ *
+ * A subscription is deliberately never deleted: when a customer leaves, its
+ * status becomes `cancelled` and the row remains as the record of what they
+ * authorised.
+ */
+export const subscriptions = pgTable("subscriptions", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessId: uuid("business_id").notNull(),
+  userId: uuid("user_id"), // who subscribed
+  provider: varchar("provider", { length: 30 }).notNull(), // mercadopago
+  // Null until the provider answers with its own id (preapproval id).
+  providerRef: varchar("provider_ref", { length: 120 }),
+  reference: varchar("reference", { length: 40 }).notNull(), // LV-XXXXXX, shown to the customer
+  planId: varchar("plan_id", { length: 30 }).notNull(),
+  period: varchar("period", { length: 20 }).notNull(), // monthly | annual
+  amountCents: integer("amount_cents").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("PEN"),
+  payerEmail: varchar("payer_email", { length: 255 }),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  // Where the customer goes to authorise the recurring charge.
+  initPoint: text("init_point"),
+  // When the provider is expected to charge again (informative).
+  nextPaymentAt: timestamp("next_payment_at"),
+  startedAt: timestamp("started_at"),
+  cancelledAt: timestamp("cancelled_at"),
+  raw: jsonb("raw"), // sanitized provider payload
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  unique("uq_subscriptions_reference").on(table.reference),
+  index("idx_subscriptions_business_id").on(table.businessId),
+  index("idx_subscriptions_provider_ref").on(table.provider, table.providerRef),
 ]);
 
 // Relations
@@ -699,6 +813,30 @@ export const insertUserBusinessAccessSchema = createInsertSchema(userBusinessAcc
   createdAt: true,
 });
 
+export const insertBusinessAccessRequestSchema = createInsertSchema(businessAccessRequests).omit({
+  id: true,
+  status: true,
+  decidedByUserId: true,
+  decidedAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+/**
+ * Payload a login sends to ask for access to an already-registered RUC. The
+ * business is resolved from the RUC server-side; the requester never supplies a
+ * business id.
+ */
+export const businessAccessRequestSchema = z.object({
+  ruc: z.string().trim().regex(/^\d{11}$/, "El RUC debe tener 11 dígitos"),
+  message: z.string().trim().max(500, "El mensaje no puede superar 500 caracteres").optional(),
+});
+
+/** Outcome of a decision, as sent by the business administrator. */
+export const businessAccessDecisionSchema = z.object({
+  note: z.string().trim().max(500).optional(),
+});
+
 export const insertApiKeySchema = createInsertSchema(apiKeys).omit({
   id: true,
   createdAt: true,
@@ -710,15 +848,45 @@ export const insertWebhookSchema = createInsertSchema(webhooks).omit({
   updatedAt: true,
 });
 
+export const insertPaymentSchema = createInsertSchema(payments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertSubscriptionSchema = createInsertSchema(subscriptions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+/**
+ * Normalization applied to every email that identifies an account.
+ *
+ * Emails reach us auto-capitalized (phones, Outlook autocorrect) and with a
+ * stray space from a copy-paste, while the `users.email` UNIQUE constraint is
+ * case-sensitive. Without this, "Jan@Gmail.com" would register a SECOND
+ * account for the same person and then the login typed in lowercase would
+ * fail - the exact "my account does not exist" support ticket this avoids.
+ * One normalization rule, shared by signup, login and recovery so the three
+ * paths can never disagree about who someone is.
+ */
+export const accountEmailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .email("Email inválido")
+  .max(255);
+
 // Auth-specific schemas for the 2-step onboarding
 export const userRegistrationSchema = z.object({
-  firstName: z.string().min(2, "Nombre debe tener al menos 2 caracteres"),
-  lastName: z.string().min(2, "Apellido debe tener al menos 2 caracteres"),
-  email: z.string().email("Email inválido"),
+  firstName: z.string().trim().min(2, "Nombre debe tener al menos 2 caracteres").max(100),
+  lastName: z.string().trim().min(2, "Apellido debe tener al menos 2 caracteres").max(100),
+  email: accountEmailSchema,
 });
 
 export const loginSchema = z.object({
-  email: z.string().email("Email inválido"),
+  email: accountEmailSchema,
   password: z.string().min(1, "Contraseña requerida"),
 });
 
@@ -731,7 +899,21 @@ export const MIN_PASSWORD_LENGTH = 8;
 
 /** Step 1 of password recovery: request a reset link. */
 export const forgotPasswordSchema = z.object({
-  email: z.string().trim().email("Email inválido").max(255),
+  email: accountEmailSchema,
+});
+
+/**
+ * Email verification: the token from the "confirma tu correo" link.
+ *
+ * 32 random bytes as hex (64 chars) is what we issue, so anything shorter than
+ * the reset-token floor cannot be one of ours.
+ */
+export const emailVerificationSchema = z.object({
+  token: z
+    .string()
+    .trim()
+    .min(16, "Token inválido")
+    .max(255, "Token inválido"),
 });
 
 /** Step 2 of password recovery: consume the token and set the new password. */
@@ -793,11 +975,20 @@ export type InsertComplaintAttachment = z.infer<typeof insertComplaintAttachment
 export type UserBusinessAccess = typeof userBusinessAccess.$inferSelect;
 export type InsertUserBusinessAccess = z.infer<typeof insertUserBusinessAccessSchema>;
 
+export type BusinessAccessRequest = typeof businessAccessRequests.$inferSelect;
+export type InsertBusinessAccessRequest = z.infer<typeof insertBusinessAccessRequestSchema>;
+
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
 
 export type Webhook = typeof webhooks.$inferSelect;
 export type InsertWebhook = z.infer<typeof insertWebhookSchema>;
+
+export type Payment = typeof payments.$inferSelect;
+export type InsertPayment = z.infer<typeof insertPaymentSchema>;
+
+export type Subscription = typeof subscriptions.$inferSelect;
+export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
 
 /** Public (safe) projection of an API key - never exposes the hash. */
 export type ApiKeyPublic = Omit<ApiKey, "keyHash">;

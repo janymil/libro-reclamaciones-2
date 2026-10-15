@@ -15,6 +15,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Plus, Users, Mail, Shield, MoreVertical, UserCheck, UserX } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useUpgradeToast } from '@/hooks/use-plan-upgrade';
 import { useAuth } from '@/hooks/use-auth';
 import { z } from 'zod';
 
@@ -31,6 +32,7 @@ type CreateUser = z.infer<typeof createUserSchema>;
 export default function UsersPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const { toast } = useToast();
+  const upgradeToast = useUpgradeToast();
   const queryClient = useQueryClient();
 
   // User administration is an admin-only capability server-side
@@ -73,11 +75,9 @@ export default function UsersPage() {
       form.reset();
     },
     onError: (error) => {
-      toast({
-        title: "Error",
-        description: "No se pudo crear el usuario. Intente nuevamente.",
-        variant: "destructive",
-      });
+      // A plan limit (e.g. Básico = 2 usuarios) must say so and offer the
+      // upgrade, not fade into a generic "intente nuevamente".
+      upgradeToast(error, 'No se pudo crear el usuario');
     },
   });
 

@@ -1,18 +1,20 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import AppLayout from "@/components/layout/app-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { useToast } from "@/hooks/use-toast";
-import { usePlans, useSubscription, useChangePlan } from "@/hooks/use-subscription";
+import CheckoutDialog from "@/components/payments/checkout-dialog";
+import { usePlans, useSubscription } from "@/hooks/use-subscription";
 import type { PlanDefinition } from "@shared/plans";
 
 /**
- * Plan y Cuotas (Phase 2.6): the sellable SaaS surface. Shows the trial state,
+ * Plan y Cuotas: the sellable SaaS surface. Shows the trial state,
  * usage meters against the effective plan limits and the three plans with
- * monthly/annual pricing. Positioning: "reclamos ilimitados + IA incluida"
- * from Profesional up - competitors charge per complaint.
+ * monthly/annual pricing. Positioning: "reclamos ilimitados en todos los
+ * planes + IA en Pro" — competitors limit claims or charge per case.
+ * Annual is pre-selected because it saves ~50% vs monthly.
  */
 
 function UsageMeter({ label, used, limit }: { label: string; used: number; limit: number | null }) {
@@ -37,15 +39,14 @@ function PlanCard({
   period,
   isCurrent,
   onSelect,
-  pending,
 }: {
   plan: PlanDefinition;
   period: 'monthly' | 'annual';
   isCurrent: boolean;
   onSelect: (planId: string) => void;
-  pending: boolean;
 }) {
   const price = period === 'annual' ? plan.priceAnnual : plan.priceMonthly;
+  const isFree = plan.id === 'gratis';
 
   return (
     <Card className={isCurrent ? "border-primary ring-2 ring-primary/30" : ""}>
@@ -60,10 +61,18 @@ function PlanCard({
         <div>
           <p className="text-3xl font-bold">
             S/ {price}
-            <span className="text-sm font-normal text-gray-500"> /{period === 'annual' ? 'año' : 'mes'}</span>
+            {!isFree && (
+              <span className="text-sm font-normal text-gray-500"> /{period === 'annual' ? 'año' : 'mes'}</span>
+            )}
           </p>
-          {period === 'annual' && (
-            <p className="text-xs text-green-600 mt-1">2 meses gratis con el pago anual</p>
+          {isFree ? (
+            <p className="text-xs text-gray-500 mt-1">
+              Para siempre · sin tarjeta · 5 reclamos al mes
+            </p>
+          ) : period === 'annual' ? (
+            <p className="text-xs text-green-600 mt-1">Ahorra ~50% vs pagar mes a mes</p>
+          ) : (
+            <p className="text-xs text-gray-500 mt-1">El anual sale mucho más barato</p>
           )}
         </div>
 
@@ -79,11 +88,11 @@ function PlanCard({
         <Button
           className="w-full"
           variant={isCurrent ? "outline" : "default"}
-          disabled={isCurrent || pending}
+          disabled={isCurrent || isFree}
           onClick={() => onSelect(plan.id)}
           data-testid={`button-select-plan-${plan.id}`}
         >
-          {isCurrent ? "Plan activo" : pending ? "Cambiando..." : `Cambiar a ${plan.name}`}
+          {isFree ? 'Gratis, no se paga' : isCurrent ? "Plan activo" : `Pagar y activar ${plan.name}`}
         </Button>
       </CardContent>
     </Card>
@@ -91,24 +100,17 @@ function PlanCard({
 }
 
 export default function SubscriptionPage() {
-  const { toast } = useToast();
-  const [period, setPeriod] = useState<'monthly' | 'annual'>('monthly');
+  const [period, setPeriod] = useState<'monthly' | 'annual'>('annual');
+  // Selecting a plan now opens the checkout: the plan is activated by the
+  // confirmed payment, never by the click itself (Phase 2.7).
+  const [checkoutPlan, setCheckoutPlan] = useState<PlanDefinition | null>(null);
 
   const { data: plans } = usePlans();
   const { data: subscription, isLoading } = useSubscription();
-  const changePlan = useChangePlan();
 
-  const handleSelect = async (planId: string) => {
-    try {
-      const result = await changePlan.mutateAsync({ plan: planId, period });
-      toast({ title: "Plan actualizado", description: result.message });
-    } catch (error) {
-      toast({
-        title: "No se pudo cambiar el plan",
-        description: error instanceof Error ? error.message : "Intente nuevamente",
-        variant: "destructive",
-      });
-    }
+  const handleSelect = (planId: string) => {
+    const plan = (plans ?? []).find((candidate) => candidate.id === planId) ?? null;
+    setCheckoutPlan(plan);
   };
 
   return (
@@ -126,7 +128,7 @@ export default function SubscriptionPage() {
                     <CardTitle>Estado de la suscripción</CardTitle>
                     <CardDescription>
                       {subscription.isTrial
-                        ? `Prueba gratuita activa — quedan ${subscription.trialDaysRemaining} día(s). Todas las funciones de Profesional desbloqueadas.`
+                        ? `Prueba gratuita activa — quedan ${subscription.trialDaysRemaining} día(s). Todas las funciones de Pro desbloqueadas.`
                         : `Plan ${subscription.plan.name} · ${subscription.planPeriod === 'annual' ? 'anual' : 'mensual'}`}
                     </CardDescription>
                   </div>
@@ -136,11 +138,19 @@ export default function SubscriptionPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <UsageMeter
-                  label="Reclamos este mes"
-                  used={subscription.usage.complaintsThisMonth}
-                  limit={subscription.plan.limits.complaintsPerMonth}
-                />
+                {subscription.plan.limits.complaintsTotal !== null ? (
+                  <UsageMeter
+                    label="Reclamos usados (total del plan Gratis)"
+                    used={subscription.usage.complaintsTotal}
+                    limit={subscription.plan.limits.complaintsTotal}
+                  />
+                ) : (
+                  <UsageMeter
+                    label="Reclamos este mes"
+                    used={subscription.usage.complaintsThisMonth}
+                    limit={subscription.plan.limits.complaintsPerMonth}
+                  />
+                )}
                 <UsageMeter label="Usuarios" used={subscription.usage.users} limit={subscription.plan.limits.users} />
                 <UsageMeter
                   label="Sucursales"
@@ -165,12 +175,12 @@ export default function SubscriptionPage() {
                 size="sm"
                 onClick={() => setPeriod('annual')}
               >
-                Anual (2 meses gratis)
+                Anual (ahorra ~50%)
               </Button>
             </div>
 
             {/* Plan catalog */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
               {(plans ?? []).map((plan) => (
                 <PlanCard
                   key={plan.id}
@@ -178,18 +188,37 @@ export default function SubscriptionPage() {
                   period={period}
                   isCurrent={!subscription.isTrial && subscription.storedPlanId === plan.id}
                   onSelect={handleSelect}
-                  pending={changePlan.isPending}
                 />
               ))}
             </div>
 
-            <p className="text-xs text-gray-500 text-center">
-              Los reclamos ilimitados incluyen todas las funciones de IA (clasificación, borradores de respuesta,
-              predicción de SLA y tendencias). El cobro se gestiona con su proveedor de pagos al confirmar el plan.
-            </p>
+            <div className="flex flex-col items-center gap-2">
+              <Link href="/pagos">
+                <Button variant="link" data-testid="link-payment-history">
+                  Ver historial de pagos
+                </Button>
+              </Link>
+              <p className="text-xs text-gray-500 text-center">
+                Reclamos ilimitados en todos los planes. La IA que redacta respuestas viene en Pro y Empresarial.
+                El plan se activa cuando el pago queda confirmado: con tarjeta o
+                Yape suele ser inmediato y, si elige transferencia, un administrador lo confirma en «Pagos».
+                Consejo: el anual ahorra ~50% frente al mensual. Paga 2 años y llévate el 3ro al 50%.
+              </p>
+            </div>
           </>
         )}
       </div>
+
+      <CheckoutDialog
+        open={checkoutPlan !== null}
+        onOpenChange={(next) => {
+          if (!next) {
+            setCheckoutPlan(null);
+          }
+        }}
+        plan={checkoutPlan}
+        period={period}
+      />
     </AppLayout>
   );
 }

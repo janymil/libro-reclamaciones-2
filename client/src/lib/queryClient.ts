@@ -44,6 +44,41 @@ async function throwIfResNotOk(res: Response, url: string) {
   }
 }
 
+/**
+ * Human-readable text for a failed request, for use in a toast or an inline
+ * notice.
+ *
+ * `apiRequest` rejects with `${status}: ${body}` because that is what makes a
+ * failed call identifiable in a log. Shown verbatim in the UI it produced
+ * messages like `400: {"message":"El email ya está registrado"}`, so this
+ * unwraps the server's `message` field and falls back to the raw text when the
+ * body is not our JSON envelope (a proxy error page, for instance).
+ */
+export function apiErrorMessage(error: unknown): string {
+  const fallback = "No se pudo completar la operación. Intenta nuevamente.";
+  if (!(error instanceof Error)) return fallback;
+
+  const raw = error.message.replace(/^\d{3}:\s*/, "").trim();
+  if (!raw) return fallback;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Not JSON (a proxy error page, for instance): the body text is the best
+    // description available.
+    return raw;
+  }
+
+  // Our API's envelope: show the human message, and never the raw blob.
+  if (parsed && typeof parsed === "object" && "message" in parsed) {
+    const message = (parsed as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+
+  return fallback;
+}
+
 export async function apiRequest(
   method: string,
   url: string,

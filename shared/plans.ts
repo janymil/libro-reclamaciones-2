@@ -1,25 +1,43 @@
 import type { Business } from "./schema";
 
 /**
- * Commercial plan catalog (Phase 2 of the roadmap).
+ * Commercial plan catalog — aggressive mass-market pricing for Perú.
  *
- * Plans are code (not a table) so quota enforcement and the upgrade UI can
- * never drift from what was sold. `businesses.subscription_plan` stores the
- * plan id; every new business starts a TRIAL_DAYS trial with the full
- * "profesional" feature set, after which the selected plan's quotas apply.
+ * Goal: be the clearly cheaper + better-value option for micro + small
+ * businesses (1 local / 1 RUC), while keeping profitable higher tiers.
+ * Annual billing is pushed hard (50%+ cheaper than paying month by month)
+ * because most cash comes from yearly payments.
  *
- * Positioning note: reclamavirtual charges per complaint - every plan here
- * that targets real usage (profesional/corporativo) has unlimited complaints
- * with AI included.
+ * Tiers:
+ *   gratis       = Gratis      S/ 0 — hook to beat the paper book + DIY form
+ *   esencial     = Básico      S/ 89/año (S/ 15/mes) — volume driver
+ *   profesional  = Pro         S/ 189/año (S/ 29/mes) — MOST POPULAR
+ *   corporativo  = Empresarial S/ 429/año (S/ 69/mes) — multi-RUC + API
+ * Chains / franchises (10+ locales, SSO, nube privada) go custom — contact sales.
+ *
+ * Trial: every new business starts a TRIAL_DAYS trial with the full
+ * "profesional" feature set, after which the stored plan's quotas apply.
+ * New businesses store "gratis" so when the trial ends they fall back to
+ * Free automatically instead of being blocked.
+ *
+ * Positioning: paid plans have UNLIMITED complaints. Gratis is deliberately
+ * tight (5 reclamos/mes, solo Reclamos, 1 local, 1 usuario) so it beats a
+ * photocopied paper book or a homemade form, but any real volume, second
+ * local, second user or Queja pushes to Básico.
  */
 
-export type PlanId = "esencial" | "profesional" | "corporativo";
+export type PlanId = "gratis" | "esencial" | "profesional" | "corporativo";
 
 export interface PlanLimits {
-  /** Monthly complaint intake quota. `null` = unlimited. */
+  /** Monthly complaint intake quota. `null` = unlimited / not monthly-metered. */
   complaintsPerMonth: number | null;
-  /** Team members per business. */
-  users: number;
+  /**
+   * Lifetime complaint quota. Gratis gets 5 complaints in total (not per
+   * month), so a free book never becomes a permanent free service.
+   */
+  complaintsTotal: number | null;
+  /** Team members per business. `null` = unlimited. */
+  users: number | null;
   /** Branch offices (sucursales) per business. `null` = unlimited. */
   establishments: number | null;
   /** RUCs (businesses) manageable from one login. */
@@ -41,35 +59,90 @@ export interface PlanFeatures {
   webhooks: boolean;
   /** Embeddable intake widget. */
   widget: boolean;
+  /**
+   * WhatsApp Cloud API: inbound consumer messages get a guided reply, and a
+   * registered written response can be notified to the consumer on WhatsApp.
+   * Requires the platform WABA (env-configured); degrades silently without it.
+   */
+  whatsapp: boolean;
   /** Per-business email/portal templates and branding. */
   templates: boolean;
+  /** Consolidated reports, statistics and SIREC/INDECOPI export. */
+  reports: boolean;
+  /** Audit trail: who changed what, and when. */
+  auditLog: boolean;
 }
 
 export interface PlanDefinition {
   id: PlanId;
   name: string;
   tagline: string;
-  priceMonthly: number; // soles / month
-  priceAnnual: number; // soles / year (2 months free)
+  priceMonthly: number; // soles / month (decoy to push annual)
+  priceAnnual: number; // soles / year (the real price, ~50% off)
   limits: PlanLimits;
   features: PlanFeatures;
   highlights: string[];
 }
 
-export const TRIAL_DAYS = 7;
+export const TRIAL_DAYS = 15;
 export const RETENTION_MONTHS = 24;
 
+/** Launch offer: first 500 customers pay S/ 69 the first year (regular S/ 89). */
+export const LAUNCH_OFFER_ANNUAL_BASICO = 69;
+export const REGULAR_ANNUAL_BASICO = 89;
+export const LAUNCH_OFFER_SEATS = 500;
+
+/** Multi-year: pay 2 years, 3rd year at 50% (messaging, applied as coupon at checkout). */
+export const MULTI_YEAR_DISCOUNT_NOTE =
+  'Paga 2 años y llévate el 3ro al 50%';
+
 export const PLANS: Record<PlanId, PlanDefinition> = {
-  esencial: {
-    id: "esencial",
-    name: "Esencial",
-    tagline: "Cumplimiento legal desde el primer día",
-    priceMonthly: 49,
-    priceAnnual: 490,
+  gratis: {
+    id: 'gratis',
+    name: 'Gratis',
+    tagline: 'Cumple la ley sin pagar nada · 1 local',
+    priceMonthly: 0,
+    priceAnnual: 0,
     limits: {
-      complaintsPerMonth: 60,
-      users: 3,
-      establishments: 2,
+      complaintsPerMonth: null,
+      complaintsTotal: 5,
+      users: 1,
+      establishments: 1,
+      businesses: 1,
+      attachmentsPerComplaint: 1,
+    },
+    features: {
+      aiClassification: true,
+      aiDrafting: false,
+      brandTone: false,
+      api: false,
+      webhooks: false,
+      widget: false,
+      whatsapp: false,
+      templates: false,
+      reports: false,
+      auditLog: false,
+    },
+    highlights: [
+      '5 reclamos en total, para siempre (solo Reclamos, no Quejas)',
+      '1 RUC, 1 local y 1 libro',
+      '1 usuario',
+      'QR + cartel oficial + constancia PDF',
+      'Alertas de 15 días hábiles',
+      'Resguardo 2 años (ley)',
+    ],
+  },
+  esencial: {
+    id: 'esencial',
+    name: 'Básico',
+    tagline: 'Cumple la ley sin pagar de más · 1 local',
+    priceMonthly: 15,
+    priceAnnual: 89,
+    limits: {
+      complaintsPerMonth: null,
+      complaintsTotal: null,
+      users: 2,
+      establishments: 1,
       businesses: 1,
       attachmentsPerComplaint: 3,
     },
@@ -80,27 +153,33 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
       api: false,
       webhooks: false,
       widget: false,
+      whatsapp: false,
       templates: false,
+      reports: true,
+      auditLog: false,
     },
     highlights: [
-      "1 empresa y 2 sucursales",
-      "60 reclamos al mes",
-      "Clasificación y priorización con IA",
-      "Constancia PDF, QR y consulta pública",
-      "Reporte SIREC y expediente INDECOPI",
+      'Reclamos ILIMITADOS (otros los limitan o cobran por caso)',
+      '1 RUC y 1 local / 1 libro',
+      '2 usuarios',
+      'Reportes de cumplimiento y exportación SIREC / INDECOPI',
+      'Alertas de 15 días hábiles + resguardo 2 años (ley)',
+      'QR + cartel oficial + constancia PDF automática',
+      'Logo de tu negocio',
     ],
   },
   profesional: {
-    id: "profesional",
-    name: "Profesional",
-    tagline: "Reclamos ilimitados + IA incluida",
-    priceMonthly: 99,
-    priceAnnual: 990,
+    id: 'profesional',
+    name: 'Pro',
+    tagline: 'El más elegido · hasta 5 locales',
+    priceMonthly: 29,
+    priceAnnual: 189,
     limits: {
       complaintsPerMonth: null,
-      users: 15,
-      establishments: 10,
-      businesses: 1,
+      complaintsTotal: null,
+      users: 5,
+      establishments: 5,
+      businesses: 2,
       attachmentsPerComplaint: 5,
     },
     features: {
@@ -110,26 +189,31 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
       api: false,
       webhooks: false,
       widget: true,
+      whatsapp: true,
       templates: true,
+      reports: true,
+      auditLog: false,
     },
     highlights: [
-      "Reclamos ilimitados con IA incluida",
-      "1 empresa y hasta 10 sucursales",
-      "IA con su tono de marca y políticas",
-      "Plantillas y branding personalizados",
-      "Recordatorios y escalado automático de SLA",
-      "Widget para su tienda virtual",
+      'Todo lo de Básico, ILIMITADO',
+      'Hasta 5 locales y 2 RUCs',
+      '5 usuarios con roles',
+      'IA que redacta respuestas con tu tono',
+      'Panel con estadísticas y plantillas',
+      'Widget para Shopify / WooCommerce / web',
+      'Soporte por WhatsApp prioritario',
     ],
   },
   corporativo: {
-    id: "corporativo",
-    name: "Corporativo",
-    tagline: "Multi-empresa, API e integraciones",
-    priceMonthly: 249,
-    priceAnnual: 2490,
+    id: 'corporativo',
+    name: 'Empresarial',
+    tagline: 'Multi-RUC, API y auditoría',
+    priceMonthly: 69,
+    priceAnnual: 429,
     limits: {
       complaintsPerMonth: null,
-      users: 100,
+      complaintsTotal: null,
+      users: null,
       establishments: null,
       businesses: 5,
       attachmentsPerComplaint: 10,
@@ -141,32 +225,56 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
       api: true,
       webhooks: true,
       widget: true,
+      whatsapp: true,
       templates: true,
+      reports: true,
+      auditLog: true,
     },
     highlights: [
-      "Hasta 5 RUCs con un solo usuario",
-      "Sucursales y reclamos ilimitados",
-      "API REST y webhooks para su CRM/ERP",
-      "Todo lo de Profesional",
+      'Todo lo de Pro, ILIMITADO',
+      'Hasta 5 RUCs · locales y usuarios ilimitados',
+      'API REST + webhooks para tu CRM/ERP',
+      'Reportes avanzados y registro de auditoría',
+      'Exportación SIREC lista para fiscalización',
+      'Atención prioritaria con SLA',
     ],
   },
 };
 
 export const PLAN_LIST: PlanDefinition[] = [
+  PLANS.gratis,
   PLANS.esencial,
   PLANS.profesional,
   PLANS.corporativo,
 ];
 
 export function isPlanId(value: string): value is PlanId {
-  return value === "esencial" || value === "profesional" || value === "corporativo";
+  return value === "gratis" || value === "esencial" || value === "profesional" || value === "corporativo";
 }
 
 export function getPlan(planId: string): PlanDefinition {
-  return isPlanId(planId) ? PLANS[planId] : PLANS.esencial;
+  return isPlanId(planId) ? PLANS[planId] : PLANS.gratis;
 }
 
-/** Whether the business is inside its 7-day trial window. */
+/**
+ * Which complaint types a plan may receive.
+ * Gratis is Reclamos-only (no Quejas): Quejas are about attention/service
+ * quality, Reclamos about the product/service itself. A free hook that only
+ * handles Reclamos beats a paper book for an online shop, but any business
+ * that gets Quejas (i.e. real customer-service volume) must move to Básico.
+ */
+export function getAllowedComplaintTypes(plan: PlanDefinition): Array<"reclamo" | "queja"> {
+  return plan.id === "gratis" ? ["reclamo"] : ["reclamo", "queja"];
+}
+
+export function isComplaintTypeAllowed(
+  plan: PlanDefinition,
+  complaintType: string,
+): boolean {
+  return getAllowedComplaintTypes(plan).includes(complaintType as "reclamo" | "queja");
+}
+
+/** Whether the business is inside its trial window. */
 export function isTrialing(
   business: Pick<Business, "subscriptionStatus" | "trialEndsAt">,
   now: Date = new Date(),
@@ -195,6 +303,7 @@ export function getEffectivePlan(
 
 export type QuotaResource =
   | "complaintsThisMonth"
+  | "complaintsTotal"
   | "users"
   | "establishments"
   | "businesses"
@@ -207,9 +316,16 @@ export interface QuotaCheck {
 }
 
 const QUOTA_LABELS: Record<QuotaResource, (plan: PlanDefinition) => string> = {
-  complaintsThisMonth: (plan) => `Su plan ${plan.name} permite ${plan.limits.complaintsPerMonth ?? '∞'} reclamos al mes`,
-  users: (plan) => `Su plan ${plan.name} permite hasta ${plan.limits.users} usuarios`,
-  establishments: (plan) => `Su plan ${plan.name} permite hasta ${plan.limits.establishments} sucursales`,
+  complaintsThisMonth: (plan) => plan.limits.complaintsPerMonth === null
+    ? `Su plan ${plan.name} no tiene límite mensual de reclamos`
+    : `Su plan ${plan.name} permite ${plan.limits.complaintsPerMonth} reclamos al mes`,
+  complaintsTotal: (plan) => `Su plan ${plan.name} incluye ${plan.limits.complaintsTotal ?? 0} reclamos en total`,
+  users: (plan) => plan.limits.users === null
+    ? `Su plan ${plan.name} permite usuarios ilimitados`
+    : `Su plan ${plan.name} permite hasta ${plan.limits.users} usuarios`,
+  establishments: (plan) => plan.limits.establishments === null
+    ? `Su plan ${plan.name} permite locales ilimitados`
+    : `Su plan ${plan.name} permite hasta ${plan.limits.establishments} locales`,
   businesses: (plan) => `Su plan ${plan.name} permite gestionar hasta ${plan.limits.businesses} empresa(s)`,
   attachmentsPerComplaint: (plan) => `Su plan ${plan.name} permite hasta ${plan.limits.attachmentsPerComplaint} adjuntos por reclamo`,
 };
@@ -217,6 +333,7 @@ const QUOTA_LABELS: Record<QuotaResource, (plan: PlanDefinition) => string> = {
 /** Maps a quota resource to the plan limit that governs it. */
 const LIMIT_KEYS: Record<QuotaResource, keyof PlanLimits> = {
   complaintsThisMonth: 'complaintsPerMonth',
+  complaintsTotal: 'complaintsTotal',
   users: 'users',
   establishments: 'establishments',
   businesses: 'businesses',

@@ -2,6 +2,36 @@ import type { Business, Establishment } from "@shared/schema";
 
 import { storage } from "../storage";
 
+/** The fields the establishment provisioning rule decides. */
+export interface DefaultEstablishment {
+  name: string;
+  address: string;
+  phone: string | null;
+  identificationCode: string;
+}
+
+/**
+ * The first establishment a tenant gets, derived from its sales channel.
+ *
+ * Extracted so the two places that create a tenant cannot drift apart: the
+ * transactional onboarding (`storage.completeOnboarding`) and the multi-RUC
+ * registration (`POST /api/businesses`).
+ */
+export function defaultEstablishmentFor(
+  business: Pick<Business, "address" | "phone">,
+  businessType?: string | null,
+): DefaultEstablishment {
+  const isOnline = businessType === "tienda_virtual";
+
+  return {
+    name: isOnline ? "Tienda Online" : "Casa Matriz",
+    address: business.address,
+    phone: business.phone ?? null,
+    // Identifies the establishment for the consolidated national registry.
+    identificationCode: isOnline ? "ONLINE-01" : "SUC-001",
+  };
+}
+
 /**
  * Guarantees a business has at least one establishment so it can receive
  * complaints from day one.
@@ -29,15 +59,10 @@ export async function provisionDefaultEstablishment(
     return existing[0];
   }
 
-  const isOnline = businessType === "tienda_virtual";
-
   return await storage.createEstablishment({
     businessId: business.id,
-    name: isOnline ? "Tienda Online" : "Casa Matriz",
-    address: business.address,
-    phone: business.phone ?? null,
-    // Identifies the establishment for the consolidated national registry.
-    identificationCode: isOnline ? "ONLINE-01" : "SUC-001",
     isActive: true,
+    ...defaultEstablishmentFor(business, businessType),
   });
 }
+

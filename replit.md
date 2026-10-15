@@ -128,12 +128,24 @@ competitors. Everything below is wired end to end (server + client):
   script) plus a honeypot field on the public form; both verified on submission.
 
 **Phase 2 - commercial**
-- **Plans & quotas**: `shared/plans.ts` defines Esencial/Profesional/Corporativo (monthly and
-  annual), quotas are enforced on complaints, users, establishments, businesses and
-  attachments, and every new tenant starts a 7-day trial with Profesional features.
+- **Plans & quotas**: `shared/plans.ts` defines Básico/Pro/Empresarial (monthly and
+  annual, annual ~50% off), quotas are enforced on complaints (unlimited on all paid plans), users, establishments, businesses and
+  attachments, and every new tenant starts a 15-day trial with Pro features.
   `GET /api/plans`, `GET|POST /api/subscription`, UI at `/plan`.
 - **Multi-RUC switcher**: `user_business_access` grants a login access to several businesses;
   `GET /api/auth/businesses` + `POST /api/auth/switch-business` and a header dropdown.
+- **Access requests** (one RUC, one tenant, no dead end): a RUC that is already registered
+  cannot be registered again, so the second legitimate person (the accountant of a client, a
+  new partner, staff turnover) asks for access instead: `POST /api/businesses/access-requests`
+  → the tenant's administrators are notified → `GET /api/businesses/access-requests`
+  (incoming) / `.../mine` and `POST .../:id/approve|reject` (UI at `/empresas`). Approving
+  grants the switcher access and, when the requester has no tenant yet, finishes their
+  onboarding instead of sending them back to the wizard.
+- **Email verification**: signup emails a confirmation link (inside the welcome email) for the
+  mailbox that receives every complaint notification: `POST /api/auth/verify-email`,
+  `POST /api/auth/resend-verification`, page at `/acceso/verificar-email` and a banner in the
+  panel while `is_email_verified` is false. Completing a password reset also confirms the
+  address, because following that link proves control of the mailbox too.
 - **Configurable templates**: per-business brand color, email subject prefix/header/footer and
   portal confirmation text (`PATCH /api/libro-configuration`, UI at `/personalizacion`).
 - **SLA reminders + escalation**: `slaMonitoringService` turns the existing SLA prediction into
@@ -161,6 +173,25 @@ competitors. Everything below is wired end to end (server + client):
   `/api`), WCAG AA skip link/landmarks/ARIA labels, an accessibility and cookie statement at
   `/accesibilidad`, an informational cookie notice, and a public status page `/estado` backed by
   `GET /api/status`.
+- **Redes sociales (la vía simple)**: `client/src/components/libro/social-channels-card.tsx` en
+  `/integraciones` entrega el enlace público del Libro, textos listos para copiar y los pasos por
+  plataforma para publicarlo en WhatsApp Business, Instagram, TikTok, YouTube y Facebook. Sin API,
+  sin alta en Meta y disponible en todos los planes: para quien vende sin web, este ES el camino de
+  cumplimiento (el Libro virtual debe ser accesible desde el mismo medio donde vende).
+  Qué guía ve cada cliente lo decide `client/src/lib/channel-fit.ts` (probado en `channel-fit.test.ts`)
+  a partir de `libro_configuration.business_type`: tienda virtual → enlace web/widget; local físico y
+  servicios → guía de perfiles sociales; mixto o valor desconocido → ambas. El tipo es editable en la
+  misma página (`PATCH /api/libro-configuration`, solo admin) porque el onboarding puede equivocarse.
+- **WhatsApp Cloud API (add-on opcional, sin UI)**: `server/services/whatsappService.ts` y
+  `server/routes/whatsapp.routes.ts` pueden responder automáticamente los mensajes entrantes con el
+  enlace al Libro y avisar una respuesta ya escrita (`POST /api/complaints/:id/whatsapp-notify`,
+  limitado por `features.whatsapp`). Exige una WABA de Meta (variables de entorno) y un número por
+  empresa; sin esas variables no envía nada y ninguna pantalla lo muestra. El canal escrito
+  (correo/carta) sigue siendo el registro legal.
+- **Mobile shell**: bottom navigation is four destinations plus a "Más" sheet
+  (`client/src/lib/navigation.ts`, tested in `navigation.test.ts`) with >=44px targets and
+  safe-area padding; pinch-zoom is not blocked (`viewport` without `maximum-scale`, WCAG 1.4.4)
+  and the tables drop secondary columns below `sm`/`lg` instead of squeezing them.
 
 ### API Architecture
 RESTful API endpoints organized by domain:
@@ -172,6 +203,7 @@ RESTful API endpoints organized by domain:
 - `/api/api-keys`, `/api/webhooks`, `/api/integrations/*` - Corporativo integrations
 - `/api/v1/*` - public REST API for CRM/ERP (API-key auth)
 - `/api/status` - public health/status page feed
+- `/api/whatsapp/webhook` (Meta), `/api/whatsapp/status`, `/api/complaints/:id/whatsapp-notify` - WhatsApp Cloud API
 - `/api/public/*` - Public-facing complaint submission portal (CAPTCHA-protected)
 
 ### UI/UX Design

@@ -31,7 +31,7 @@ export function registerIntegrationsRoutes(app: Express): void {
 
       if (!(await hasFeature(req.user.businessId, 'api'))) {
         return res.status(402).json({
-          message: "Las claves de API están disponibles en el plan Corporativo. Mejore su plan en la sección \"Plan y Cuotas\".",
+          message: "Las claves de API están disponibles en el plan Empresarial. Mejore su plan en la sección \"Plan y Cuotas\".",
           code: "plan_upgrade_required",
         });
       }
@@ -92,7 +92,7 @@ export function registerIntegrationsRoutes(app: Express): void {
 
       if (!(await hasFeature(req.user.businessId, 'webhooks'))) {
         return res.status(402).json({
-          message: "Los webhooks están disponibles en el plan Corporativo. Mejore su plan en la sección \"Plan y Cuotas\".",
+          message: "Los webhooks están disponibles en el plan Empresarial. Mejore su plan en la sección \"Plan y Cuotas\".",
           code: "plan_upgrade_required",
         });
       }
@@ -147,6 +147,13 @@ export function registerIntegrationsRoutes(app: Express): void {
 
   app.get('/api/integrations/widget', requireAuth, async (req: any, res) => {
     try {
+      if (!(await hasFeature(req.user.businessId, 'widget'))) {
+        return res.status(402).json({
+          message: "El widget para su web o tienda virtual está disponible desde el plan Pro. Mejore su plan en \"Plan y Cuotas\".",
+          code: "plan_upgrade_required",
+        });
+      }
+
       const config = await storage.getLibroConfiguration(req.user.businessId);
       if (!config) {
         return res.status(404).json({ message: "Primero configure su Libro de Reclamaciones" });

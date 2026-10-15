@@ -2,9 +2,17 @@ import type { Express } from "express";
 
 import { aiService, getAIStatus } from "../services/aiService";
 import { rankSlaRisk } from "../services/slaPredictionService";
+import { hasFeature } from "../services/subscriptionService";
 import { requireAuth } from "../middleware/requireAuth";
 import { aiLimiter, publicAiLimiter } from "../middleware/rateLimits";
 import { storage } from "../storage";
+
+/** Reusable 402 for the AI features that only Pro and up include. */
+const AI_DRAFTING_REQUIRED = {
+  message:
+    "La IA que redacta respuestas está disponible desde el plan Pro. Mejore su plan en \"Plan y Cuotas\".",
+  code: "plan_upgrade_required",
+};
 
 /**
  * AI assisted complaint classification, response drafting and trend analysis.
@@ -35,6 +43,10 @@ export function registerAiRoutes(app: Express): void {
 
   app.post('/api/ai/suggest-response', requireAuth, aiLimiter, async (req: any, res) => {
     try {
+      if (!(await hasFeature(req.user.businessId, 'aiDrafting'))) {
+        return res.status(402).json(AI_DRAFTING_REQUIRED);
+      }
+
       const { complaintText, complaintType } = req.body;
 
       if (!complaintText || !complaintType) {
@@ -60,6 +72,10 @@ export function registerAiRoutes(app: Express): void {
   // and get them reviewed against art. 47 of the Consumer Protection Code.
   app.post('/api/ai/abusive-clauses', requireAuth, aiLimiter, async (req: any, res) => {
     try {
+      if (!(await hasFeature(req.user.businessId, 'aiDrafting'))) {
+        return res.status(402).json(AI_DRAFTING_REQUIRED);
+      }
+
       const { text } = req.body;
 
       if (!text || typeof text !== 'string' || text.trim().length < 20) {
@@ -77,6 +93,10 @@ export function registerAiRoutes(app: Express): void {
   // Executive case summary (Phase 3.11): the 30-second brief for managers.
   app.post('/api/ai/case-summary', requireAuth, aiLimiter, async (req: any, res) => {
     try {
+      if (!(await hasFeature(req.user.businessId, 'aiDrafting'))) {
+        return res.status(402).json(AI_DRAFTING_REQUIRED);
+      }
+
       const { complaintId } = req.body;
 
       const complaint = await storage.getComplaint(complaintId);
@@ -107,6 +127,10 @@ export function registerAiRoutes(app: Express): void {
   // code in aiService with no route or UI).
   app.post('/api/ai/trends', requireAuth, aiLimiter, async (req: any, res) => {
     try {
+      if (!(await hasFeature(req.user.businessId, 'aiDrafting'))) {
+        return res.status(402).json(AI_DRAFTING_REQUIRED);
+      }
+
       const complaints = await storage.getComplaintsByBusiness(req.user.businessId);
       const openComplaints = complaints
         .filter((complaint) => complaint.status === 'new' || complaint.status === 'in_progress')

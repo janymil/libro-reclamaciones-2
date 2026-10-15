@@ -2,6 +2,7 @@ import {
   PLANS,
   TRIAL_DAYS,
   getEffectivePlan,
+  isComplaintTypeAllowed,
   isPlanId,
   isTrialing,
   type PlanDefinition,
@@ -13,9 +14,9 @@ import type { Business } from "@shared/schema";
 import { storage } from "../storage";
 
 /**
- * Plans & quotas framework (Phase 2.6).
+ * Plans & quotas framework.
  *
- * Every new business starts a 7-day trial with the full "profesional"
+ * Every new business starts a trial (TRIAL_DAYS) with the full "profesional"
  * feature set; afterwards the stored plan's quotas apply. Enforcement is a
  * pure function (`checkQuota` in shared/plans.ts) fed with usage counters
  * resolved here, so the same logic drives intake, users, establishments,
@@ -24,6 +25,8 @@ import { storage } from "../storage";
 
 export interface SubscriptionUsage {
   complaintsThisMonth: number;
+  /** Lifetime complaints (the Gratis quota is a total, not monthly). */
+  complaintsTotal: number;
   users: number;
   establishments: number;
   businesses: number;
@@ -46,11 +49,15 @@ export function monthWindowStart(now: Date = new Date()): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
+/** Start of time: counting every complaint the tenant ever received. */
+const LIFETIME_START = new Date(0);
+
 export async function getSubscriptionUsage(businessId: string, userId: string): Promise<SubscriptionUsage> {
   const monthStart = monthWindowStart();
 
-  const [complaintsThisMonth, users, establishments] = await Promise.all([
+  const [complaintsThisMonth, complaintsTotal, users, establishments] = await Promise.all([
     storage.countComplaintsSince(businessId, monthStart),
+    storage.countComplaintsSince(businessId, LIFETIME_START),
     countBusinessUsers(businessId),
     countBusinessEstablishments(businessId),
   ]);
@@ -62,7 +69,7 @@ export async function getSubscriptionUsage(businessId: string, userId: string): 
     businesses.add(businessId);
   }
 
-  return { complaintsThisMonth, users, establishments, businesses: businesses.size };
+  return { complaintsThisMonth, complaintsTotal, users, establishments, businesses: businesses.size };
 }
 
 async function countBusinessUsers(businessId: string): Promise<number> {
@@ -120,6 +127,8 @@ export async function enforceQuota(
     // resource needs the full usage snapshot of the business.
     if (resource === 'complaintsThisMonth') {
       usage = await storage.countComplaintsSince(businessId, monthWindowStart());
+    } else if (resource === 'complaintsTotal') {
+      usage = await storage.countComplaintsSince(businessId, LIFETIME_START);
     } else if (userId) {
       const snapshot = await getSubscriptionUsage(businessId, userId);
       usage = snapshot[resource as keyof SubscriptionUsage] ?? 0;
@@ -131,6 +140,35 @@ export async function enforceQuota(
   return checkQuota(plan, resource, usage);
 }
 
+/**
+ * Whether the business's effective plan accepts this complaint type.
+ *
+ * Gratis only accepts Reclamos (a disconformity with the product/service), not
+ * Quejas (a disconformity with the attention received). It is a deliberate
+ * limit on the free tier: a business that gets Quejas has real
+ * customer-service volume and moves (or their customers do) to Básico.
+ */
+export async function enforceComplaintType(
+  businessId: string,
+  complaintType: string,
+): Promise<QuotaCheck> {
+  const business = await storage.getBusiness(businessId);
+  if (!business) {
+    return { allowed: false, reason: "Empresa no encontrada" };
+  }
+
+  const plan = getEffectivePlan(business);
+  if (isComplaintTypeAllowed(plan, complaintType)) {
+    return { allowed: true };
+  }
+
+  return {
+    allowed: false,
+    reason:
+      `Su plan ${plan.name} acepta solo Reclamos. Para registrar Quejas, active el plan Básico en "Plan y Cuotas".`,
+  };
+}
+
 /** Whether a plan-gated feature is available to the business. */
 export async function hasFeature(businessId: string, feature: keyof PlanDefinition["features"]): Promise<boolean> {
   const business = await storage.getBusiness(businessId);
@@ -140,7 +178,8 @@ export async function hasFeature(businessId: string, feature: keyof PlanDefiniti
   return getEffectivePlan(business).features[feature];
 }
 
-/** Trial fields applied to every newly created business. */
+/** Trial fields applied to every newly created business. New tenants store
+ * "gratis" so when the trial ends they fall back to Free automatically. */
 export function newBusinessTrialDefaults(now: Date = new Date()): {
   subscriptionPlan: string;
   subscriptionStatus: string;
@@ -150,7 +189,7 @@ export function newBusinessTrialDefaults(now: Date = new Date()): {
   const trialEndsAt = new Date(now);
   trialEndsAt.setUTCDate(trialEndsAt.getUTCDate() + TRIAL_DAYS);
   return {
-    subscriptionPlan: "esencial",
+    subscriptionPlan: "gratis",
     subscriptionStatus: "trialing",
     trialEndsAt,
     planPeriod: "monthly",

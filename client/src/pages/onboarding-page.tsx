@@ -5,8 +5,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { useMutation } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { apiRequest, apiErrorMessage } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { Loader2, Building2, Book, Upload, ExternalLink, Search } from "lucide-react";
@@ -73,6 +73,103 @@ export default function OnboardingPage() {
     whatsappNumber: '',
     websiteUrl: ''
   });
+
+  /**
+   * Resume state.
+   *
+   * A previous attempt may have written the tenant (or the whole libro) before
+   * failing, so the wizard loads whatever already exists instead of asking the
+   * user to type it again - and, because the server commits atomically, this is
+   * the normal way to finish a partially completed onboarding.
+   */
+  const { data: existingBusiness } = useQuery<any>({
+    queryKey: ['/api/businesses/current'],
+    enabled: isAuthenticated,
+  });
+
+  const { data: existingLibro } = useQuery<any>({
+    queryKey: ['/api/libro-configuration'],
+    enabled: isAuthenticated && Boolean(existingBusiness),
+  });
+
+  const [isResumed, setIsResumed] = useState(false);
+
+  // Set when the RUC is already registered by another account: the wizard can
+  // then offer "solicitar acceso" instead of leaving the user stuck.
+  const [accessRequest, setAccessRequest] = useState<{ businessName: string } | null>(null);
+  const [isRequestingAccess, setIsRequestingAccess] = useState(false);
+
+  // Prefill from whatever a previous attempt already saved. If the libro itself
+  // exists, the user only has to confirm it: jump straight to step 2.
+  useEffect(() => {
+    if (!existingBusiness) return;
+
+    setBusinessForm((prev) => ({
+      ...prev,
+      ruc: existingBusiness.ruc ?? prev.ruc,
+      businessName: existingBusiness.businessName ?? prev.businessName,
+      commercialName: existingBusiness.commercialName ?? prev.commercialName,
+      phone: existingBusiness.phone ?? prev.phone,
+      address: existingBusiness.address ?? prev.address,
+      distrito: existingBusiness.distrito ?? prev.distrito,
+      provincia: existingBusiness.provincia ?? prev.provincia,
+      departamento: existingBusiness.departamento ?? prev.departamento,
+    }));
+
+    if (existingBusiness.departamento) {
+      setAvailableProvinces(getProvinces(existingBusiness.departamento));
+      if (existingBusiness.provincia) {
+        setAvailableDistricts(
+          getDistricts(existingBusiness.departamento, existingBusiness.provincia),
+        );
+      }
+    }
+
+    setIsResumed(true);
+  }, [existingBusiness]);
+
+  useEffect(() => {
+    if (!existingLibro) return;
+
+    setLibroForm((prev) => ({
+      ...prev,
+      libroName: existingLibro.libroName ?? prev.libroName,
+      urlSlug: existingLibro.urlSlug ?? prev.urlSlug,
+      businessType: existingLibro.businessType ?? prev.businessType,
+      notificationEmail: existingLibro.notificationEmail ?? prev.notificationEmail,
+      whatsappNumber: existingLibro.whatsappNumber ?? prev.whatsappNumber,
+      websiteUrl: existingLibro.websiteUrl ?? prev.websiteUrl,
+    }));
+
+    setStep(2);
+  }, [existingLibro]);
+
+  /**
+   * Asks the current administrators of the typed RUC for access.
+   *
+   * The alternative was a permanent 409: a RUC belongs to one tenant, so a
+   * second legitimate person (the accountant, a new partner, a replacement
+   * employee) could never register it and had nowhere to go.
+   */
+  const requestAccess = async () => {
+    setIsRequestingAccess(true);
+    try {
+      const response = await apiRequest('POST', '/api/businesses/access-requests', {
+        ruc: businessForm.ruc,
+      });
+      const data = await response.json();
+      toast({ title: 'Solicitud enviada', description: data.message });
+      setAccessRequest(null);
+    } catch (error) {
+      toast({
+        title: 'No se pudo enviar la solicitud',
+        description: apiErrorMessage(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsRequestingAccess(false);
+    }
+  };
 
   // RUC lookup function
   const lookupRUC = async (ruc: string) => {
@@ -155,9 +252,31 @@ export default function OnboardingPage() {
       setLocation('/panel');
     },
     onError: (error: Error) => {
+      const raw = error.message;
+
+      // The RUC belongs to another account: offer the way forward instead of
+      // repeating a message the user cannot act on.
+      if (raw.includes('ruc_already_registered')) {
+        let businessName = 'esa empresa';
+        try {
+          const body = JSON.parse(raw.replace(/^\d{3}:\s*/, ''));
+          if (body?.businessName) businessName = body.businessName;
+        } catch {
+          // Body was not our JSON envelope: the generic wording is enough.
+        }
+        setAccessRequest({ businessName });
+        return;
+      }
+
+      // Already configured (for instance in another tab): nothing to redo.
+      if (raw.includes('already_onboarded')) {
+        setLocation('/panel');
+        return;
+      }
+
       toast({
         title: "Error al completar configuración",
-        description: error.message,
+        description: apiErrorMessage(error),
         variant: "destructive",
       });
     }
@@ -262,6 +381,52 @@ export default function OnboardingPage() {
               <span>Configurar libro</span>
             </div>
           </div>
+
+          {/* Resumed: a previous attempt already saved part of this wizard */}
+          {isResumed && (
+            <div
+              className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900"
+              data-testid="notice-onboarding-resumed"
+            >
+              <p className="font-medium">Recuperamos lo que ya habíamos guardado de tu empresa.</p>
+              <p className="mt-1">
+                Revisa los datos y continúa donde quedaste: al finalizar, tu Libro queda publicado.
+              </p>
+            </div>
+          )}
+
+          {/* That RUC belongs to another account: the way forward is asking for access */}
+          {accessRequest && (
+            <div
+              role="alert"
+              className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+              data-testid="notice-ruc-taken"
+            >
+              <p className="font-medium">
+                El RUC {businessForm.ruc} ya está registrado en {accessRequest.businessName}.
+              </p>
+              <p className="mt-1">
+                Si trabajas en esa empresa, puedes solicitar acceso: el administrador actual recibirá tu
+                pedido y deberá aprobarlo. Mientras tanto, esta empresa no se puede crear de nuevo.
+              </p>
+              <Button
+                type="button"
+                onClick={requestAccess}
+                disabled={isRequestingAccess}
+                className="mt-3"
+                data-testid="button-request-access"
+              >
+                {isRequestingAccess ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Enviando…
+                  </>
+                ) : (
+                  'Solicitar acceso a esta empresa'
+                )}
+              </Button>
+            </div>
+          )}
 
           {/* Step 1: Business Information */}
           {step === 1 && (

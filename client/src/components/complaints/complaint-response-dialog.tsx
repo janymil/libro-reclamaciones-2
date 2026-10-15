@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useUpgradeToast } from "@/hooks/use-plan-upgrade";
 import { useUpdateComplaint, useAISuggestResponse, useSimilarComplaints, useCaseSummary, type CaseSummaryResult } from "@/hooks/use-complaints";
 import { useBusinessDays } from "@/hooks/use-business-days";
 import type { Complaint } from "@shared/schema";
@@ -30,6 +31,7 @@ interface ComplaintResponseDialogProps {
  */
 export default function ComplaintResponseDialog({ complaint, open, onOpenChange }: ComplaintResponseDialogProps) {
   const { toast } = useToast();
+  const upgradeToast = useUpgradeToast();
   const { getBusinessDaysRemaining, getUrgencyLevel } = useBusinessDays();
   const updateComplaint = useUpdateComplaint();
   const suggestResponse = useAISuggestResponse();
@@ -76,11 +78,7 @@ export default function ComplaintResponseDialog({ complaint, open, onOpenChange 
             : "Revise y ajuste la respuesta antes de enviarla.",
       });
     } catch (error) {
-      toast({
-        title: "No se pudo generar la sugerencia",
-        description: "Verifique la conexión con el servicio de IA e intente nuevamente.",
-        variant: "destructive",
-      });
+      upgradeToast(error, 'No se pudo generar la sugerencia');
     }
   };
 

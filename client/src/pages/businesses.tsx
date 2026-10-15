@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiRequest } from '@/lib/queryClient';
+import { apiRequest, apiErrorMessage } from '@/lib/queryClient';
 import AppLayout from '@/components/layout/app-layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,10 +13,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Plus, Building2, MapPin, Users, Settings, Save } from 'lucide-react';
+import { Plus, Building2, MapPin, Users, Settings, Save, MailQuestion, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { insertBusinessSchema, type InsertBusiness } from '@shared/schema';
 import type { BusinessSummary } from '@/lib/api-types';
 import { useToast } from '@/hooks/use-toast';
+import { useUpgradeToast } from '@/hooks/use-plan-upgrade';
 import { useAuth } from '@/hooks/use-auth';
 
 export default function Businesses() {
@@ -24,6 +25,7 @@ export default function Businesses() {
   const [manageTarget, setManageTarget] = useState<BusinessSummary | null>(null);
   const [manageForm, setManageForm] = useState<Partial<InsertBusiness>>({});
   const { toast } = useToast();
+  const upgradeToast = useUpgradeToast();
   const queryClient = useQueryClient();
 
   // Creating and editing a tenant is admin-only server-side
@@ -69,11 +71,23 @@ export default function Businesses() {
       form.reset();
     },
     onError: (error) => {
-      toast({
-        title: "Error",
-        description: "No se pudo crear la empresa. Intente nuevamente.",
-        variant: "destructive",
-      });
+      const raw = error instanceof Error ? error.message : '';
+
+      // RUC already registered: not a plan problem, and no longer a dead end.
+      if (raw.includes('ruc_already_registered')) {
+        let businessName = 'otra cuenta';
+        try {
+          const body = JSON.parse(raw.replace(/^\d{3}:\s*/, ''));
+          if (body?.businessName) businessName = body.businessName;
+        } catch {
+          // Not our JSON envelope: the generic wording is fine.
+        }
+        setTakenRuc({ ruc: form.getValues('ruc'), businessName });
+        return;
+      }
+
+      // The number of RUCs a login may manage is a plan limit.
+      upgradeToast(error, 'No se pudo crear la empresa');
     },
   });
 
@@ -119,6 +133,81 @@ export default function Businesses() {
     });
   };
 
+  // ---- Access requests (duplicate RUC) --------------------------------------
+  // A RUC belongs to one tenant. The second legitimate person - the accountant
+  // of a client, a new partner, staff turnover - asks here, and an administrator
+  // of that tenant approves or rejects.
+
+  interface AccessRequestSummary {
+    id: string;
+    businessName: string;
+    ruc: string;
+    requesterEmail: string;
+    requesterName: string | null;
+    message: string | null;
+    status: string;
+    createdAt: string;
+  }
+
+  // Incoming: only an admin of the target tenant may see or decide these.
+  const { data: incomingRequests } = useQuery<AccessRequestSummary[]>({
+    queryKey: ['/api/businesses/access-requests'],
+    enabled: isAdmin,
+  });
+
+  // Sent by this login, so it can follow up on its own request.
+  const { data: myRequests } = useQuery<AccessRequestSummary[]>({
+    queryKey: ['/api/businesses/access-requests/mine'],
+  });
+
+  const pendingIncoming = (incomingRequests ?? []).filter((r) => r.status === 'pending');
+
+  // Set when the create dialog hit a RUC that already exists, so the page can
+  // offer "solicitar acceso" instead of a dead end.
+  const [takenRuc, setTakenRuc] = useState<{ ruc: string; businessName: string } | null>(null);
+
+  const decideMutation = useMutation({
+    mutationFn: async (input: { id: string; action: 'approve' | 'reject' }) => {
+      const response = await apiRequest(
+        'POST',
+        `/api/businesses/access-requests/${input.id}/${input.action}`,
+      );
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/businesses/access-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/businesses/access-requests/mine'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/businesses'] });
+      toast({ title: 'Solicitud atendida', description: data.message });
+    },
+    onError: (error) => {
+      toast({
+        title: 'No se pudo atender la solicitud',
+        description: apiErrorMessage(error),
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const requestAccessMutation = useMutation({
+    mutationFn: async (ruc: string) => {
+      const response = await apiRequest('POST', '/api/businesses/access-requests', { ruc });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/businesses/access-requests/mine'] });
+      toast({ title: 'Solicitud enviada', description: data.message });
+      setTakenRuc(null);
+    },
+    onError: (error) => {
+      toast({
+        title: 'No se pudo enviar la solicitud',
+        description: apiErrorMessage(error),
+        variant: 'destructive',
+      });
+    },
+  });
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -144,6 +233,41 @@ export default function Businesses() {
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl">
+              {takenRuc && (
+                <div
+                  role="alert"
+                  data-testid="notice-ruc-taken"
+                  className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+                >
+                  <p className="font-medium">
+                    El RUC {takenRuc.ruc} ya está registrado en {takenRuc.businessName}.
+                  </p>
+                  <p className="mt-1">
+                    Un RUC solo puede tener una empresa registrada. Si trabajas en esa empresa, solicita
+                    acceso: el administrador actual recibirá tu pedido y deberá aprobarlo.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="mt-3"
+                    disabled={requestAccessMutation.isPending}
+                    onClick={() => requestAccessMutation.mutate(takenRuc.ruc)}
+                    data-testid="button-request-access"
+                  >
+                    {requestAccessMutation.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Enviando…
+                      </>
+                    ) : (
+                      <>
+                        <MailQuestion className="h-4 w-4 mr-2" />
+                        Solicitar acceso a esta empresa
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
               <DialogHeader>
                 <DialogTitle>Registrar Nueva Empresa</DialogTitle>
                 <DialogDescription>
@@ -269,32 +393,8 @@ export default function Businesses() {
                     />
                     <FormField
                       control={form.control}
-                      name="subscriptionPlan"
+                      name="website"
                       render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Plan</FormLabel>
-                          <Select onValueChange={field.onChange} defaultValue={field.value}>
-                            <FormControl>
-                              <SelectTrigger data-testid="select-business-plan">
-                                <SelectValue placeholder="Seleccionar plan" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              <SelectItem value="basic">Básico</SelectItem>
-                              <SelectItem value="professional">Profesional</SelectItem>
-                              <SelectItem value="enterprise">Empresarial</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-
-                  <FormField
-                    control={form.control}
-                    name="website"
-                    render={({ field }) => (
                       <FormItem>
                         <FormLabel>Sitio web (opcional)</FormLabel>
                         <FormControl>
@@ -304,6 +404,7 @@ export default function Businesses() {
                       </FormItem>
                     )}
                   />
+                  </div>
 
                   <div className="flex justify-end space-x-2 pt-4">
                     <Button
@@ -405,6 +506,105 @@ export default function Businesses() {
             </div>
           )}
         </div>
+        {/* Solicitudes de acceso recibidas: solo un admin de la empresa destino */}
+        {isAdmin && pendingIncoming.length > 0 && (
+          <Card data-testid="card-incoming-access-requests">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <MailQuestion className="h-5 w-5 text-amber-600" />
+                Solicitudes de acceso pendientes
+              </CardTitle>
+              <CardDescription>
+                Personas que piden administrar una empresa cuyo RUC ya está registrado. Aprobar les
+                da acceso a esa empresa; rechazar no concede nada.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {pendingIncoming.map((request) => (
+                <div
+                  key={request.id}
+                  className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium text-gray-900">
+                      {request.requesterName ?? request.requesterEmail}
+                    </p>
+                    <p className="text-sm text-gray-600">{request.requesterEmail}</p>
+                    <p className="mt-1 text-sm text-gray-600">
+                      Solicita acceso a <strong>{request.businessName}</strong> (RUC {request.ruc})
+                    </p>
+                    {request.message && (
+                      <p className="mt-1 text-sm italic text-gray-500">“{request.message}”</p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => decideMutation.mutate({ id: request.id, action: 'approve' })}
+                      disabled={decideMutation.isPending}
+                      data-testid={`button-approve-${request.id}`}
+                    >
+                      <CheckCircle2 className="h-4 w-4 mr-1" />
+                      Aprobar
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => decideMutation.mutate({ id: request.id, action: 'reject' })}
+                      disabled={decideMutation.isPending}
+                      data-testid={`button-reject-${request.id}`}
+                    >
+                      <XCircle className="h-4 w-4 mr-1" />
+                      Rechazar
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Mis solicitudes de acceso enviadas */}
+        {(myRequests ?? []).length > 0 && (
+          <Card data-testid="card-my-access-requests">
+            <CardHeader>
+              <CardTitle className="text-lg">Mis solicitudes de acceso</CardTitle>
+              <CardDescription>
+                El estado de los accesos que has pedido a empresas ya registradas.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {(myRequests ?? []).map((request) => (
+                <div
+                  key={request.id}
+                  className="flex items-center justify-between rounded-lg border p-3 text-sm"
+                >
+                  <div>
+                    <p className="font-medium text-gray-900">{request.businessName}</p>
+                    <p className="text-gray-600">RUC {request.ruc}</p>
+                  </div>
+                  <Badge
+                    variant={
+                      request.status === 'approved'
+                        ? 'default'
+                        : request.status === 'pending'
+                          ? 'secondary'
+                          : 'destructive'
+                    }
+                    data-testid={`badge-access-request-${request.status}`}
+                  >
+                    {request.status === 'approved'
+                      ? 'Aprobada'
+                      : request.status === 'pending'
+                        ? 'Pendiente'
+                        : 'Rechazada'}
+                  </Badge>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
         {/* Gestionar empresa */}
         <Dialog open={!!manageTarget} onOpenChange={(open) => !open && setManageTarget(null)}>
           <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">

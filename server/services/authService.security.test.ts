@@ -11,7 +11,12 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const h = vi.hoisted(() => {
   const state: any = { userById: undefined, userByEmail: undefined };
-  const captured: { passwords: string[] } = { passwords: [] };
+  const captured: {
+    passwords: string[];
+    verificationTokens: Array<{ userId: string; token: string; expires: Date }>;
+    emailedVerificationTokens: string[];
+    userInserts: any[];
+  } = { passwords: [], verificationTokens: [], emailedVerificationTokens: [], userInserts: [] };
   const cryptoUsage = { randomIntCalls: 0 };
   return { state, captured, cryptoUsage };
 });
@@ -31,7 +36,14 @@ vi.mock("../storage", () => ({
   storage: {
     getUserByEmail: async () => h.state.userByEmail,
     getUserById: async () => h.state.userById,
-    createUser: async (data: any) => ({ id: "new-user", ...data }),
+    createUser: async (data: any) => {
+      h.captured.userInserts.push(data);
+      return { id: "new-user", ...data };
+    },
+    // Signup also issues the email-verification link through this writer.
+    setEmailVerificationToken: async (userId: string, token: string, expires: Date) => {
+      h.captured.verificationTokens.push({ userId, token, expires });
+    },
     createAuthAuditLog: async (data: any) => data,
     createLoginAttempt: async (data: any) => data,
   },
@@ -39,8 +51,16 @@ vi.mock("../storage", () => ({
 
 vi.mock("./emailService", () => ({
   emailService: {
-    sendWelcomePassword: async (_email: string, _name: string, password: string) => {
+    sendWelcomePassword: async (
+      _email: string,
+      _name: string,
+      password: string,
+      verificationToken?: string,
+    ) => {
       h.captured.passwords.push(password);
+      if (verificationToken) {
+        h.captured.emailedVerificationTokens.push(verificationToken);
+      }
     },
   },
 }));
@@ -58,6 +78,9 @@ import { authService } from "./authService";
 
 beforeEach(() => {
   h.captured.passwords = [];
+  h.captured.verificationTokens = [];
+  h.captured.emailedVerificationTokens = [];
+  h.captured.userInserts = [];
 });
 
 describe("registration passwords are generated with a CSPRNG", () => {
@@ -96,6 +119,44 @@ describe("registration passwords are generated with a CSPRNG", () => {
 
     // No collisions across 25 registrations.
     expect(new Set(passwords).size).toBe(passwords.length);
+  });
+});
+
+describe("signup confirms the mailbox it will notify", () => {
+  it("issues a CSPRNG email-verification token bound to the new account", async () => {
+    const result = await authService.registerUser(
+      { firstName: "Juana", lastName: "Pérez", email: "juana@example.com" },
+      "127.0.0.1",
+      "vitest",
+    );
+
+    expect(result.success).toBe(true);
+
+    // Exactly one token written, for the account just created: 32 bytes as hex.
+    expect(h.captured.verificationTokens).toHaveLength(1);
+    const issued = h.captured.verificationTokens[0];
+    expect(issued.userId).toBe("new-user");
+    expect(issued.token).toMatch(/^[0-9a-f]{64}$/);
+    // ~24 hours out, so the link is never already expired when it is opened.
+    expect(issued.expires.getTime()).toBeGreaterThan(Date.now());
+
+    // The email carries exactly the stored token, which is what makes the
+    // confirmation page able to consume it.
+    expect(h.captured.emailedVerificationTokens).toEqual([issued.token]);
+  });
+
+  it("makes the new account the admin of its own tenant, explicitly", async () => {
+    await authService.registerUser(
+      { firstName: "Juana", lastName: "Pérez", email: "juana@example.com" },
+      "127.0.0.1",
+      "vitest",
+    );
+
+    // Never rely on a column DEFAULT here: on a database where users.role lost
+    // its default, a signup with role NULL is locked out of every admin endpoint.
+    expect(h.captured.userInserts[0].role).toBe("admin");
+    expect(h.captured.userInserts[0].onboardingCompleted).toBe(false);
+    expect(h.captured.userInserts[0].isEmailVerified).toBe(false);
   });
 });
 

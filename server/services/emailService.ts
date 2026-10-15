@@ -78,9 +78,10 @@ export class EmailService {
       return;
     }
 
-    // SMTP configuration using provided Hostinger credentials
+    // SMTP configuration. Defaults suit Gmail; any other provider only needs
+    // SMTP_HOST and SMTP_PORT to change.
     const emailConfig: EmailConfig = {
-      host: process.env.SMTP_HOST || 'smtp.hostinger.com',
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
       port: parseInt(process.env.SMTP_PORT || '465'),
       secure: parseInt(process.env.SMTP_PORT || '465') === 465, // true for 465, false for other ports
       auth: {
@@ -89,18 +90,60 @@ export class EmailService {
       }
     };
 
+    // Certificate verification stays ON by default (Gmail and every host with a
+    // trusted certificate). The previous unconditional `rejectUnauthorized:
+    // false` disabled it for everyone, which is a man-in-the-middle hazard; a
+    // self-signed server now has to opt out explicitly with
+    // SMTP_TLS_REJECT_UNAUTHORIZED=false.
+    const rejectUnauthorized = process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false';
+
     this.transporter = nodemailer.createTransport({
       ...emailConfig,
       tls: {
-        rejectUnauthorized: false // Allow self-signed certificates if needed
+        rejectUnauthorized
       }
     });
   }
 
   /**
-   * Send welcome email with generated password
+   * Send welcome email with generated password.
+   *
+   * `verificationToken`, when present, embeds the "confirma tu correo" link. It
+   * travels in this email rather than in a second one so signup stays a single
+   * message, while still making `users.is_email_verified` mean something: the
+   * mailbox that receives every complaint notification is proven to belong to
+   * the account owner.
    */
-  async sendWelcomePassword(email: string, firstName: string, password: string): Promise<void> {
+  async sendWelcomePassword(
+    email: string,
+    firstName: string,
+    password: string,
+    verificationToken?: string,
+  ): Promise<void> {
+    const verificationUrl = verificationToken
+      ? `${process.env.APP_URL || 'https://librovirtual.pe'}/acceso/verificar-email?token=${verificationToken}`
+      : null;
+
+    const verificationHtml = verificationUrl
+      ? `
+              <div style="text-align: center;">
+                <a href="${verificationUrl}" class="button">Confirmar mi correo</a>
+              </div>
+
+              <p style="color: #64748b; font-size: 14px;">
+                Confirma tu correo para que podamos avisarte de cada nueva reclamación.
+                El enlace vence en 24 horas.
+              </p>
+`
+      : '';
+
+    const verificationText = verificationUrl
+      ? `
+        Confirma tu correo (el enlace vence en 24 horas):
+        ${verificationUrl}
+`
+      : '';
+
     const mailOptions = {
       from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to: email,
@@ -155,6 +198,8 @@ export class EmailService {
                 3. ¡Comienza a gestionar tus reclamaciones de forma digital!
               </p>
 
+              ${verificationHtml}
+
               <div style="text-align: center;">
                 <a href="${process.env.APP_URL || 'https://librovirtual.pe'}/panel" class="button">
                   Acceder a mi cuenta
@@ -180,7 +225,7 @@ export class EmailService {
         Tu cuenta en LibroVirtual.pe ha sido creada exitosamente.
 
         Tu contraseña de acceso: ${password}
-
+${verificationText}
         Para acceder a tu cuenta, visita: ${process.env.APP_URL || 'https://librovirtual.pe'}/panel
 
         Por seguridad, guarda esta contraseña en un lugar seguro.
@@ -199,7 +244,10 @@ export class EmailService {
   }
 
   /**
-   * Send email verification link
+   * "Confirma tu correo" email.
+   *
+   * Used at signup (the link also rides inside the welcome email, so this is the
+   * resend path) and by `POST /api/auth/resend-verification`.
    */
   async sendEmailVerification(email: string, firstName: string, verificationToken: string): Promise<void> {
     const verificationUrl = `${process.env.APP_URL || 'https://librovirtual.pe'}/acceso/verificar-email?token=${verificationToken}`;
@@ -243,10 +291,29 @@ export class EmailService {
           </div>
         </body>
         </html>
-      `
+      `,
+      // Plain-text alternative: the local dev transport prints THIS field, so
+      // without it a developer running the app with no SMTP configured could
+      // never follow the confirmation link.
+      text: `
+        ¡Hola ${firstName}!
+
+        Confirma tu correo para que podamos avisarte de cada nueva reclamación de tu Libro de Reclamaciones.
+
+        Enlace de confirmación (vence en 24 horas):
+        ${verificationUrl}
+
+        Si no creaste esta cuenta, ignora este email.
+      `,
     };
 
-    await this.transporter.sendMail(mailOptions);
+    try {
+      await this.transporter.sendMail(mailOptions);
+      console.log(`Verification email sent to ${email}`);
+    } catch (error) {
+      console.error('Error sending verification email:', error);
+      throw new Error('Failed to send verification email');
+    }
   }
 
   /**
@@ -352,6 +419,128 @@ export class EmailService {
     };
 
     await this.transporter.sendMail(mailOptions);
+  }
+
+  /**
+   * Tells the administrators of a business that a login is asking for access to
+   * their RUC, so somebody can approve or reject it from /empresas.
+   */
+  async sendAccessRequestReceived(params: {
+    to: string;
+    businessName: string;
+    requesterName: string;
+    requesterEmail: string;
+    message?: string | null;
+  }): Promise<void> {
+    const { to, businessName, requesterName, requesterEmail, message } = params;
+    const reviewUrl = `${process.env.APP_URL || 'https://librovirtual.pe'}/empresas`;
+
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to,
+      subject: `Solicitud de acceso a ${businessName} - LibroVirtual.pe`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Solicitud de acceso</title>
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 24px;">
+            <h2>Solicitud de acceso a ${businessName}</h2>
+            <p>
+              <strong>${requesterName}</strong> (${requesterEmail}) solicita acceso al RUC
+              registrado en esta cuenta para administrar el Libro de Reclamaciones.
+            </p>
+            ${message ? `<p style="background: #f1f5f9; padding: 12px; border-radius: 6px;">"${message}"</p>` : ''}
+            <p>
+              Revise la solicitud en <a href="${reviewUrl}">${reviewUrl}</a> (sección Empresas →
+              Solicitudes recibidas). Si no reconoce a esta persona, rechácela.
+            </p>
+            <p style="color: #64748b; font-size: 14px;">© 2024 LibroVirtual.pe</p>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `
+        Solicitud de acceso a ${businessName}
+
+        ${requesterName} (${requesterEmail}) solicita acceso al RUC registrado en esta cuenta.
+
+        ${message ? `Mensaje: ${message}\n` : ''}Revise la solicitud en: ${reviewUrl}
+
+        Si no reconoce a esta persona, rechácela.
+      `,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+      console.log(`Access request notification sent to ${to}`);
+    } catch (error) {
+      // The request itself is already stored; a notification failure must not
+      // lose it, so this is logged and swallowed.
+      console.error('Error sending access request notification:', error);
+    }
+  }
+
+  /** Tells the requester the outcome of its access request. */
+  async sendAccessRequestDecision(params: {
+    to: string;
+    requesterName: string;
+    businessName: string;
+    approved: boolean;
+    note?: string | null;
+  }): Promise<void> {
+    const { to, requesterName, businessName, approved, note } = params;
+    const loginUrl = `${process.env.APP_URL || 'https://librovirtual.pe'}/acceso`;
+
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to,
+      subject: approved
+        ? `Acceso aprobado a ${businessName} - LibroVirtual.pe`
+        : 'Solicitud de acceso rechazada - LibroVirtual.pe',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Resultado de la solicitud</title>
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 24px;">
+            <h2>${approved ? 'Acceso aprobado' : 'Solicitud rechazada'}</h2>
+            <p>¡Hola ${requesterName}!</p>
+            <p>
+              ${approved
+                ? `Ya puede administrar el Libro de Reclamaciones de <strong>${businessName}</strong>. Inicie sesión y elija esa empresa en el selector de empresas.`
+                : `Su solicitud de acceso a <strong>${businessName}</strong> fue rechazada. Si cree que es un error, contacte a la empresa o inténtelo nuevamente más adelante.`}
+            </p>
+            ${note ? `<p style="background: #f1f5f9; padding: 12px; border-radius: 6px;">"${note}"</p>` : ''}
+            ${approved ? `<p>Ingrese en: <a href="${loginUrl}">${loginUrl}</a></p>` : ''}
+            <p style="color: #64748b; font-size: 14px;">© 2024 LibroVirtual.pe</p>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `
+        ¡Hola ${requesterName}!
+
+        ${approved
+          ? `Acceso aprobado: ya puede administrar el Libro de Reclamaciones de ${businessName}.`
+          : `Su solicitud de acceso a ${businessName} fue rechazada.`}
+
+        ${note ? `Nota: ${note}\n` : ''}${approved ? `Ingrese en: ${loginUrl}` : ''}
+      `,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+      console.log(`Access request decision sent to ${to}`);
+    } catch (error) {
+      console.error('Error sending access request decision:', error);
+    }
   }
 
   /**
@@ -642,6 +831,50 @@ LibroVirtual.pe
     } catch (error) {
       console.error('Error sending SLA escalation:', error);
       throw new Error('Failed to send SLA escalation');
+    }
+  }
+
+  /**
+   * Sends a plain "it works" message so an administrator can confirm SMTP
+   * delivery end-to-end, not just that the socket and credentials are valid.
+   */
+  async sendTestEmail(email: string, firstName?: string): Promise<void> {
+    const greeting = firstName ? `¡Hola ${firstName}!` : '¡Hola!';
+
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to: email,
+      subject: 'Prueba de correo - LibroVirtual.pe',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Prueba de correo</title>
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 24px;">
+            <h2>${greeting}</h2>
+            <p>Este es un correo de prueba enviado desde el Libro de Reclamaciones para verificar la configuración de envío.</p>
+            <p>Si lo recibiste, el servicio de correo está configurado correctamente.</p>
+            <p style="color: #64748b; font-size: 14px;">© 2024 LibroVirtual.pe</p>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `${greeting}
+
+Este es un correo de prueba del Libro de Reclamaciones para verificar la configuración de envío.
+
+Si lo recibiste, el servicio de correo está configurado correctamente.
+      `,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending test email:', error);
+      throw new Error('Failed to send test email');
     }
   }
 

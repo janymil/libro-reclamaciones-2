@@ -6,7 +6,7 @@ import { storage } from "../storage";
 import { apiV1Limiter } from "../middleware/rateLimits";
 import { hashApiKey } from "../storage/integration.storage";
 import { intakeComplaint, IntakeError } from "../services/complaintIntakeService";
-import { enforceQuota } from "../services/subscriptionService";
+import { enforceQuota, enforceComplaintType } from "../services/subscriptionService";
 
 /**
  * Public REST API v1 (Phase 3.12): CRM/ERP systems create and sync complaints
@@ -52,6 +52,18 @@ export function registerApiV1Routes(app: Express): void {
       const quota = await enforceQuota(apiKey.businessId, null, 'complaintsThisMonth');
       if (!quota.allowed) {
         return res.status(402).json({ error: 'quota_exceeded', message: quota.reason });
+      }
+
+      // Complaint-type gate: the Gratis plan accepts Reclamos only.
+      const typeCheck = await enforceComplaintType(apiKey.businessId, data.complaintType);
+      if (!typeCheck.allowed) {
+        return res.status(402).json({ error: 'complaint_type_not_allowed', message: typeCheck.reason });
+      }
+
+      // Lifetime gate: Gratis includes 5 complaints in total, not per month.
+      const lifetime = await enforceQuota(apiKey.businessId, null, 'complaintsTotal');
+      if (!lifetime.allowed) {
+        return res.status(402).json({ error: 'quota_exceeded', message: lifetime.reason });
       }
 
       const { complaint } = await intakeComplaint(data);

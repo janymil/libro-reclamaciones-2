@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   businessProfileSchema,
+  emailVerificationSchema,
   forgotPasswordSchema,
   insertLibroConfigurationSchema,
   loginSchema as authLoginSchema,
@@ -11,7 +12,7 @@ import {
 } from "@shared/schema";
 
 import { authService } from "../services/authService";
-import { provisionDefaultEstablishment } from "../services/establishmentProvisioning";
+import { defaultEstablishmentFor } from "../services/establishmentProvisioning";
 import { newBusinessTrialDefaults } from "../services/subscriptionService";
 import { storage } from "../storage";
 import { authLimiter, passwordResetLimiter, registerLimiter } from "../middleware/rateLimits";
@@ -172,6 +173,49 @@ export function registerAuthRoutes(app: Express): void {
     }
   });
 
+  // ---- Email verification ("confirma tu correo") ------------------------------
+
+  // Step 2 of signup: the link inside the welcome email points here.
+  // Public (the user may not be signed in) and rate-limited with the recovery
+  // limiter, since it takes a secret token from the query string.
+  app.post('/api/auth/verify-email', passwordResetLimiter, async (req, res) => {
+    try {
+      const { token } = emailVerificationSchema.parse(req.body);
+      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const userAgent = req.get('User-Agent') || '';
+
+      const result = await authService.verifyEmail(token, ipAddress, userAgent);
+
+      // A dead or expired link is not a client error to shout about: the page
+      // shows the same friendly notice and offers a new link.
+      res.status(result.success ? 200 : 400).json({
+        message: result.message,
+        verified: result.success,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Token inválido", errors: error.errors });
+      }
+      console.error('Verify email error:', error);
+      res.status(500).json({ message: "No se pudo confirmar el correo" });
+    }
+  });
+
+  // Resend the verification link for the signed-in account.
+  app.post('/api/auth/resend-verification', requireAuth, async (req: any, res) => {
+    try {
+      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const userAgent = req.get('User-Agent') || '';
+
+      const result = await authService.resendEmailVerification(req.user.id, ipAddress, userAgent);
+
+      res.status(result.success ? 200 : 400).json({ message: result.message, sent: result.success });
+    } catch (error) {
+      console.error('Resend verification error:', error);
+      res.status(500).json({ message: "No se pudo enviar el enlace de confirmación" });
+    }
+  });
+
   // Get current user (protected)
   app.get('/api/auth/user', requireAuth, (req: any, res) => {
     res.json(req.user);
@@ -250,14 +294,29 @@ export function registerAuthRoutes(app: Express): void {
     }
   });
 
-  // Step 2: Configure business and libro (onboarding completion)
+  /**
+   * Step 2 of onboarding: business + libro configuration, atomically.
+   *
+   * The whole write happens in ONE transaction (storage.completeOnboarding), and
+   * the user is flagged "onboarded" only as the last statement inside it. Before
+   * this, a failure between the business insert and the establishment left an
+   * "onboarded" account with no libro - and, because the route demanded
+   * `onboardingStep === 1`, that state could never be repaired by retrying.
+   *
+   * Two dead ends are now recoverable instead:
+   *  - a RUC this login already created on a failed attempt -> resume, and
+   *  - a RUC owned by another account -> 409 + the "solicitar acceso" path.
+   */
   app.post('/api/auth/complete-onboarding', requireAuth, async (req: any, res) => {
     try {
       const user = req.user;
-      
-      // Ensure user is in onboarding step 1
-      if (user.onboardingCompleted || user.onboardingStep !== 1) {
-        return res.status(400).json({ message: "Onboarding ya completado o usuario en estado inválido" });
+
+      if (user.onboardingCompleted) {
+        return res.status(409).json({
+          message: "Tu cuenta ya está configurada.",
+          code: "already_onboarded",
+          redirectTo: '/panel',
+        });
       }
 
       const { businessData, libroData } = req.body;
@@ -267,39 +326,75 @@ export function registerAuthRoutes(app: Express): void {
       // a new signup could grant itself a paid plan or skip the trial.
       const validBusinessData = businessProfileSchema.parse(businessData);
 
-      // Create business first so the libro configuration can reference it
-      const business = await storage.createBusiness({
-        ...validBusinessData,
-        ...newBusinessTrialDefaults(),
-      });
+      // businessId/userId are assigned by the transaction (the tenant may be
+      // created by this very call), so they are not accepted from the client.
+      const validLibroData = insertLibroConfigurationSchema
+        .omit({ businessId: true, userId: true })
+        .parse(libroData);
 
-      // Validate libro configuration data (businessId is injected from the new business)
-      const validLibroData = insertLibroConfigurationSchema.parse({
-        ...libroData,
+      // The public URL is globally unique. Checked before writing anything so the
+      // user gets a fixable message instead of a rolled-back transaction.
+      const slugOwner = await storage.getLibroConfigurationBySlug(validLibroData.urlSlug);
+      if (slugOwner && slugOwner.businessId !== user.businessId) {
+        return res.status(409).json({
+          message: `La URL pública "${validLibroData.urlSlug}" ya está en uso. Elige otra.`,
+          code: "slug_taken",
+        });
+      }
+
+      // A RUC belongs to exactly one tenant. Three cases:
+      //  1. unknown                  -> create it
+      //  2. created by an earlier, failed attempt of THIS login (the access grant
+      //     identifies it as ours) -> resume it instead of failing on the unique
+      //     RUC constraint
+      //  3. owned by someone else    -> 409 with the way forward
+      const existingBusiness = await storage.getBusinessByRuc(validBusinessData.ruc);
+      let resumableBusinessId: string | null = null;
+
+      if (existingBusiness) {
+        const access = await storage.getUserBusinessAccess(user.id);
+        const isOurs =
+          user.businessId === existingBusiness.id ||
+          access.some((entry) => entry.businessId === existingBusiness.id);
+
+        if (!isOurs) {
+          return res.status(409).json({
+            message:
+              "Ese RUC ya está registrado por otra cuenta. Puedes solicitar acceso a esa empresa; el administrador actual debe aprobarlo.",
+            code: "ruc_already_registered",
+            businessName: existingBusiness.businessName,
+          });
+        }
+
+        resumableBusinessId = existingBusiness.id;
+      }
+
+      const result = await storage.completeOnboarding({
         userId: user.id,
-        businessId: business.id,
+        existingBusinessId: resumableBusinessId,
+        refreshBusinessProfile: Boolean(resumableBusinessId),
+        // Plan and lifecycle are server-assigned: a wizard payload can never
+        // mint a paid plan or skip the trial.
+        business: { ...validBusinessData, ...newBusinessTrialDefaults() },
+        libro: validLibroData,
+        // Every business needs at least one establishment so the public portal
+        // has a "lugar" to file against. Online stores get a virtual channel
+        // instead of a physical sucursal (DS 011-2011-PCM: selling over the
+        // Internet requires the book be reachable from that medium).
+        establishment: defaultEstablishmentFor(
+          { address: validBusinessData.address, phone: validBusinessData.phone ?? null },
+          validLibroData.businessType,
+        ),
       });
-
-      // Update user with business ID and onboarding completion
-      await storage.updateUser(user.id, {
-        businessId: business.id,
-        onboardingStep: 2,
-        onboardingCompleted: true,
-      });
-
-      const libroConfig = await storage.createLibroConfiguration(validLibroData);
-
-      // Every business needs at least one establishment so the public portal
-      // has a "lugar" to file against. Online stores get a virtual channel
-      // instead of a physical sucursal (DS 011-2011-PCM: selling over the
-      // Internet requires the book be reachable from that medium).
-      await provisionDefaultEstablishment(business, validLibroData.businessType);
 
       res.json({
         message: "Onboarding completado exitosamente",
-        business,
-        libroConfig,
-        redirectTo: '/panel'
+        business: result.business,
+        libroConfig: result.config,
+        establishment: result.establishment,
+        // true when a previous attempt had already created the tenant
+        resumed: !result.createdBusiness,
+        redirectTo: '/panel',
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -308,8 +403,25 @@ export function registerAuthRoutes(app: Express): void {
           errors: error.errors 
         });
       }
+
+      // Unique-violation race: another signup took the slug between the check
+      // above and the insert. The transaction rolled back, so nothing is half
+      // written and the user can simply pick another URL.
+      const pgCode = (error as any)?.code ?? (error as any)?.cause?.code;
+      if (pgCode === '23505') {
+        return res.status(409).json({
+          message: 'Esa URL pública acaba de ser tomada por otra empresa. Elige otra.',
+          code: 'slug_taken',
+        });
+      }
+
+      // The transaction guarantees all-or-nothing, so the account is exactly as
+      // it was: the wizard can be retried.
       console.error('Onboarding completion error:', error);
-      res.status(500).json({ message: "Error al completar el onboarding" });
+      res.status(500).json({
+        message: "No se pudo completar la configuración. Tus datos no se guardaron; puedes intentarlo nuevamente.",
+        code: "onboarding_failed",
+      });
     }
   });
 }

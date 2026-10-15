@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useUpgradeToast } from "@/hooks/use-plan-upgrade";
+import PlanGate from "@/components/plan/plan-gate";
 import { apiRequest } from "@/lib/queryClient";
 import type { LibroConfiguration } from "@shared/schema";
 
@@ -57,7 +59,7 @@ const formFields = [
     label: "Tono de marca para la IA",
     placeholder: "Cercano pero formal, tuteamos al cliente, firmamos como 'El equipo de MiEmpresa'...",
     type: "textarea" as const,
-    description: "La IA redacta respuestas con este tono (plan Profesional).",
+    description: "La IA redacta respuestas con este tono (plan Pro).",
   },
   {
     id: "brandPolicies",
@@ -72,6 +74,7 @@ type FormValues = Record<string, string>;
 
 export default function CustomizationPage() {
   const { toast } = useToast();
+  const upgradeToast = useUpgradeToast();
   const queryClient = useQueryClient();
   const [values, setValues] = useState<FormValues>({});
 
@@ -95,14 +98,24 @@ export default function CustomizationPage() {
 
   const save = useMutation({
     mutationFn: async (updates: FormValues) => {
-      // Only send fields that changed, as nullable strings
+      // Only send fields that changed. Values are compared in their stored form
+      // (empty string means "no value"), otherwise an untouched field that is
+      // null in the database would be sent as a template change and rejected
+      // with a plan error for no reason.
       const payload: Record<string, string | null> = {};
+
       for (const field of formFields) {
-        const value = updates[field.id];
-        if ((config as any)?.[field.id] !== value) {
-          payload[field.id] = value.trim() ? value : null;
+        const nextValue = (updates[field.id] ?? "").trim() ? updates[field.id] : null;
+        const currentValue = ((config as any)?.[field.id] ?? null) as string | null;
+        if (currentValue !== nextValue) {
+          payload[field.id] = nextValue;
         }
       }
+
+      if (Object.keys(payload).length === 0) {
+        throw new Error("No hay cambios por guardar.");
+      }
+
       const response = await apiRequest("PATCH", "/api/libro-configuration", payload);
       return response.json();
     },
@@ -111,23 +124,26 @@ export default function CustomizationPage() {
       toast({ title: "Personalización guardada", description: "Los correos y el portal usarán la nueva configuración." });
     },
     onError: (error: Error) => {
-      toast({
-        title: "No se pudo guardar",
-        description: error.message,
-        variant: "destructive",
-      });
+      // Sending a Pro-only field (plantillas, tono de marca) must say which
+      // plan unlocks it, with the upgrade one click away.
+      upgradeToast(error, "No se pudo guardar");
     },
   });
 
   return (
     <AppLayout title="Personalización" subtitle="Plantillas, branding y voz de marca de la IA">
       <div className="max-w-3xl mx-auto space-y-6">
+        <PlanGate
+          feature="templates"
+          title="Plantillas, branding y voz de marca"
+          description="Color, correos con su marca y el tono con el que la IA redacta sus respuestas."
+        >
         <Card>
           <CardHeader>
             <CardTitle>Plantillas y voz de marca</CardTitle>
             <CardDescription>
               Todo es opcional: sin configurar se usan los textos estándar de LibroVirtual.pe.
-              Las plantillas de correo y el color requieren plan Profesional; la voz de la IA está disponible
+              Las plantillas de correo y el color requieren plan Pro; la voz de la IA está disponible
               con la IA activa.
             </CardDescription>
           </CardHeader>
@@ -169,6 +185,7 @@ export default function CustomizationPage() {
             </div>
           </CardContent>
         </Card>
+        </PlanGate>
       </div>
     </AppLayout>
   );

@@ -16,6 +16,8 @@ const LOCKOUT_DURATION_MINUTES = 30;
 const PASSWORD_LENGTH = 12;
 /** Lifetime of a password-reset link (the email says "1 hora"). */
 const PASSWORD_RESET_TTL_MINUTES = 60;
+/** Lifetime of an email-verification link (the email says "24 horas"). */
+const EMAIL_VERIFICATION_TTL_MINUTES = 24 * 60;
 
 export class AuthService {
   
@@ -157,7 +159,14 @@ export class AuthService {
           undefined,
           'email_already_exists'
         );
-        return { success: false, message: "El email ya está registrado" };
+        // The account exists (and the password was emailed when it was created).
+        // Saying only "already registered" stranded the user on a form that can
+        // never succeed, so name the two ways forward instead of the dead end.
+        return {
+          success: false,
+          message:
+            "Ese email ya tiene una cuenta. Inicia sesión con tu contraseña o usa \"¿Olvidaste tu contraseña?\" para crear una nueva.",
+        };
       }
 
       // Generate secure password
@@ -165,16 +174,33 @@ export class AuthService {
       const hashedPassword = await this.hashPassword(password);
 
       // Create user account (Step 1 of onboarding)
+      //
+      // `role` is set explicitly: this account owns the tenant it is about to
+      // create. Relying on the column default was not enough - on a database
+      // where the legacy `users.role` column has no DEFAULT (the compat
+      // migration only backfilled values), new signups landed with role NULL and
+      // every admin-only endpoint answered 403 to the person who just signed up.
       const newUser = await storage.createUser({
         ...userData,
         password: hashedPassword,
+        role: 'admin',
         onboardingStep: 1,
         onboardingCompleted: false,
         isEmailVerified: false
       });
 
-      // Send password via email
-      await emailService.sendWelcomePassword(userData.email, userData.firstName, password);
+      // Confirm the mailbox that will receive every complaint notification. The
+      // link rides inside the welcome email, so signup stays a single message
+      // while `users.is_email_verified` finally means something.
+      const verificationToken = await this.issueEmailVerificationToken(newUser.id);
+
+      // Send password + verification link via email
+      await emailService.sendWelcomePassword(
+        userData.email,
+        userData.firstName,
+        password,
+        verificationToken,
+      );
 
       // Log successful registration
       await this.logAuthEvent(
@@ -290,6 +316,13 @@ export class AuthService {
         if (user.failedLoginAttempts + 1 >= MAX_LOGIN_ATTEMPTS) {
           const lockUntil = new Date(Date.now() + LOCKOUT_DURATION_MINUTES * 60 * 1000);
           await storage.lockUserAccount(user.id, lockUntil);
+
+          // Fire-and-forget: warn the owner that their account just got locked,
+          // so a real takeover attempt is noticed. A mail failure must not
+          // change the "credenciales inválidas" answer.
+          void emailService
+            .sendAccountLockedNotification(user.email, user.firstName, lockUntil)
+            .catch((error) => console.error('[email] account-locked notification failed:', error));
         }
 
         await this.logLoginAttempt(loginData.email, ipAddress, userAgent, false, 'invalid_password');
@@ -308,6 +341,12 @@ export class AuthService {
       // Successful login - reset failed attempts and update last login
       await storage.resetFailedLoginAttempts(user.id);
       await storage.updateLastLogin(user.id);
+
+      // Fire-and-forget security notice. A slow or down SMTP server must never
+      // delay or fail an otherwise successful login.
+      void emailService
+        .sendLoginNotification(user.email, user.firstName, ipAddress, userAgent)
+        .catch((error) => console.error('[email] login notification failed:', error));
 
       await this.logLoginAttempt(loginData.email, ipAddress, userAgent, true);
       await this.logAuthEvent(
@@ -365,6 +404,99 @@ export class AuthService {
 
     await storage.setPasswordResetToken(email, token, expires);
     return token;
+  }
+
+  /**
+   * Issues a single-use email-verification token (internal).
+   *
+   * Same entropy and shape as the reset token: 32 bytes from the CSPRNG, valid
+   * for 24 hours. Issued at signup and on every "reenviar" request, replacing
+   * the previous token so only the newest link works.
+   */
+  private async issueEmailVerificationToken(userId: string): Promise<string> {
+    const token = randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + EMAIL_VERIFICATION_TTL_MINUTES * 60 * 1000);
+
+    await storage.setEmailVerificationToken(userId, token, expires);
+    return token;
+  }
+
+  /**
+   * Step 2 of signup: consume the "confirma tu correo" link.
+   *
+   * Idempotent on purpose - a user who clicks the link twice, or opens it in two
+   * tabs, must read "ya estaba confirmado", not a scary failure.
+   */
+  async verifyEmail(
+    token: string,
+    ipAddress: string,
+    userAgent: string,
+  ): Promise<{ success: boolean; message: string; email?: string }> {
+    const user = await storage.getUserByEmailVerificationToken(token);
+
+    if (!user) {
+      await this.logAuthEvent(
+        'email_verification_failed',
+        'unknown',
+        false,
+        ipAddress,
+        userAgent,
+        undefined,
+        'invalid_token',
+      );
+      return {
+        success: false,
+        message: 'El enlace de confirmación no es válido o ya fue usado.',
+      };
+    }
+
+    if (user.isEmailVerified) {
+      return { success: true, message: 'Tu correo ya estaba confirmado.', email: user.email };
+    }
+
+    if (!user.emailVerificationExpires || user.emailVerificationExpires.getTime() < Date.now()) {
+      await this.logAuthEvent(
+        'email_verification_failed',
+        user.email,
+        false,
+        ipAddress,
+        userAgent,
+        user.id,
+        'expired_token',
+      );
+      return {
+        success: false,
+        message: 'El enlace de confirmación ha expirado. Solicita uno nuevo desde tu panel.',
+      };
+    }
+
+    await storage.completeEmailVerification(user.id);
+    await this.logAuthEvent('email_verified', user.email, true, ipAddress, userAgent, user.id);
+
+    return { success: true, message: 'Correo confirmado. Gracias.', email: user.email };
+  }
+
+  /** Issues a fresh verification link for the signed-in account. */
+  async resendEmailVerification(
+    userId: string,
+    ipAddress: string,
+    userAgent: string,
+  ): Promise<{ success: boolean; message: string }> {
+    const user = await storage.getUserById(userId);
+
+    if (!user) {
+      return { success: false, message: 'No encontramos tu cuenta.' };
+    }
+
+    if (user.isEmailVerified) {
+      return { success: false, message: 'Tu correo ya está confirmado.' };
+    }
+
+    const token = await this.issueEmailVerificationToken(user.id);
+    await emailService.sendEmailVerification(user.email, user.firstName, token);
+    await this.logAuthEvent('email_verification_resent', user.email, true, ipAddress, userAgent, user.id);
+
+    return { success: true, message: `Te enviamos un enlace nuevo a ${user.email}.` };
   }
 
   /**
@@ -436,6 +568,13 @@ export class AuthService {
 
     const hashedPassword = await this.hashPassword(newPassword);
     await storage.completePasswordReset(user.id, hashedPassword);
+
+    // Completing a reset proves control of the mailbox, which is exactly what
+    // email verification asks for - so it confirms the address too, instead of
+    // leaving an "unverified" badge on an account that just proved itself.
+    if (!user.isEmailVerified) {
+      await storage.completeEmailVerification(user.id);
+    }
 
     await this.logAuthEvent(
       'password_reset_success',

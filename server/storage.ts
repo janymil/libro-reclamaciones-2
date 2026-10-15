@@ -8,12 +8,15 @@ import { complaintStorage } from "./storage/complaint.storage";
 import { attachmentStorage } from "./storage/attachment.storage";
 import { accessStorage } from "./storage/access.storage";
 import { integrationStorage } from "./storage/integration.storage";
+import { paymentStorage } from "./storage/payment.storage";
 import { arcoStorage } from "./storage/arco.storage";
 import { complianceStorage } from "./storage/compliance.storage";
 import { notificationStorage } from "./storage/notification.storage";
 import { reportingStorage } from "./storage/reporting.storage";
 import { bookStorage } from "./storage/book.storage";
 import { historyStorage } from "./storage/history.storage";
+import { onboardingStorage } from "./storage/onboarding.storage";
+import { accessRequestStorage } from "./storage/accessRequest.storage";
 
 export * from "./storage/types";
 
@@ -34,12 +37,15 @@ export const storage: IStorage = {
   ...attachmentStorage,
   ...accessStorage,
   ...integrationStorage,
+  ...paymentStorage,
   ...arcoStorage,
   ...complianceStorage,
   ...notificationStorage,
   ...reportingStorage,
   ...bookStorage,
   ...historyStorage,
+  ...onboardingStorage,
+  ...accessRequestStorage,
 };
 
 export type DatabaseStorage = typeof storage;

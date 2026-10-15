@@ -1,11 +1,21 @@
 import { useState } from "react";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import AppLayout from "@/components/layout/app-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
+import { apiRequest } from "@/lib/queryClient";
+import { BUSINESS_TYPE_OPTIONS, resolveChannelFit } from "@/lib/channel-fit";
 import LibroWebLinkCard from "@/components/libro/libro-web-link-card";
+import SocialChannelsCard from "@/components/libro/social-channels-card";
+import PlanGate from "@/components/plan/plan-gate";
+import { useUpgradeToast } from "@/hooks/use-plan-upgrade";
+import type { LibroConfiguration } from "@shared/schema";
 import {
   useApiKeys,
   useCreateApiKey,
@@ -17,15 +27,53 @@ import {
 } from "@/hooks/use-subscription";
 
 /**
- * Integraciones (Phase 3.12): the Corporativo surface - public REST API keys,
- * outgoing webhooks and the embeddable widget for e-commerce.
+ * Integraciones: how the business puts its Libro where its customers are.
+ *
+ * The page adapts to the sales channel stored on the Libro configuration:
+ * an online store gets the link/widget guidance, a business that sells through
+ * WhatsApp or social networks gets the copy-ready profile guide. Both are plain
+ * links - no API and no third-party account needed. The API keys and webhooks
+ * below stay for Corporativo/API customers.
  */
 export default function IntegrationsPage() {
   const { toast } = useToast();
+  const upgradeToast = useUpgradeToast();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [keyName, setKeyName] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
+
+  const { data: config } = useQuery<LibroConfiguration | null>({
+    queryKey: ["/api/libro-configuration"],
+  });
+
+  const fit = resolveChannelFit(config?.businessType);
+  const isAdmin = user?.role === "admin";
+
+  const updateBusinessType = useMutation({
+    mutationFn: async (businessType: string) => {
+      const response = await apiRequest("PATCH", "/api/libro-configuration", { businessType });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/libro-configuration"] });
+      toast({
+        title: "Tipo de negocio actualizado",
+        description: "Ajustamos las guías que ve en esta página.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "No se pudo actualizar",
+        description: isAdmin
+          ? "Intente nuevamente en unos instantes."
+          : "Solo un administrador puede cambiar el tipo de negocio.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const apiKeys = useApiKeys();
   const createApiKey = useCreateApiKey();
@@ -36,10 +84,51 @@ export default function IntegrationsPage() {
   const widget = useWidgetSnippet();
 
   return (
-    <AppLayout title="Integraciones" subtitle="API, webhooks y widget para su negocio">
+    <AppLayout title="Integraciones" subtitle="Enlace, redes sociales, widget y API para su negocio">
       <div className="max-w-4xl mx-auto space-y-8">
-        <LibroWebLinkCard />
+        {/* Qué guía corresponde según dónde vende */}
+        <Card data-testid="channel-guide-intro">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <span className="material-icons text-[#c02b0a]">storefront</span>
+              {fit.headline}
+            </CardTitle>
+            <CardDescription>{fit.hint}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-3">
+            <Label htmlFor="businessType" className="text-sm text-gray-600">
+              Tipo de negocio
+            </Label>
+            <Select
+              value={config?.businessType ?? ""}
+              onValueChange={(value) => updateBusinessType.mutate(value)}
+              disabled={!isAdmin || updateBusinessType.isPending || !config}
+            >
+              <SelectTrigger id="businessType" className="w-[240px]" data-testid="select-business-type">
+                <SelectValue placeholder="Seleccione" />
+              </SelectTrigger>
+              <SelectContent>
+                {BUSINESS_TYPE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {!isAdmin && (
+              <span className="text-xs text-gray-500">Solo un administrador puede cambiarlo.</span>
+            )}
+          </CardContent>
+        </Card>
+
+        {fit.showWebLink && <LibroWebLinkCard />}
+        {fit.showSocialChannels && <SocialChannelsCard />}
         {/* Widget */}
+        <PlanGate
+          feature="widget"
+          title="Widget para su tienda virtual"
+          description="Un botón flotante que abre su Libro de Reclamaciones dentro de su propia web o tienda."
+        >
         <Card>
           <CardHeader>
             <CardTitle>Widget para su tienda virtual</CardTitle>
@@ -54,18 +143,28 @@ export default function IntegrationsPage() {
                 {widget.data.snippet}
               </pre>
             ) : (
-              <p className="text-sm text-gray-500">Configure primero su Libro de Reclamaciones.</p>
+              <p className="text-sm text-gray-500">
+                {widget.error
+                  ? 'No se pudo generar el código. Intente nuevamente en unos momentos.'
+                  : 'Configure primero su Libro de Reclamaciones.'}
+              </p>
             )}
           </CardContent>
         </Card>
+        </PlanGate>
 
         {/* API keys */}
+        <PlanGate
+          feature="api"
+          title="Claves de API para su CRM/ERP"
+          description="Cree y consulte reclamaciones desde su propio sistema con POST/GET /api/v1/complaints."
+        >
         <Card>
           <CardHeader>
             <CardTitle>Claves de API</CardTitle>
             <CardDescription>
               Para crear y consultar reclamaciones desde su CRM/ERP vía POST/GET /api/v1/complaints
-              (plan Corporativo).
+              (plan Empresarial).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -86,11 +185,7 @@ export default function IntegrationsPage() {
                     setKeyName("");
                     toast({ title: "Clave creada", description: "Guárdela ahora: no se volverá a mostrar." });
                   } catch (error) {
-                    toast({
-                      title: "No se pudo crear la clave",
-                      description: error instanceof Error ? error.message : "",
-                      variant: "destructive",
-                    });
+                    upgradeToast(error, 'No se pudo crear la clave');
                   }
                 }}
                 data-testid="button-create-api-key"
@@ -138,14 +233,20 @@ export default function IntegrationsPage() {
             </ul>
           </CardContent>
         </Card>
+        </PlanGate>
 
         {/* Webhooks */}
+        <PlanGate
+          feature="webhooks"
+          title="Webhooks a su sistema"
+          description="Le avisamos a su sistema cada nueva reclamación, con firma HMAC-SHA256."
+        >
         <Card>
           <CardHeader>
             <CardTitle>Webhooks</CardTitle>
             <CardDescription>
               Le notificamos a su sistema cada nueva reclamación con una firma HMAC-SHA256 en la
-              cabecera X-LibroVirtual-Signature (plan Corporativo).
+              cabecera X-LibroVirtual-Signature (plan Empresarial).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -166,11 +267,7 @@ export default function IntegrationsPage() {
                     setWebhookUrl("");
                     toast({ title: "Webhook creado", description: "Guarde el secreto de firma mostrado abajo." });
                   } catch (error) {
-                    toast({
-                      title: "No se pudo crear el webhook",
-                      description: error instanceof Error ? error.message : "",
-                      variant: "destructive",
-                    });
+                    upgradeToast(error, 'No se pudo crear el webhook');
                   }
                 }}
                 data-testid="button-create-webhook"
@@ -208,6 +305,7 @@ export default function IntegrationsPage() {
             </ul>
           </CardContent>
         </Card>
+        </PlanGate>
       </div>
     </AppLayout>
   );

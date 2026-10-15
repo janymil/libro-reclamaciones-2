@@ -171,11 +171,11 @@ function tenantBusiness(id: string, name: string) {
     departamento: "Lima",
     website: null,
     isActive: true,
-    subscriptionPlan: "esencial",
-    // Trial active => the effective plan is "profesional" (full quotas), so
-    // these tests exercise authorization, not quota rejections.
-    subscriptionStatus: "trialing",
-    trialEndsAt: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000),
+    subscriptionPlan: "corporativo",
+    // Active Empresarial (unlimited users) => these tests exercise
+    // authorization, not quota rejections.
+    subscriptionStatus: "active",
+    trialEndsAt: null,
     planPeriod: "monthly",
     currentPeriodEnd: null,
     createdAt: new Date(),

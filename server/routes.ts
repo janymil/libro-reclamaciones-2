@@ -6,12 +6,14 @@ import { registerHealthRoutes } from "./routes/health.routes";
 import { registerAuthRoutes } from "./routes/auth.routes";
 import { registerDashboardRoutes } from "./routes/dashboard.routes";
 import { registerBusinessesRoutes } from "./routes/businesses.routes";
+import { registerAccessRequestRoutes } from "./routes/accessRequests.routes";
 import { registerBooksRoutes } from "./routes/books.routes";
 import { registerUsersRoutes } from "./routes/users.routes";
 import { registerHistoryRoutes } from "./routes/history.routes";
 import { registerComplaintsRoutes } from "./routes/complaints.routes";
 import { registerAttachmentsRoutes } from "./routes/attachments.routes";
 import { registerSubscriptionRoutes } from "./routes/subscription.routes";
+import { registerPaymentsRoutes } from "./routes/payments.routes";
 import { registerIntegrationsRoutes } from "./routes/integrations.routes";
 import { registerApiV1Routes } from "./routes/api.routes";
 import { registerStatusRoutes } from "./routes/status.routes";
@@ -24,6 +26,8 @@ import { registerComplianceRoutes } from "./routes/compliance.routes";
 import { registerNotificationsRoutes } from "./routes/notifications.routes";
 import { registerPublicRoutes } from "./routes/public.routes";
 import { registerDocumentsRoutes } from "./routes/documents.routes";
+import { registerWhatsAppRoutes } from "./routes/whatsapp.routes";
+import { registerEmailRoutes } from "./routes/email.routes";
 
 /**
  * Wires the HTTP application together.
@@ -43,12 +47,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerAuthRoutes(app);
   registerDashboardRoutes(app);
   registerBusinessesRoutes(app);
+  registerAccessRequestRoutes(app);
   registerBooksRoutes(app);
   registerUsersRoutes(app);
   registerHistoryRoutes(app);
   registerComplaintsRoutes(app);
   registerAttachmentsRoutes(app);
   registerSubscriptionRoutes(app);
+  registerPaymentsRoutes(app);
   registerIntegrationsRoutes(app);
   registerApiV1Routes(app);
   registerStatusRoutes(app);
@@ -61,6 +67,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerNotificationsRoutes(app);
   registerPublicRoutes(app);
   registerDocumentsRoutes(app);
+  registerWhatsAppRoutes(app);
+  registerEmailRoutes(app);
 
   const httpServer = createServer(app);
   return httpServer;

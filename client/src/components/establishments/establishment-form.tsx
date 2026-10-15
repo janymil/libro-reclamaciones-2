@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { useUpgradeToast } from "@/hooks/use-plan-upgrade";
 import { establishmentFormSchema, type EstablishmentFormData } from "@/lib/validation";
 import { apiRequest } from "@/lib/queryClient";
 import type { Establishment } from "@shared/schema";
@@ -22,6 +23,7 @@ export default function EstablishmentForm({
   onCancel
 }: EstablishmentFormProps) {
   const { toast } = useToast();
+  const upgradeToast = useUpgradeToast();
   const queryClient = useQueryClient();
 
   const form = useForm<EstablishmentFormData>({
@@ -50,11 +52,9 @@ export default function EstablishmentForm({
       onSuccess?.();
     },
     onError: (error) => {
-      toast({
-        title: "Error al crear establecimiento",
-        description: "Hubo un problema al registrar el establecimiento",
-        variant: "destructive",
-      });
+      // Reaching the plan's locale limit must explain itself and offer the
+      // upgrade, instead of a generic "hubo un problema".
+      upgradeToast(error, 'No se pudo registrar el establecimiento');
     },
   });
 

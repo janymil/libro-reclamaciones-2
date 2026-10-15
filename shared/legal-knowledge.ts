@@ -202,6 +202,17 @@ export const LEGAL_KNOWLEDGE: LegalKnowledgeEntry[] = [
       'Todo proveedor con establecimiento abierto al público debe contar con Libro físico o virtual; si vende por ' +
       'Internet, además debe ofrecer un Libro virtual accesible desde ese mismo medio.',
   },
+  {
+    id: 'venta-redes-sociales',
+    norm: 'DS 011-2011-PCM',
+    article: 'Libro virtual (venta por Internet)',
+    title: 'Venta por Internet y redes sociales: el Libro virtual va en el mismo medio',
+    keywords: ['instagram', 'whatsapp', 'tiktok', 'facebook', 'redes', 'sociales', 'marketplace', 'tienda', 'online', 'influencer', 'youtuber', 'streamer', 'creador', 'virtual'],
+    summary:
+      'La obligación no distingue el soporte: todo proveedor que vende por Internet (incluidas las redes sociales) debe ofrecer un Libro virtual ' +
+      'accesible desde ese mismo medio y publicar el aviso del Anexo III con un enlace visible. Un chat no reemplaza al Libro: la hoja exige los ' +
+      'campos del Anexo 1, la constancia gratuita al consumidor y la respuesta por escrito en 15 días hábiles.',
+  },
 ];
 
 /** Reduces an entry to the citation shape the agent reports back to the UI. */

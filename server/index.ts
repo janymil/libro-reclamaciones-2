@@ -6,7 +6,13 @@ import { setupRUCLookup } from "./ruc-lookup";
 import { startScheduler } from "./services/scheduler";
 
 const app = express();
-app.use(express.json());
+// The raw body is kept so webhook signatures can be verified (WhatsApp Cloud
+// API signs the exact bytes it sent; re-serializing parsed JSON would not match).
+app.use(express.json({
+  verify: (req, _res, buf) => {
+    (req as Request & { rawBody?: Buffer }).rawBody = buf;
+  },
+}));
 app.use(express.urlencoded({ extended: false }));
 
 // Request logging. Response bodies are deliberately NOT logged: this is a

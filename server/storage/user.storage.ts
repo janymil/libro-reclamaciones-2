@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { eq, and, asc, count, inArray } from "drizzle-orm";
+import { eq, and, asc, count, inArray, sql } from "drizzle-orm";
 import {
   type User,
   type InsertUser,
@@ -24,8 +24,22 @@ export const userStorage = {
     return user;
   },
 
+  /**
+   * Look an account up by email, case-insensitively.
+   *
+   * The column's UNIQUE constraint is case-sensitive, so an exact comparison
+   * would (a) let "Jan@Gmail.com" be registered as a second account for a user
+   * who already exists and (b) fail to log in anyone whose stored address
+   * carries legacy capitalization. Every caller here needs "who is this
+   * person", never "which exact string was stored", so the comparison is
+   * folded and new/updated addresses are normalized at the schema level
+   * (accountEmailSchema).
+   */
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.email, email));
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(sql`lower(${users.email}) = ${email.trim().toLowerCase()}`);
     return user;
   },
 

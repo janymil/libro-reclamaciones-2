@@ -27,10 +27,21 @@ import type {
   InsertLibroConfiguration,
   UserBusinessAccess,
   InsertUserBusinessAccess,
+  BusinessAccessRequest,
+  InsertBusinessAccessRequest,
   ApiKeyPublic,
   Webhook,
   InsertWebhook,
+  Payment,
+  InsertPayment,
+  Subscription,
+  InsertSubscription,
 } from "@shared/schema";
+import type {
+  CompleteOnboardingInput,
+  CompleteOnboardingResult,
+} from "./onboarding.storage";
+import type { AccessRequestWithBusiness } from "./accessRequest.storage";
 
 // Application version reported alongside the derived system-change entries.
 export const APP_VERSION = "1.2.0";
@@ -57,6 +68,11 @@ export interface IStorage {
    */
   completePasswordReset(userId: string, hashedPassword: string): Promise<void>;
   getFailedLoginAttempts(email: string, ipAddress: string, since: Date): Promise<number>;
+
+  // Email verification: confirms the mailbox that receives every notification.
+  setEmailVerificationToken(userId: string, token: string, expires: Date): Promise<void>;
+  getUserByEmailVerificationToken(token: string): Promise<User | undefined>;
+  completeEmailVerification(userId: string): Promise<void>;
   
   // Auth audit logging
   createAuthAuditLog(auditLog: InsertAuthAuditLog): Promise<AuthAuditLog>;
@@ -66,7 +82,16 @@ export interface IStorage {
   createLibroConfiguration(config: InsertLibroConfiguration): Promise<LibroConfiguration>;
   getLibroConfiguration(businessId: string): Promise<LibroConfiguration | undefined>;
   getLibroConfigurationBySlug(slug: string): Promise<LibroConfiguration | undefined>;
+  /** Active configurations across tenants: the WhatsApp webhook resolves the sender number with this. */
+  getActiveLibroConfigurations(): Promise<LibroConfiguration[]>;
   updateLibroConfiguration(id: string, updates: Partial<InsertLibroConfiguration>): Promise<LibroConfiguration>;
+
+  /**
+   * Commits the whole of onboarding (tenant + libro + first establishment + the
+   * user link) in one transaction, and can resume a tenant created by an earlier
+   * failed attempt. See `server/storage/onboarding.storage.ts`.
+   */
+  completeOnboarding(input: CompleteOnboardingInput): Promise<CompleteOnboardingResult>;
   
   // Business operations
   getBusiness(id: string): Promise<Business | undefined>;
@@ -128,6 +153,23 @@ export interface IStorage {
   getActiveWebhooks(businessId: string, event: string): Promise<Webhook[]>;
   updateWebhook(id: string, businessId: string, updates: Partial<InsertWebhook>): Promise<Webhook | undefined>;
   deleteWebhook(id: string, businessId: string): Promise<boolean>;
+
+  // Payments (Phase 2.7)
+  createPayment(data: InsertPayment): Promise<Payment>;
+  getPayment(id: string): Promise<Payment | undefined>;
+  getPaymentByReference(reference: string): Promise<Payment | undefined>;
+  getPaymentByProviderRef(provider: string, providerRef: string): Promise<Payment | undefined>;
+  getPaymentsByBusiness(businessId: string): Promise<Payment[]>;
+  updatePayment(id: string, updates: Partial<InsertPayment>): Promise<Payment | undefined>;
+
+  // Recurring agreements (Phase 2.7, step 2)
+  createSubscription(data: InsertSubscription): Promise<Subscription>;
+  getSubscription(id: string): Promise<Subscription | undefined>;
+  getSubscriptionByProviderRef(provider: string, providerRef: string): Promise<Subscription | undefined>;
+  getLatestSubscriptionByBusiness(businessId: string): Promise<Subscription | undefined>;
+  getSubscriptionsByBusiness(businessId: string): Promise<Subscription[]>;
+  getSubscriptionByReference(reference: string): Promise<Subscription | undefined>;
+  updateSubscription(id: string, updates: Partial<InsertSubscription>): Promise<Subscription | undefined>;
   
   // ARCO request operations
   getArcoRequests(businessId: string): Promise<ArcoRequest[]>;
@@ -168,6 +210,17 @@ export interface IStorage {
   // Business administration
   getAllBusinesses(): Promise<BusinessWithStats[]>;
   getBusinessById(id: string): Promise<Business | undefined>;
+
+  // Business access requests (a login asking for access to an existing RUC)
+  createAccessRequest(request: InsertBusinessAccessRequest): Promise<BusinessAccessRequest>;
+  getAccessRequest(id: string): Promise<AccessRequestWithBusiness | undefined>;
+  getPendingAccessRequest(businessId: string, requesterUserId: string): Promise<BusinessAccessRequest | undefined>;
+  getAccessRequestsByBusinessIds(businessIds: string[]): Promise<AccessRequestWithBusiness[]>;
+  getAccessRequestsByRequester(requesterUserId: string): Promise<AccessRequestWithBusiness[]>;
+  decideAccessRequest(
+    id: string,
+    decision: { status: "approved" | "rejected"; decidedByUserId: string },
+  ): Promise<BusinessAccessRequest | undefined>;
 
   // Books (one libro de reclamaciones per establishment)
   getBooks(businessId: string): Promise<BookSummary[]>;

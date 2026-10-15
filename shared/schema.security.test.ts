@@ -2,10 +2,14 @@ import { describe, it, expect } from "vitest";
 import { z } from "zod";
 
 import {
+  accountEmailSchema,
   businessProfileSchema,
   businessUpdateSchema,
   complaintSubmissionSchema,
+  forgotPasswordSchema,
   insertArcoRequestSchema,
+  loginSchema,
+  userRegistrationSchema,
 } from "./schema";
 
 /**
@@ -116,6 +120,57 @@ describe("business payload schemas - commercial lifecycle protection", () => {
     expect(parsed.isActive).toBe(true);
     expect(parsed.ruc).toBeUndefined();
     expect(parsed.subscriptionPlan).toBeUndefined();
+  });
+});
+
+describe("account email normalization - one account per person", () => {
+  it("folds case and trims on signup", () => {
+    const parsed = userRegistrationSchema.parse({
+      firstName: "Jan",
+      lastName: "Milata",
+      email: "  Jan.Milata@Gmail.COM  ",
+    });
+
+    expect(parsed.email).toBe("jan.milata@gmail.com");
+  });
+
+  it("folds case and trims on login, so the same stored account is found", () => {
+    const parsed = loginSchema.parse({ email: " Jan.Milata@Gmail.com ", password: "secreta" });
+
+    expect(parsed.email).toBe("jan.milata@gmail.com");
+    // The password is a secret: never trim or otherwise reshape it.
+    expect(parsed.password).toBe("secreta");
+  });
+
+  it("folds case and trims on password recovery", () => {
+    expect(forgotPasswordSchema.parse({ email: "JAN@Example.PE" }).email).toBe("jan@example.pe");
+  });
+
+  it("normalizes to a single value whatever the caller typed", () => {
+    const variants = ["A@b.com", "a@b.com", " A@B.COM ", "A@B.com"];
+
+    const normalized = new Set(variants.map((email) => accountEmailSchema.parse(email)));
+
+    // Duplicate detection (and the UNIQUE index) can only work if these collapse.
+    expect(normalized).toEqual(new Set(["a@b.com"]));
+  });
+
+  it("still rejects an address that is not an email", () => {
+    expect(() => accountEmailSchema.parse("no-es-un-email")).toThrow(z.ZodError);
+    expect(() => userRegistrationSchema.parse({
+      firstName: "Jan",
+      lastName: "Milata",
+      email: "jan.milata",
+    })).toThrow(z.ZodError);
+  });
+
+  it("rejects an over-long address and a one-character name", () => {
+    expect(() => accountEmailSchema.parse(`${"a".repeat(250)}@example.com`)).toThrow(z.ZodError);
+    expect(() => userRegistrationSchema.parse({
+      firstName: "J",
+      lastName: "Milata",
+      email: "jan@example.com",
+    })).toThrow(z.ZodError);
   });
 });
 

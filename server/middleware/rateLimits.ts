@@ -113,6 +113,38 @@ export const apiV1Limiter = rateLimit({
 });
 
 /**
+ * Public payment webhook (Phase 2.7).
+ *
+ * Unauthenticated by necessity: the PSP calls it. The body proves nothing on
+ * its own - the handler always re-reads the status from the provider API - so
+ * the limiter is here to stop a flood of junk requests, not to authenticate.
+ */
+export const paymentWebhookLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120, // Generous: a busy day still fits, a flood does not
+  message: { message: "Demasiadas notificaciones de pago." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
+ * WhatsApp Cloud API webhook (Meta -> us).
+ *
+ * Unauthenticated by necessity and, unlike the payment webhook, the body IS the
+ * content (a consumer message drives a tenant notification and an outbound
+ * reply that costs money per conversation), so it is throttled tighter than the
+ * PSP callback. The `X-Hub-Signature-256` HMAC is the actual authentication.
+ */
+export const whatsappWebhookLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 60,
+  message: { message: "Demasiadas notificaciones de WhatsApp." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+
+/**
  * Self-service password recovery (Phase 0).
  *
  * Used by BOTH `/api/auth/forgot-password` and `/api/auth/reset-password`.
@@ -124,6 +156,35 @@ export const passwordResetLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // Maximum 10 reset requests/confirmations per window per IP
   message: { message: "Demasiadas solicitudes. Intenta en 15 minutos." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
+ * "Solicitar acceso a esta empresa" (duplicate RUC).
+ *
+ * Authenticated, but every accepted request emails the tenant's administrators,
+ * so an impatient - or hostile - staff account must not be able to flood their
+ * inbox. Same reasoning as the recovery limiter, one hour wide.
+ */
+export const accessRequestLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10, // Maximum 10 access requests per window per IP
+  message: { message: "Demasiadas solicitudes de acceso. Intenta más tarde." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
+ * SMTP smoke test (POST /api/email/test).
+ *
+ * Authenticated, but each call sends a real message, so keep it tight enough
+ * that a signed-in account cannot use it to flood its own (or anyone's) inbox.
+ */
+export const emailTestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Maximum 5 test emails per window per IP
+  message: { message: "Demasiadas pruebas de correo. Intenta en 15 minutos." },
   standardHeaders: true,
   legacyHeaders: false,
 });

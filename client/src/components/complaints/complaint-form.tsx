@@ -55,6 +55,8 @@ interface ComplaintFormProps {
     name: string;
     address: string;
   };
+  /** Complaint types the business's plan accepts (Gratis = Reclamos only). */
+  allowedComplaintTypes?: Array<"reclamo" | "queja">;
   onSuccess?: (data: any) => void;
 }
 
@@ -63,6 +65,7 @@ export default function ComplaintForm({
   establishmentId,
   businessInfo,
   establishmentInfo,
+  allowedComplaintTypes = ["reclamo", "queja"],
   onSuccess
 }: ComplaintFormProps) {
   const { toast } = useToast();
@@ -531,12 +534,19 @@ export default function ComplaintForm({
                 <Label htmlFor="reclamo" className="font-medium">Reclamo</Label>
                 <span className="text-sm text-gray-500">(Disconformidad con productos o servicios)</span>
               </div>
-              <div className="flex items-center space-x-3">
-                <RadioGroupItem value="queja" id="queja" />
-                <Label htmlFor="queja" className="font-medium">Queja</Label>
-                <span className="text-sm text-gray-500">(Disconformidad con la atención)</span>
-              </div>
+              {allowedComplaintTypes.includes("queja") && (
+                <div className="flex items-center space-x-3">
+                  <RadioGroupItem value="queja" id="queja" />
+                  <Label htmlFor="queja" className="font-medium">Queja</Label>
+                  <span className="text-sm text-gray-500">(Disconformidad con la atención)</span>
+                </div>
+              )}
             </RadioGroup>
+            {!allowedComplaintTypes.includes("queja") && (
+              <p className="text-xs text-gray-500 mt-2" data-testid="queja-not-in-plan">
+                Este libro acepta Reclamos. Las Quejas están disponibles en el plan Básico.
+              </p>
+            )}
             {form.formState.errors.complaintType && (
               <p className="text-sm text-red-600 mt-2">{form.formState.errors.complaintType.message}</p>
             )}

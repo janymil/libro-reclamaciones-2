@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import PlanGate from '@/components/plan/plan-gate';
 import { Calendar, Clock, User, FileText, Filter, Search, Download, Eye } from 'lucide-react';
 
 export default function History() {
@@ -253,6 +254,11 @@ export default function History() {
           </TabsContent>
 
           <TabsContent value="audit" className="space-y-4">
+            <PlanGate
+              feature="auditLog"
+              title="Auditoría de datos"
+              description="Registro de quién cambió qué, y cuándo, sobre los datos críticos del sistema."
+            >
             <Card>
               <CardHeader>
                 <CardTitle>Auditoría de Datos</CardTitle>
@@ -300,6 +306,7 @@ export default function History() {
                 )}
               </CardContent>
             </Card>
+            </PlanGate>
           </TabsContent>
 
           <TabsContent value="system" className="space-y-4">

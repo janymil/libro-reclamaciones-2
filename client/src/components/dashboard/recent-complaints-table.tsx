@@ -108,13 +108,14 @@ export default function RecentComplaintsTable({ complaints = [] }: RecentComplai
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <Table>
+            {/* Compact phones: secondary columns are hidden instead of squeezed. */}
+            <Table className="min-w-[520px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Nº Correlativo</TableHead>
-                  <TableHead>Tipo</TableHead>
+                  <TableHead className="hidden sm:table-cell">Tipo</TableHead>
                   <TableHead>Consumidor</TableHead>
-                  <TableHead>Establecimiento</TableHead>
+                  <TableHead className="hidden lg:table-cell">Establecimiento</TableHead>
                   <TableHead>Días Restantes</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Acciones</TableHead>
@@ -132,7 +133,7 @@ export default function RecentComplaintsTable({ complaints = [] }: RecentComplai
                       </div>
                     </TableCell>
 
-                    <TableCell>
+                    <TableCell className="hidden sm:table-cell">
                       <Badge className={complaint.complaintType === 'reclamo' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}>
                         {COMPLAINT_TYPES[complaint.complaintType as keyof typeof COMPLAINT_TYPES]}
                       </Badge>
@@ -145,7 +146,7 @@ export default function RecentComplaintsTable({ complaints = [] }: RecentComplai
                       </div>
                     </TableCell>
 
-                    <TableCell>{complaint.establishmentId}</TableCell>
+                    <TableCell className="hidden lg:table-cell">{complaint.establishmentId}</TableCell>
 
                     <TableCell>
                       {getUrgencyBadge(complaint.dueDate)}

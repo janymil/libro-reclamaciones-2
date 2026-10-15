@@ -74,6 +74,10 @@ export function registerDocumentsRoutes(app: Express): void {
     confirmationMessage: z.string().max(2000).nullable().optional(),
     brandTone: z.string().max(2000).nullable().optional(),
     brandPolicies: z.string().max(5000).nullable().optional(),
+    // Sales channel. Not a template, so it carries no plan gate: it only decides
+    // which guidance the Integraciones page shows (website vs social profiles),
+    // and it is editable here because onboarding may have guessed wrong.
+    businessType: z.enum(['tienda_virtual', 'local_fisico', 'servicios', 'mixto']).optional(),
   });
 
   app.patch('/api/libro-configuration', requireAuth, async (req: any, res) => {
@@ -89,13 +93,22 @@ export function registerDocumentsRoutes(app: Express): void {
 
       const updates = customizationSchema.parse(req.body);
 
-      // Template/branding fields are a Profesional feature; the AI brand voice
-      // is available to any plan with AI drafting
+      // Template/branding fields are a Pro feature; the AI brand voice ships
+      // with AI drafting, which also starts at Pro.
       const templateKeys = ['brandColor', 'emailSubjectPrefix', 'emailHeaderText', 'emailFooterText', 'confirmationMessage'];
       const touchesTemplates = templateKeys.some((key) => updates[key as keyof typeof updates] !== undefined);
       if (touchesTemplates && !(await hasFeature(req.user.businessId, 'templates'))) {
         return res.status(402).json({
-          message: "Las plantillas personalizadas están disponibles a partir del plan Profesional.",
+          message: "Las plantillas personalizadas están disponibles a partir del plan Pro.",
+          code: "plan_upgrade_required",
+        });
+      }
+
+      const voiceKeys = ['brandTone', 'brandPolicies'];
+      const touchesBrandVoice = voiceKeys.some((key) => updates[key as keyof typeof updates] !== undefined);
+      if (touchesBrandVoice && !(await hasFeature(req.user.businessId, 'brandTone'))) {
+        return res.status(402).json({
+          message: "El tono de marca para la IA está disponible desde el plan Pro. Mejore su plan en \"Plan y Cuotas\".",
           code: "plan_upgrade_required",
         });
       }

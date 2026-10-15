@@ -22,6 +22,7 @@ const h = vi.hoisted(() => {
     tokensSet: [] as Array<{ email: string; token: string; expires: Date }>,
     emailsSent: [] as Array<{ email: string; firstName: string; token: string }>,
     completions: [] as Array<{ userId: string; hashedPassword: string }>,
+    emailVerifications: [] as string[],
     audit: [] as any[],
   };
 
@@ -37,6 +38,10 @@ vi.mock("../storage", () => ({
     },
     completePasswordReset: async (userId: string, hashedPassword: string) => {
       h.calls.completions.push({ userId, hashedPassword });
+    },
+    // A completed reset also proves the mailbox, so it confirms the address.
+    completeEmailVerification: async (userId: string) => {
+      h.calls.emailVerifications.push(userId);
     },
     createAuthAuditLog: async (data: any) => {
       h.calls.audit.push(data);
@@ -79,6 +84,7 @@ beforeEach(() => {
   h.calls.tokensSet = [];
   h.calls.emailsSent = [];
   h.calls.completions = [];
+  h.calls.emailVerifications = [];
   h.calls.audit = [];
 });
 
@@ -185,5 +191,35 @@ describe("resetPassword", () => {
     expect(h.calls.completions[0].hashedPassword).toBe("hashed:NewPassw0rd!");
     // The cleartext password must never reach the data layer.
     expect(h.calls.completions[0].hashedPassword).not.toBe("NewPassw0rd!");
+  });
+
+  it("confirms the mailbox, because following the link proves control of it", async () => {
+    h.state.userByToken = {
+      ...activeUser,
+      isEmailVerified: false,
+      passwordResetExpires: new Date(Date.now() + 60_000),
+    };
+
+    const result = await authService.resetPassword(
+      "a".repeat(64),
+      "NewPassw0rd!",
+      "127.0.0.1",
+      "vitest",
+    );
+
+    expect(result.success).toBe(true);
+    expect(h.calls.emailVerifications).toEqual(["u1"]);
+  });
+
+  it("does not re-confirm a mailbox that is already verified", async () => {
+    h.state.userByToken = {
+      ...activeUser,
+      isEmailVerified: true,
+      passwordResetExpires: new Date(Date.now() + 60_000),
+    };
+
+    await authService.resetPassword("a".repeat(64), "NewPassw0rd!", "127.0.0.1", "vitest");
+
+    expect(h.calls.emailVerifications).toHaveLength(0);
   });
 });

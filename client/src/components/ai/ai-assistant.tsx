@@ -4,6 +4,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useUpgradeToast } from "@/hooks/use-plan-upgrade";
 import { useAIClassification, useAISuggestResponse, useAIStatus, useAITrends, useSlaPrediction } from "@/hooks/use-complaints";
 import { COMPLAINT_TYPES } from "@/lib/constants";
 
@@ -17,6 +18,7 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
   const [responseType, setResponseType] = useState<"reclamo" | "queja">("reclamo");
   
   const { toast } = useToast();
+  const upgradeToast = useUpgradeToast();
   const { data: aiStatus } = useAIStatus();
   const trendsMutation = useAITrends();
   const { data: slaPrediction } = useSlaPrediction();
@@ -79,11 +81,7 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
             : "Se ha generado una respuesta sugerida. Revísela antes de enviarla.",
       });
     } catch (error) {
-      toast({
-        title: "Error en sugerencia",
-        description: "No se pudo generar la respuesta. Intente nuevamente.",
-        variant: "destructive",
-      });
+      upgradeToast(error, 'No se pudo generar la respuesta');
     }
   };
 

@@ -8,7 +8,17 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
-import { PLAN_LIST, TRIAL_DAYS, RETENTION_MONTHS } from '@shared/plans';
+import {
+  PLANS,
+  PLAN_LIST,
+  TRIAL_DAYS,
+  RETENTION_MONTHS,
+  LAUNCH_OFFER_ANNUAL_BASICO,
+  REGULAR_ANNUAL_BASICO,
+  LAUNCH_OFFER_SEATS,
+  MULTI_YEAR_DISCOUNT_NOTE,
+  type PlanDefinition,
+} from '@shared/plans';
 import { BrandMark, StampMark, QrGlyph, HojaDocument } from '@/components/landing/brand';
 import {
   ArrowRight,
@@ -129,7 +139,7 @@ const FAQ_ITEMS = [
   },
   {
     q: '¿La prueba gratis tiene compromiso?',
-    a: `No. Todos los planes incluyen ${TRIAL_DAYS} días de prueba con las funciones del plan Profesional, sin tarjeta de crédito. Si no continúa, sus datos se eliminan según la política de retención.`,
+    a: `No. Todos los planes incluyen ${TRIAL_DAYS} días de prueba con las funciones del plan Pro, sin tarjeta de crédito. Si no continúa, sus datos se eliminan según la política de retención.`,
   },
   {
     q: '¿Qué pasa con los datos personales de mis clientes?',
@@ -137,7 +147,7 @@ const FAQ_ITEMS = [
   },
   {
     q: '¿Puedo usar mi propio tono en las respuestas?',
-    a: 'Sí. Desde el plan Profesional, la IA redacta con el tono de su marca y sus políticas internas; usted revisa, ajusta y envía.',
+    a: 'Sí. Desde el plan Pro, la IA redacta con el tono de su marca y sus políticas internas; usted revisa, ajusta y envía.',
   },
 ];
 
@@ -821,6 +831,30 @@ function SocialProof() {
 }
 
 function Pricing() {
+  const [period, setPeriod] = useState<'monthly' | 'annual'>('annual');
+
+  // Savings are computed from the catalogue, never hardcoded, so the copy can
+  // never disagree with the price again.
+  const maxAnnualSavingPct = Math.max(
+    ...PLAN_LIST.filter((plan) => plan.priceMonthly > 0).map((plan) =>
+      Math.round(((plan.priceMonthly * 12 - plan.priceAnnual) / (plan.priceMonthly * 12)) * 100),
+    ),
+  );
+
+  // The comparison table's small print is derived from the plan catalogue too:
+  // the page must never promise "unlimited from the cheapest plan" (the cheapest
+  // plan is Gratis: 5 reclamos in total, Reclamos-only) and must never imply a
+  // per-branch charge that does not exist (locales are a per-plan cap, not a
+  // paid add-on: Básico 1, Pro 5, Empresarial unlimited).
+  const freePlan = PLANS.gratis;
+  const basicPlan = PLANS.esencial;
+  const proPlan = PLANS.profesional;
+  const businessPlan = PLANS.corporativo;
+  const localesCopy = (plan: PlanDefinition) =>
+    plan.limits.establishments === null
+      ? `ilimitados en ${plan.name}`
+      : `hasta ${plan.limits.establishments} en ${plan.name}`;
+
   return (
     <section id="precios" className="border-y border-[#e3d9c6] bg-[#fdfaf3] py-20 md:py-28">
       <div className="mx-auto max-w-6xl px-5 sm:px-8">
@@ -832,16 +866,55 @@ function Pricing() {
           <p className="mt-4 text-pretty text-lg text-[#5c5246]">
             Todos los planes incluyen {TRIAL_DAYS} días de prueba gratis, QR y cartel oficial,
             constancias automáticas y resguardo de {RETENTION_MONTHS} meses.
+            Reclamos <strong>ilimitados desde Básico</strong>; el plan Gratis incluye 5 reclamos en total.
           </p>
+          <div className="mx-auto mt-6 flex max-w-xl flex-col items-center gap-2 rounded-2xl border border-[#c02b0a]/25 bg-[#c02b0a]/5 px-6 py-4">
+            <p className="font-mono text-sm font-bold text-[#c02b0a]">
+              LANZAMIENTO: Básico a {soles(LAUNCH_OFFER_ANNUAL_BASICO)} el primer año (en vez de {soles(REGULAR_ANNUAL_BASICO)})
+            </p>
+            <p className="text-sm text-[#5c5246]">
+              Solo para los primeros {LAUNCH_OFFER_SEATS} negocios · {MULTI_YEAR_DISCOUNT_NOTE}
+            </p>
+          </div>
         </Reveal>
 
-        <div className="mt-14 grid gap-6 lg:grid-cols-3">
+        <Reveal delay={80}>
+          <div className="mt-8 flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPeriod('monthly')}
+              aria-pressed={period === 'monthly'}
+              className={`rounded-full px-5 py-2 font-mono text-xs font-bold uppercase tracking-[0.14em] transition-colors ${
+                period === 'monthly'
+                  ? 'bg-[#1b1611] text-[#f7f2e8]'
+                  : 'border border-[#e3d9c6] bg-white text-[#5c5246] hover:border-[#1b1611]'
+              }`}
+            >
+              Mensual
+            </button>
+            <button
+              type="button"
+              onClick={() => setPeriod('annual')}
+              aria-pressed={period === 'annual'}
+              className={`rounded-full px-5 py-2 font-mono text-xs font-bold uppercase tracking-[0.14em] transition-colors ${
+                period === 'annual'
+                  ? 'bg-[#1b1611] text-[#f7f2e8]'
+                  : 'border border-[#e3d9c6] bg-white text-[#5c5246] hover:border-[#1b1611]'
+              }`}
+            >
+              Anual · {maxAnnualSavingPct}% menos
+            </button>
+          </div>
+        </Reveal>
+
+        <div className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {PLAN_LIST.map((plan, i) => {
             const popular = plan.id === 'profesional';
+            const isFree = plan.id === 'gratis';
             return (
               <Reveal key={plan.id} delay={i * 110} className="h-full">
                 <article
-                  className={`relative flex h-full flex-col rounded-2xl border p-8 ${
+                  className={`relative flex h-full flex-col rounded-2xl border p-6 ${
                     popular
                       ? 'border-[#1b1611] bg-[#1b1611] text-[#f7f2e8] shadow-[0_30px_60px_-24px_rgba(27,22,17,0.55)]'
                       : 'border-[#e3d9c6] bg-white text-[#1b1611]'
@@ -859,13 +932,19 @@ function Pricing() {
                   </p>
 
                   <p className="mt-6">
-                    <span className="font-mono text-4xl font-bold tabular-nums">{soles(plan.priceAnnual)}</span>
+                    <span className="font-mono text-4xl font-bold tabular-nums">
+                      {soles(period === 'annual' ? plan.priceAnnual : plan.priceMonthly)}
+                    </span>
                     <span className={`ml-2 text-sm ${popular ? 'text-[#f7f2e8]/65' : 'text-[#5c5246]'}`}>
-                      al año
+                      {isFree ? 'siempre' : period === 'annual' ? 'al año' : 'al mes'}
                     </span>
                   </p>
                   <p className={`mt-1 font-mono text-xs ${popular ? 'text-amber-300' : 'text-[#c02b0a]'}`}>
-                    equivale a {soles(Math.round(plan.priceAnnual / 12))}/mes · 2 meses gratis al pagar anual
+                    {isFree
+                      ? 'Sin tarjeta · sin fecha de vencimiento'
+                      : period === 'annual'
+                        ? `Ahorras ${soles(plan.priceMonthly * 12 - plan.priceAnnual)} al año frente al pago mensual`
+                        : 'Cancela cuando quieras, sin contrato'}
                   </p>
 
                   <ul className="mt-7 flex-1 space-y-3 text-[15px]">
@@ -888,7 +967,7 @@ function Pricing() {
                           : 'bg-[#1b1611] text-[#f7f2e8] hover:bg-black'
                       }`}
                     >
-                      Probar {TRIAL_DAYS} días gratis
+                      {isFree ? 'Empezar gratis' : `Probar ${TRIAL_DAYS} días gratis`}
                     </Button>
                   </Link>
                 </article>
@@ -899,8 +978,63 @@ function Pricing() {
 
         <Reveal delay={200}>
           <p className="mt-10 text-center text-sm text-[#5c5246]">
-            Precios en soles (S/). Sin tarjeta para empezar · cancele cuando quiera.
+            Precios en soles (S/). Puede pagar mes a mes o al año, y cancelar cuando quiera.
+            El pago anual se muestra por defecto porque sale {maxAnnualSavingPct}% más barato que pagar mes a mes.
           </p>
+        </Reveal>
+
+        <Reveal delay={220}>
+          <div className="mx-auto mt-12 max-w-4xl overflow-hidden rounded-2xl border border-[#e3d9c6] bg-white">
+            <p className="border-b border-[#e3d9c6] bg-[#1b1611] px-6 py-4 text-center font-mono text-xs font-bold uppercase tracking-[0.18em] text-[#f7f2e8]">
+              Por qué somos el más económico del Perú
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-[#e3d9c6] font-mono text-[11px] uppercase tracking-widest text-[#5c5246]">
+                    <th className="px-6 py-3">Proveedor (precio anual aprox.)</th>
+                    <th className="px-6 py-3">Entrada</th>
+                    <th className="px-6 py-3">Reclamos</th>
+                    <th className="px-6 py-3">Nosotros</th>
+                  </tr>
+                </thead>
+                <tbody className="text-[#1b1611]">
+                  <tr className="border-b border-[#e3d9c6]">
+                    <td className="px-6 py-3">Reclamo Virtual</td>
+                    <td className="px-6 py-3 font-mono">S/ 189</td>
+                    <td className="px-6 py-3">limitados / por caso</td>
+                    <td className="px-6 py-3 font-semibold text-[#1e6b4a]">Nosotros: S/ 89, ilimitados</td>
+                  </tr>
+                  <tr className="border-b border-[#e3d9c6]">
+                    <td className="px-6 py-3">Librovirtual (competidor)</td>
+                    <td className="px-6 py-3 font-mono">S/ 100</td>
+                    <td className="px-6 py-3">limitados</td>
+                    <td className="px-6 py-3 font-semibold text-[#1e6b4a]">Nosotros: S/ 89, ilimitados</td>
+                  </tr>
+                  <tr className="border-b border-[#e3d9c6]">
+                    <td className="px-6 py-3">YoReclamo</td>
+                    <td className="px-6 py-3 font-mono">S/ 129</td>
+                    <td className="px-6 py-3">limitados</td>
+                    <td className="px-6 py-3 font-semibold text-[#1e6b4a]">Nosotros: S/ 89, ilimitados</td>
+                  </tr>
+                  <tr>
+                    <td className="px-6 py-3">Estudio Manrique / tradicionales</td>
+                    <td className="px-6 py-3 font-mono">S/ 199+</td>
+                    <td className="px-6 py-3">según plan</td>
+                    <td className="px-6 py-3 font-semibold text-[#1e6b4a]">Pro S/ 189 con IA y 5 locales</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="px-6 py-4 text-center text-xs text-[#5c5246]">
+              Precios de otros proveedores: referenciales de mercado 2025-2026, no verificados
+              por nosotros. Lo que sí garantizamos: reclamos ilimitados desde {basicPlan.name} (
+              {soles(basicPlan.priceAnnual)} al año), mientras {freePlan.name} incluye{' '}
+              {freePlan.limits.complaintsTotal} reclamos en total; QR + cartel oficial + constancia
+              PDF en todos los planes; y locales sin cobro por sucursal:
+              {localesCopy(basicPlan)}, {localesCopy(proPlan)} e {localesCopy(businessPlan)}.
+            </p>
+          </div>
         </Reveal>
       </div>
     </section>

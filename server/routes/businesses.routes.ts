@@ -50,9 +50,8 @@ export function registerBusinessesRoutes(app: Express): void {
     }
   });
 
-  // Register another RUC under the same login (Phase 2.7). The plan's
-  // multi-business quota applies, every new business starts its own 7-day
-  // trial, and the creator gets an access grant for the switcher.
+  // Register another RUC under the same login. The plan's
+  // multi-business quota applies, every new business starts its own trial, and the creator gets an access grant for the switcher.
   app.post('/api/businesses', requireAuth, requireAdmin, requireNonDemo, async (req: any, res) => {
     try {
       // Only the legal identity fields are accepted: plan, subscription state
@@ -61,18 +60,25 @@ export function registerBusinessesRoutes(app: Express): void {
       const businessData = businessProfileSchema.parse(req.body);
 
       // Quota: businesses manageable from this login. Users without an active
-      // business yet are starting their first one, so the esencial limit
+      // business yet are starting their first one, so the gratis limit
       // applies (and their own access grants count as usage).
       const quota = req.user.businessId
         ? await enforceQuota(req.user.businessId, req.user.id, 'businesses')
-        : checkQuota(PLANS.esencial, 'businesses', (await storage.getUserBusinessAccess(req.user.id)).length);
+        : checkQuota(PLANS.gratis, 'businesses', (await storage.getUserBusinessAccess(req.user.id)).length);
       if (!quota.allowed) {
         return res.status(402).json({ message: quota.reason, code: "quota_exceeded" });
       }
 
       const duplicate = await storage.getBusinessByRuc(businessData.ruc);
       if (duplicate) {
-        return res.status(409).json({ message: "Ya existe una empresa registrada con ese RUC" });
+        // Not a dead end any more: the caller can ask the current administrators
+        // of that RUC for access (POST /api/businesses/access-requests), which is
+        // what the client offers right next to this message.
+        return res.status(409).json({
+          message: "Ya existe una empresa registrada con ese RUC. Puedes solicitar acceso a esa empresa.",
+          code: "ruc_already_registered",
+          businessName: duplicate.businessName,
+        });
       }
 
       const business = await storage.createBusiness({

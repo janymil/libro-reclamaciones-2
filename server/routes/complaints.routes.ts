@@ -9,7 +9,7 @@ import { storage } from "../storage";
 import { requireAuth, requireStaff } from "../middleware/requireAuth";
 import { publicComplaintLimiter } from "../middleware/rateLimits";
 import { intakeComplaint, IntakeError } from "../services/complaintIntakeService";
-import { enforceQuota } from "../services/subscriptionService";
+import { enforceQuota, enforceComplaintType, hasFeature } from "../services/subscriptionService";
 import { verifyCaptcha, isHoneypotTriggered, consumeCaptchaToken } from "../services/captchaService";
 import { buildExpedienteZip } from "../services/expedienteService";
 
@@ -160,6 +160,15 @@ export function registerComplaintsRoutes(app: Express): void {
       if (!complaint || complaint.businessId !== req.user.businessId) {
         return res.status(404).json({ message: "Complaint not found" });
       }
+
+      // Audit trail is an Empresarial feature (checked after ownership, so a
+      // cross-tenant probe still gets 404 and never learns the plan).
+      if (!(await hasFeature(req.user.businessId, 'auditLog'))) {
+        return res.status(402).json({
+          message: "El registro de auditoría está disponible en el plan Empresarial. Mejore su plan en \"Plan y Cuotas\".",
+          code: "plan_upgrade_required",
+        });
+      }
       
       const auditLogs = await storage.getAuditLogsByComplaint(req.params.id);
       res.json(auditLogs);
@@ -235,6 +244,18 @@ export function registerComplaintsRoutes(app: Express): void {
       const quota = await enforceQuota(data.businessId, null, 'complaintsThisMonth');
       if (!quota.allowed) {
         return res.status(402).json({ message: quota.reason, code: "quota_exceeded" });
+      }
+
+      // Complaint-type gate: the Gratis plan accepts Reclamos only.
+      const typeCheck = await enforceComplaintType(data.businessId, data.complaintType);
+      if (!typeCheck.allowed) {
+        return res.status(402).json({ message: typeCheck.reason, code: "complaint_type_not_allowed" });
+      }
+
+      // Lifetime gate: Gratis includes 5 complaints in total, not per month.
+      const lifetime = await enforceQuota(data.businessId, null, 'complaintsTotal');
+      if (!lifetime.allowed) {
+        return res.status(402).json({ message: lifetime.reason, code: "quota_exceeded" });
       }
 
       const { complaint } = await intakeComplaint(data);

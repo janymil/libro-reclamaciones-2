@@ -18,9 +18,11 @@ import History from "@/pages/history";
 import QrCodePage from "@/pages/qr-code";
 import PublicPortal from "@/pages/public-portal";
 import ResetPasswordPage from "@/pages/reset-password";
+import VerifyEmailPage from "@/pages/verify-email";
 import Compliance from "@/pages/compliance";
 import AssistantPage from "@/pages/assistant";
 import SubscriptionPage from "@/pages/subscription";
+import PaymentsPage from "@/pages/payments";
 import CustomizationPage from "@/pages/customization";
 import IntegrationsPage from "@/pages/integrations";
 import StatusPage from "@/pages/status";
@@ -41,6 +43,7 @@ function Router() {
       {/* Paso 2 de la recuperación de contraseña: el enlace del correo apunta aquí.
           Va antes de `/acceso` para que la ruta exacta gane siempre. */}
       <Route path="/acceso/restablecer-password" component={ResetPasswordPage} />
+      <Route path="/acceso/verificar-email" component={VerifyEmailPage} />
       <Route path="/acceso" component={AuthPage} />
       <Route path="/registro" component={OnboardingPage} />
       <Route path="/panel" component={Dashboard} />
@@ -56,6 +59,7 @@ function Router() {
       <Route path="/cumplimiento" component={Compliance} />
       <Route path="/asistente" component={AssistantPage} />
       <Route path="/plan" component={SubscriptionPage} />
+      <Route path="/pagos" component={PaymentsPage} />
       <Route path="/personalizacion" component={CustomizationPage} />
       <Route path="/integraciones" component={IntegrationsPage} />
 
@@ -80,6 +84,7 @@ function Router() {
       <Route path="/compliance"><Redirect to="/cumplimiento" /></Route>
       <Route path="/assistant"><Redirect to="/asistente" /></Route>
       <Route path="/subscription"><Redirect to="/plan" /></Route>
+      <Route path="/payments"><Redirect to="/pagos" /></Route>
       <Route path="/integrations"><Redirect to="/integraciones" /></Route>
       <Route path="/status"><Redirect to="/estado" /></Route>
       <Route path="/accessibility"><Redirect to="/accesibilidad" /></Route>

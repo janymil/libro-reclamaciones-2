@@ -37,12 +37,24 @@ export function registerSubscriptionRoutes(app: Express): void {
     }
   });
 
-  // Change the plan / billing period (admin only). This records the intent;
-  // actual payment collection is handled by the payment provider webhook in a
-  // real deployment - here the plan applies immediately so the trial keeps
-  // working end to end.
+  // Change the plan / billing period (admin only).
+  //
+  // This is the NO-CHARGE path: it applies the plan immediately without
+  // collecting money. That is only legitimate when billing happens outside the
+  // app (manual invoicing), so it is off unless
+  // PAYMENTS_ALLOW_FREE_PLAN_CHANGE=true. The normal path is
+  // POST /api/payments/checkout, where only a confirmed payment applies a plan -
+  // otherwise this endpoint would be a free upgrade for anyone with a session.
   app.post('/api/subscription', requireAuth, requireNonDemo, async (req: any, res) => {
     try {
+      if (process.env.PAYMENTS_ALLOW_FREE_PLAN_CHANGE !== 'true') {
+        return res.status(402).json({
+          message:
+            "La activación de un plan requiere un pago confirmado. Contrátelo en la sección \"Plan y Cuotas\".",
+          code: "payment_required",
+        });
+      }
+
       if (req.user.role !== 'admin') {
         return res.status(403).json({ message: "Solo un administrador puede cambiar el plan" });
       }

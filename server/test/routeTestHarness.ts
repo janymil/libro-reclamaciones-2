@@ -21,7 +21,13 @@ export async function startTestApp(
   register: (app: Express) => void,
 ): Promise<{ url: string; close: () => Promise<void> }> {
   const app = express();
-  app.use(express.json());
+  // `rawBody` mirrors `server/index.ts`: webhook signature checks (WhatsApp Cloud
+  // API) must run against the exact bytes Meta signed, not a re-serialization.
+  app.use(express.json({
+    verify: (req, _res, buf) => {
+      (req as any).rawBody = buf;
+    },
+  }));
 
   app.use((req: any, _res, next) => {
     const userId = req.get("x-test-user");
@@ -57,11 +63,11 @@ export interface TestResponse {
 export async function call(
   url: string,
   path: string,
-  options: { method?: string; userId?: string | null; body?: unknown } = {},
+  options: { method?: string; userId?: string | null; body?: unknown; headers?: Record<string, string> } = {},
 ): Promise<TestResponse> {
-  const { method = "GET", userId, body } = options;
+  const { method = "GET", userId, body, headers: extraHeaders } = options;
 
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...(extraHeaders ?? {}) };
   if (userId !== null && userId !== undefined) {
     headers["x-test-user"] = userId;
   }

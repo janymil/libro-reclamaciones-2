@@ -2,11 +2,12 @@ import type { Express } from "express";
 import bcrypt from "bcrypt";
 import { z } from "zod";
 
-import { MIN_PASSWORD_LENGTH } from "@shared/schema";
+import { MIN_PASSWORD_LENGTH, accountEmailSchema } from "@shared/schema";
 import { storage } from "../storage";
 import { requireAuth, requireNonDemo, requireAdmin } from "../middleware/requireAuth";
 import { enforceQuota } from "../services/subscriptionService";
 import { getManageableBusinessIds } from "../services/tenantAccess";
+import { emailService } from "../services/emailService";
 
 // Whitelisted input for team-member creation. The target business is optional
 // (defaults to the caller's active tenant) and is ALWAYS validated server-side
@@ -16,7 +17,7 @@ const createUserSchema = z.object({
   username: z.string().trim().min(3).max(100).optional(),
   firstName: z.string().trim().min(1).max(100).optional(),
   lastName: z.string().trim().max(100).optional(),
-  email: z.string().trim().email("Email inválido").max(255),
+  email: accountEmailSchema,
   password: z.string().min(MIN_PASSWORD_LENGTH, `La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres`).max(200),
   role: z.enum(['admin', 'user', 'viewer']).default('user'),
   businessId: z.string().uuid().nullish(),
@@ -26,7 +27,7 @@ const createUserSchema = z.object({
 const updateProfileSchema = z.object({
   firstName: z.string().trim().min(1).max(100).optional(),
   lastName: z.string().trim().max(100).optional(),
-  email: z.string().trim().email("Email inválido").max(255).optional(),
+  email: accountEmailSchema.optional(),
   phone: z.string().trim().max(20).nullish(),
   // The registered address is mandatory on the business record, so it can be
   // updated but never cleared.
@@ -195,6 +196,13 @@ export function registerUsersRoutes(app: Express): void {
       }
 
       await storage.changeUserPassword(req.user.id, currentPassword, newPassword);
+
+      // Fire-and-forget: confirm the change so an unauthorized password swap is
+      // noticed. A mail failure must not fail the password change itself.
+      void emailService
+        .sendPasswordChangeConfirmation(req.user.email, req.user.firstName)
+        .catch((error) => console.error('[email] password-change confirmation failed:', error));
+
       res.json({ message: "Contraseña actualizada exitosamente" });
     } catch (error) {
       console.error('Error changing password:', error);

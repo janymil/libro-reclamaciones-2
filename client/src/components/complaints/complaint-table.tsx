@@ -370,16 +370,19 @@ export default function ComplaintTable({ showFilters = true }: ComplaintTablePro
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <Table>
+              {/* min-width keeps the columns readable on a phone: the secondary
+                  columns above are hidden below their breakpoint, so the table
+                  never squeezes into unreadable cells. */}
+              <Table className="min-w-[560px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>N° Correlativo</TableHead>
-                    <TableHead>Tipo</TableHead>
+                    <TableHead className="hidden sm:table-cell">Tipo</TableHead>
                     <TableHead>Consumidor</TableHead>
-                    <TableHead>Establecimiento</TableHead>
+                    <TableHead className="hidden lg:table-cell">Establecimiento</TableHead>
                     <TableHead>Días Restantes</TableHead>
                     <TableHead>Estado</TableHead>
-                    <TableHead>Prioridad</TableHead>
+                    <TableHead className="hidden md:table-cell">Prioridad</TableHead>
                     <TableHead>Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -395,7 +398,7 @@ export default function ComplaintTable({ showFilters = true }: ComplaintTablePro
                         </div>
                       </TableCell>
 
-                      <TableCell>
+                      <TableCell className="hidden sm:table-cell">
                         <Badge className={complaint.complaintType === 'reclamo' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}>
                           {COMPLAINT_TYPES[complaint.complaintType as keyof typeof COMPLAINT_TYPES]}
                         </Badge>
@@ -408,7 +411,7 @@ export default function ComplaintTable({ showFilters = true }: ComplaintTablePro
                         </div>
                       </TableCell>
 
-                      <TableCell>{complaint.establishmentId}</TableCell>
+                      <TableCell className="hidden lg:table-cell">{complaint.establishmentId}</TableCell>
 
                       <TableCell>
                         {getUrgencyBadge(complaint.dueDate)}
@@ -418,7 +421,7 @@ export default function ComplaintTable({ showFilters = true }: ComplaintTablePro
                         {getStatusBadge(complaint.status)}
                       </TableCell>
 
-                      <TableCell>
+                      <TableCell className="hidden md:table-cell">
                         {getPriorityBadge(complaint.priority)}
                       </TableCell>
 
