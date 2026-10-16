@@ -12,11 +12,11 @@ import { MailCheck, Loader2 } from "lucide-react";
 /**
  * Nudge to confirm the mailbox, shown while `isEmailVerified` is false.
  *
- * A notice rather than a wall: the account is fully usable without confirming
- * (the password was emailed at signup, so the address already works), but this is
- * the address that receives every complaint notification, so the user should
- * knowingly confirm it. Demo accounts are excluded - their credentials are
- * public, and there is nobody to confirm anything.
+ * Not decoration: since services/verificationService.ts an unconfirmed mailbox
+ * means the Libro cannot be published - no company can be created at onboarding,
+ * and the public book refuses consumer complaints - because this is the address
+ * that receives every complaint notification. Demo accounts are excluded: their
+ * credentials are public, and there is nobody to confirm anything.
  */
 function EmailVerificationBanner() {
   const { user } = useAuth();
@@ -53,7 +53,8 @@ function EmailVerificationBanner() {
       <div className="flex items-start gap-2">
         <MailCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#8a6d1f]" aria-hidden="true" />
         <p className="leading-relaxed">
-          Confirma <strong>{user.email}</strong> para recibir el aviso de cada nueva reclamación.
+          Confirma <strong>{user.email}</strong> para publicar tu Libro de Reclamaciones y recibir el
+          aviso de cada nueva reclamación.
         </p>
       </div>
       <button

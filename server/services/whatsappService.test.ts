@@ -158,28 +158,28 @@ describe("parseInboundMessages", () => {
 
 describe("message builders", () => {
   it("builds the public form and tracking URLs from APP_URL", () => {
-    const urls = buildComplaintUrls("panaderia-ana", "2026-0007", "https://librovirtual.pe/");
+    const urls = buildComplaintUrls("panaderia-ana", "2026-0007", "https://librodigital.pe/");
 
-    expect(urls.formUrl).toBe("https://librovirtual.pe/libro/panaderia-ana");
-    expect(urls.consultUrl).toBe("https://librovirtual.pe/libro/panaderia-ana?folio=2026-0007");
+    expect(urls.formUrl).toBe("https://librodigital.pe/libro/panaderia-ana");
+    expect(urls.consultUrl).toBe("https://librodigital.pe/libro/panaderia-ana?folio=2026-0007");
   });
 
   it("returns no URLs when APP_URL or the slug is missing", () => {
     expect(buildComplaintUrls("slug", "2026-0001", "")).toEqual({ formUrl: null, consultUrl: null });
-    expect(buildComplaintUrls(null, "2026-0001", "https://librovirtual.pe")).toEqual({ formUrl: null, consultUrl: null });
+    expect(buildComplaintUrls(null, "2026-0001", "https://librodigital.pe")).toEqual({ formUrl: null, consultUrl: null });
   });
 
   it("points the consumer to the virtual Libro and states the legal deadline", () => {
     const reply = buildInboundReply({
       businessName: "Panadería Ana",
       profileName: "Ana",
-      urls: buildComplaintUrls("panaderia-ana", "2026-0007", "https://librovirtual.pe"),
+      urls: buildComplaintUrls("panaderia-ana", "2026-0007", "https://librodigital.pe"),
     });
 
     expect(reply).toContain("Hola Ana");
     expect(reply).toContain("Panadería Ana");
-    expect(reply).toContain("https://librovirtual.pe/libro/panaderia-ana");
-    expect(reply).toContain("https://librovirtual.pe/libro/panaderia-ana?folio=2026-0007");
+    expect(reply).toContain("https://librodigital.pe/libro/panaderia-ana");
+    expect(reply).toContain("https://librodigital.pe/libro/panaderia-ana?folio=2026-0007");
     expect(reply).toContain("Anexo 1");
     expect(reply).toContain("15 días hábiles");
   });
@@ -201,7 +201,7 @@ describe("message builders", () => {
       correlativeNumber: "2026-0007",
       complaintType: "reclamo",
       providerResponse: "  Le   devolvimos el importe.  ",
-      consultUrl: "https://librovirtual.pe/libro/panaderia-ana?folio=2026-0007",
+      consultUrl: "https://librodigital.pe/libro/panaderia-ana?folio=2026-0007",
     });
 
     expect(text).toContain("Le devolvimos el importe.");

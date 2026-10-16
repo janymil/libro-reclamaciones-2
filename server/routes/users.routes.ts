@@ -8,6 +8,8 @@ import { requireAuth, requireNonDemo, requireAdmin } from "../middleware/require
 import { enforceQuota } from "../services/subscriptionService";
 import { getManageableBusinessIds } from "../services/tenantAccess";
 import { emailService } from "../services/emailService";
+import { authService } from "../services/authService";
+import { closeBusiness } from "../services/accountClosureService";
 
 // Whitelisted input for team-member creation. The target business is optional
 // (defaults to the caller's active tenant) and is ALWAYS validated server-side
@@ -23,15 +25,14 @@ const createUserSchema = z.object({
   businessId: z.string().uuid().nullish(),
 });
 
-// Own profile: only these fields may change, and only on the caller's own row.
+// Own profile: only the account's own identity fields, and only on the caller's
+// own row. The company's phone and address are NOT accepted here - they live on
+// the business record and are edited in "Mi empresa" (PATCH /api/businesses/:id),
+// so company data has a single write path.
 const updateProfileSchema = z.object({
   firstName: z.string().trim().min(1).max(100).optional(),
   lastName: z.string().trim().max(100).optional(),
   email: accountEmailSchema.optional(),
-  phone: z.string().trim().max(20).nullish(),
-  // The registered address is mandatory on the business record, so it can be
-  // updated but never cleared.
-  address: z.string().trim().min(1).max(500).optional(),
 });
 
 /**
@@ -126,6 +127,136 @@ export function registerUsersRoutes(app: Express): void {
     }
   });
 
+  // ---- Irreversible deletion ("abandon the app") ------------------------------
+
+  // Registered BEFORE `/api/users/:id`: Express resolves routes in order, so the
+  // param route would otherwise swallow "me" and answer 404 for the caller's own
+  // account (the same ordering rule App.tsx applies to `/acceso/...`).
+  app.delete('/api/users/me', requireAuth, requireNonDemo, deleteOwnAccountHandler);
+
+  /**
+   * Removes a team member for good.
+   *
+   * Admin-only and tenant-scoped like every other user operation, with two
+   * refusals that protect the tenant rather than the caller:
+   *   * an admin cannot delete its own account here - that is "Eliminar mi
+   *     cuenta", which knows what to do about the company, and
+   *   * the LAST active administrator cannot be removed: the company would be
+   *     left with nobody able to manage it.
+   */
+  app.delete('/api/users/:id', requireAuth, requireAdmin, requireNonDemo, async (req: any, res) => {
+    try {
+      if (req.params.id === req.user.id) {
+        return res.status(400).json({
+          message: 'Su propia cuenta se elimina desde Mi Perfil («Eliminar mi cuenta»).',
+          code: 'own_account',
+        });
+      }
+
+      const target = await storage.getUserById(req.params.id);
+      if (!target) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      const allowed = await getManageableBusinessIds(req.user);
+      if (!target.businessId || !allowed.has(target.businessId)) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      if (target.role === 'admin' && target.isActive) {
+        const members = await storage.getUsersByBusinessIds([target.businessId]);
+        const otherAdmins = members.filter(
+          (member) => member.role === 'admin' && member.isActive && member.id !== target.id,
+        );
+
+        if (otherAdmins.length === 0) {
+          return res.status(409).json({
+            message:
+              "Es el último administrador de esa empresa. Nombre a otro administrador o cierre la empresa antes de eliminarlo.",
+            code: "last_administrator",
+          });
+        }
+      }
+
+      await storage.deleteUserAccount(target.id);
+      await storage.createAuthAuditLog({
+        action: 'user_deleted',
+        email: target.email,
+        ipAddress: req.ip || req.connection.remoteAddress || '',
+        userAgent: req.get('User-Agent') || '',
+        success: true,
+        userId: req.user.id,
+        metadata: { deletedUserId: target.id, businessId: target.businessId },
+      });
+
+      res.json({
+        message:
+          "Usuario eliminado. Sus reclamos y el historial de la empresa se conservan.",
+      });
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      res.status(500).json({ message: "No se pudo eliminar el usuario" });
+    }
+  });
+
+  /**
+   * "Eliminar mi cuenta": the person leaves the app for good.
+   *
+   * The login disappears. The company does NOT disappear with it unless the
+   * caller is its last administrator AND explicitly asks for it
+   * (`?closeBusiness=true`): otherwise the tenant and its Libro would be left
+   * ownerless, which nobody asked for.
+   */
+  async function deleteOwnAccountHandler(req: any, res: any) {
+    try {
+      const user = req.user;
+      const closeBusinessFlag = String(req.query.closeBusiness ?? '') === 'true';
+
+      if (user.businessId) {
+        const business = await storage.getBusiness(user.businessId);
+
+        if (business) {
+          const members = await storage.getUsersByBusinessIds([business.id]);
+          const activeAdmins = members.filter((member) => member.role === 'admin' && member.isActive);
+          const isLastAdmin = activeAdmins.length === 1 && activeAdmins[0].id === user.id;
+
+          if (isLastAdmin && !closeBusinessFlag) {
+            return res.status(409).json({
+              message:
+                `Es el último administrador de ${business.businessName}. Para eliminar su cuenta, cierre también la empresa.`,
+              code: "last_administrator",
+              businessName: business.businessName,
+            });
+          }
+
+          if (isLastAdmin) {
+            await closeBusiness(business);
+          }
+        }
+      }
+
+      await storage.deleteUserAccount(user.id);
+      await storage.createAuthAuditLog({
+        action: 'account_deleted',
+        email: user.email,
+        ipAddress: req.ip || req.connection.remoteAddress || '',
+        userAgent: req.get('User-Agent') || '',
+        success: true,
+        metadata: { closedBusiness: closeBusinessFlag },
+      });
+
+      // The session points at a row that no longer exists: end it here.
+      req.session.destroy(() => {
+        res.json({
+          message: "Su cuenta fue eliminada. Gracias por haber usado LibroDigital.pe.",
+        });
+      });
+    } catch (error) {
+      console.error('Error deleting own account:', error);
+      res.status(500).json({ message: "No se pudo eliminar la cuenta" });
+    }
+  }
+
   app.patch('/api/users/:id/status', requireAuth, requireAdmin, async (req: any, res) => {
     try {
       const target = await storage.getUserById(req.params.id);
@@ -170,9 +301,28 @@ export function registerUsersRoutes(app: Express): void {
         }
       }
 
+      // A new address is a new mailbox: storage clears `is_email_verified`, and
+      // we immediately send the confirmation link to it. Otherwise the account
+      // would keep receiving every complaint notification at an address nobody
+      // ever proved it owned.
+      const emailChanged = Boolean(profileData.email && profileData.email !== req.user.email);
+
       const user = await storage.updateUserProfile(req.user.id, profileData);
       const { password: _password, ...userWithoutPassword } = user;
-      res.json(userWithoutPassword);
+
+      let verificationSent = false;
+      if (emailChanged) {
+        const sent = await authService
+          .resendEmailVerification(
+            user.id,
+            req.ip || req.connection.remoteAddress || '',
+            req.get('User-Agent') || '',
+          )
+          .catch(() => ({ success: false, message: '' }));
+        verificationSent = sent.success;
+      }
+
+      res.json({ ...userWithoutPassword, verificationSent });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Datos inválidos", errors: error.errors });

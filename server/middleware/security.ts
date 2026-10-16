@@ -8,6 +8,47 @@ import { isLocalDatabase } from "../db";
 import { securityAuditLogger } from "./securityLog";
 
 /**
+ * Resolves the `trust proxy` setting from `TRUST_PROXY`.
+ *
+ * The app runs behind Cloudflare in production, so Express has to be told which
+ * peers may set `X-Forwarded-For` / `X-Forwarded-Proto`. Getting this wrong is
+ * not cosmetic:
+ *
+ *  - Too low (or unset behind two proxies) and every request looks like it came
+ *    from the CDN: the login limiter throttles the whole country as one visitor
+ *    ("too many attempts" for everyone) and the security log records Cloudflare's
+ *    IP instead of whoever was probing.
+ *  - Too high, or `true`, and anyone who finds the origin IP can forge the header
+ *    and sidestep every limiter - which is why the CIDR-list form is the safe one
+ *    (only Cloudflare's published ranges are allowed to speak, see
+ *    https://www.cloudflare.com/ips/).
+ *
+ * Accepted values:
+ *   undefined / ""  1 - default: a single hop in front of the app (Cloudflare
+ *                   talking to the origin directly).
+ *   "false"         trust nobody (only correct with no proxy at all).
+ *   "true"          trust every hop (insecure unless the origin is unreachable
+ *                   except through the proxy - e.g. firewalled to Cloudflare).
+ *   2, 3, ...       that many hops, counted from the right of the header.
+ *   "1.2.3.0/24,…"  a comma-separated address/CIDR list.
+ */
+export function parseTrustProxy(raw: string | undefined): boolean | number | string[] {
+  const value = raw?.trim();
+
+  if (!value) return 1;
+  if (value === "false") return false;
+  if (value === "true") return true;
+  if (/^\d+$/.test(value)) return Number(value);
+
+  const ranges = value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  return ranges.length > 0 ? ranges : 1;
+}
+
+/**
  * Trust proxy, security headers and the session store.
  *
  * Must run before any route is registered: the auth middleware reads
@@ -15,8 +56,16 @@ import { securityAuditLogger } from "./securityLog";
  * address in production.
  */
 export function applySecurityMiddleware(app: Express): void {
-  // Trust proxy for rate limiting to work correctly in production
-  app.set('trust proxy', 1);
+  const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
+  app.set('trust proxy', trustProxy);
+
+  // Printed once per boot, because a wrong value fails silently and confusingly
+  // (login limiter blocking everyone, security log full of the CDN's address).
+  console.log(
+    `[proxy] trust proxy = ${JSON.stringify(trustProxy)}. ` +
+      'Behind Cloudflare: 1 when the CDN reaches the origin directly, 2 when your ' +
+      'host adds its own proxy hop, or a CIDR list of Cloudflare ranges (see .env.example).',
+  );
   
   // Security middleware with relaxed CSP for development.
   // In production the client is a plain Vite build (external module scripts

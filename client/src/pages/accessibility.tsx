@@ -9,14 +9,14 @@ export default function AccessibilityPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Accesibilidad y cookies</h1>
           <p className="text-gray-600 mt-2">
-            Compromiso de LibroVirtual.pe con la accesibilidad digital y la transparencia sobre cookies.
+            Compromiso de LibroDigital.pe con la accesibilidad digital y la transparencia sobre cookies.
           </p>
         </div>
 
         <section className="rounded-lg border bg-white p-6 shadow-sm space-y-4">
           <h2 className="text-xl font-semibold text-gray-900">Declaración de accesibilidad</h2>
           <p className="text-gray-700">
-            LibroVirtual.pe se compromete a garantizar la accesibilidad de sus portales públicos y
+            LibroDigital.pe se compromete a garantizar la accesibilidad de sus portales públicos y
             panel de gestión, de acuerdo con el <strong>WCAG 2.1 nivel AA</strong>. La accesibilidad
             es especialmente relevante aquí: todo consumidor tiene derecho a registrar una
             reclamación, sin importar cómo usa la web.
@@ -31,8 +31,8 @@ export default function AccessibilityPage() {
           </ul>
           <p className="text-gray-700">
             Si encuentra alguna barrera de accesibilidad, escríbanos a{" "}
-            <a href="mailto:soporte@librovirtual.pe" className="text-primary underline">
-              soporte@librovirtual.pe
+            <a href="mailto:hola@librodigital.pe" className="text-primary underline">
+              hola@librodigital.pe
             </a>{" "}
             y la corregiremos con prioridad.
           </p>

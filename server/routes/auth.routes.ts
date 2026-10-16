@@ -6,7 +6,9 @@ import {
   emailVerificationSchema,
   forgotPasswordSchema,
   insertLibroConfigurationSchema,
+  loginCodeSchema as authLoginCodeSchema,
   loginSchema as authLoginSchema,
+  requestLoginCodeSchema,
   resetPasswordSchema,
   userRegistrationSchema,
 } from "@shared/schema";
@@ -14,9 +16,11 @@ import {
 import { authService } from "../services/authService";
 import { defaultEstablishmentFor } from "../services/establishmentProvisioning";
 import { newBusinessTrialDefaults } from "../services/subscriptionService";
+import { allowsUnverifiedBusinesses } from "../services/verificationService";
 import { storage } from "../storage";
 import { authLimiter, passwordResetLimiter, registerLimiter } from "../middleware/rateLimits";
 import { requireAuth } from "../middleware/requireAuth";
+import { consumeCaptchaToken, verifyCaptcha } from "../services/captchaService";
 
 /**
  * The one and only answer the forgot-password endpoint ever returns.
@@ -29,12 +33,52 @@ const FORGOT_PASSWORD_RESPONSE =
   "Si el correo está registrado, recibirás un enlace para restablecer tu contraseña.";
 
 /**
+ * The one and only answer the code-request endpoint ever returns.
+ *
+ * Same reasoning as FORGOT_PASSWORD_RESPONSE: identical for known and unknown
+ * addresses, so the endpoint cannot be used to discover which emails have
+ * accounts.
+ */
+const LOGIN_CODE_RESPONSE =
+  "Si el correo está registrado, recibirás un código de 6 dígitos para entrar.";
+
+/**
  * Registration, login, logout and onboarding completion.
  */
 export function registerAuthRoutes(app: Express): void {
+  /**
+   * Hands a freshly authenticated account its session.
+   *
+   * The session id is regenerated on privilege change: without regeneration an
+   * attacker who planted a session id before login (fixation) would keep it
+   * valid afterwards. Shared by both login routes so they cannot drift.
+   */
+  const completeLogin = async (req: any, res: any, user: { id: string }, message: string) => {
+    await new Promise<void>((resolve, reject) => {
+      req.session.regenerate((err: any) => (err ? reject(err) : resolve()));
+    });
+    (req.session as any).userId = user.id;
+
+    res.json({ user, message });
+  };
+
   // Step 1: User Registration (sends password via email)
+  //
+  // Anonymous and account-creating, so it is gated by the proof-of-work CAPTCHA
+  // and throttled by registerLimiter. The gate is checked before the body is
+  // parsed so a bot never reaches the email/RUC work, and the challenge is
+  // consumed only on success: a rejected registration ("ese email ya tiene una
+  // cuenta") must not force the visitor to solve a second puzzle.
+  //
+  // `minDwellMs: 0` is explicit: the form fetches and solves the puzzle inside the
+  // submit handler, so a deployment-wide CAPTCHA_MIN_DWELL_MS must not break it.
   app.post('/api/auth/register', registerLimiter, async (req, res) => {
     try {
+      const captcha = verifyCaptcha(req.body?.captchaToken, req.body?.captchaAnswer, { minDwellMs: 0 });
+      if (!captcha.ok) {
+        return res.status(400).json({ message: captcha.reason, code: "captcha_invalid" });
+      }
+
       const userData = userRegistrationSchema.parse(req.body);
       const ipAddress = req.ip || req.connection.remoteAddress || '';
       const userAgent = req.get('User-Agent') || '';
@@ -44,6 +88,8 @@ export function registerAuthRoutes(app: Express): void {
       if (!result.success) {
         return res.status(400).json({ message: result.message });
       }
+
+      consumeCaptchaToken(req.body.captchaToken);
 
       res.status(201).json({ 
         message: result.message,
@@ -75,18 +121,7 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(401).json({ message: result.message });
       }
 
-      // Rotate the session id on privilege change: without regeneration an
-      // attacker who planted a session id before login (fixation) would keep
-      // it valid afterwards.
-      await new Promise<void>((resolve, reject) => {
-        req.session.regenerate((err) => (err ? reject(err) : resolve()));
-      });
-      (req.session as any).userId = result.user!.id;
-
-      res.json({
-        user: result.user,
-        message: result.message
-      });
+      await completeLogin(req, res, result.user!, result.message);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ 
@@ -95,6 +130,64 @@ export function registerAuthRoutes(app: Express): void {
         });
       }
       console.error('Login error:', error);
+      res.status(500).json({ message: "Error interno del servidor" });
+    }
+  });
+
+  // ---- Code login: email a one-time code, then exchange it for a session ----
+  //
+  // A second way into the same account: nothing to remember or to leak, proven
+  // against the mailbox that already receives every complaint notification. It
+  // shares the password path's failure counter and lockout policy
+  // (authService.loginWithCode), so neither route can be used to bypass the
+  // other's throttling.
+
+  // Step 1: request the code.
+  app.post('/api/auth/request-code', authLimiter, async (req, res) => {
+    try {
+      const { email } = requestLoginCodeSchema.parse(req.body);
+      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const userAgent = req.get('User-Agent') || '';
+
+      await authService.requestLoginCode(email, ipAddress, userAgent);
+
+      res.json({ message: LOGIN_CODE_RESPONSE });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          message: "Datos inválidos",
+          errors: error.errors
+        });
+      }
+      console.error('Request login code error:', error);
+      // Deliberately the same success-shaped answer: a failure here must not
+      // reveal whether the address is registered.
+      res.json({ message: LOGIN_CODE_RESPONSE });
+    }
+  });
+
+  // Step 2: the six digits from the email.
+  app.post('/api/auth/login-with-code', authLimiter, async (req, res) => {
+    try {
+      const loginData = authLoginCodeSchema.parse(req.body);
+      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const userAgent = req.get('User-Agent') || '';
+
+      const result = await authService.loginWithCode(loginData, ipAddress, userAgent);
+
+      if (!result.success) {
+        return res.status(401).json({ message: result.message });
+      }
+
+      await completeLogin(req, res, result.user!, result.message);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          message: "Datos inválidos",
+          errors: error.errors
+        });
+      }
+      console.error('Login with code error:', error);
       res.status(500).json({ message: "Error interno del servidor" });
     }
   });
@@ -316,6 +409,18 @@ export function registerAuthRoutes(app: Express): void {
           message: "Tu cuenta ya está configurada.",
           code: "already_onboarded",
           redirectTo: '/panel',
+        });
+      }
+
+      // The mailbox is where every complaint notification lands, so an account
+      // cannot create the company that owns a Libro before confirming it. Demo
+      // accounts are excluded: their credentials are public and there is nobody
+      // to confirm anything (see verificationService.ts).
+      if (!user.isDemo && !user.isEmailVerified && !allowsUnverifiedBusinesses()) {
+        return res.status(403).json({
+          message:
+            "Confirma tu correo antes de configurar tu empresa: te enviamos un enlace de confirmación al crear tu cuenta.",
+          code: "email_not_verified",
         });
       }
 

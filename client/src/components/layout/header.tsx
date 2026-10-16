@@ -160,7 +160,7 @@ export default function Header({
               </Button>
             </DropdownMenuTrigger>
 
-            <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuContent align="end" className="w-60">
               <DropdownMenuLabel>Mi Cuenta</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -172,11 +172,35 @@ export default function Header({
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => setLocation("/empresas")}
+                data-testid="businesses-menu-item"
+              >
+                <span className="material-icons mr-2 text-sm">business</span>
+                Mi empresa y RUCs
+              </DropdownMenuItem>
+              {/* "Configuración" means the settings of the LIBRO (brand, templates,
+                  integrations), not the company record: that one is "Mi empresa". */}
+              <DropdownMenuItem
+                onClick={() => setLocation("/personalizacion")}
                 data-testid="settings-menu-item"
               >
-                <span className="material-icons mr-2 text-sm">settings</span>
+                <span className="material-icons mr-2 text-sm">palette</span>
                 Configuración
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setLocation("/integraciones")}
+                data-testid="integrations-menu-item"
+              >
+                <span className="material-icons mr-2 text-sm">extension</span>
+                Integraciones
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setLocation("/plan")}
+                data-testid="plan-menu-item"
+              >
+                <span className="material-icons mr-2 text-sm">workspace_premium</span>
+                Plan y Cuotas
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => window.open(INDECOPI_HELP_URL, "_blank", "noopener")}
                 data-testid="help-menu-item"

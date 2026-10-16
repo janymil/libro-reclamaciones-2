@@ -4,19 +4,21 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "cross-env NODE_ENV=development tsx server/index.ts",
+    "dev": "cross-env NODE_ENV=development RATE_LIMIT_RELAXED=true tsx server/index.ts",
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "verify": "npm run check && npm test",
     "audit:security": "npm audit --omit=dev --audit-level=high",
     "db:push": "drizzle-kit push",
     "db:apply": "node --env-file=.env scripts/apply-sql.mjs",
     "db:backup": "node --env-file=.env scripts/backup-tables.mjs",
     "db:restore": "node --env-file=.env scripts/restore-tables.mjs",
-    "db:demo": "node --env-file=.env scripts/create-demo-account.mjs"
+    "db:demo": "node --env-file=.env scripts/create-demo-account.mjs",
+    "email:diagnose": "node --env-file=.env scripts/smtp-diagnose.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -97,6 +99,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
+    "@playwright/test": "^1.64.1",
     "@replit/vite-plugin-cartographer": "^0.3.0",
     "@replit/vite-plugin-runtime-error-modal": "^0.0.3",
     "@tailwindcss/typography": "^0.5.15",
@@ -116,8 +119,8 @@
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
-    "tw-animate-css": "^1.2.5",
     "tsx": "^4.19.1",
+    "tw-animate-css": "^1.2.5",
     "typescript": "5.6.3",
     "vite": "^5.4.19",
     "vitest": "^3.2.7"

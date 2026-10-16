@@ -19,7 +19,7 @@ export interface WidgetSize {
 /** Gap kept between the widget and the viewport edges. */
 export const WIDGET_MARGIN = 8;
 
-const POSITION_KEY_STORAGE = "librovirtual.agentWidget.position";
+const POSITION_KEY_STORAGE = "librodigital.agentWidget.position";
 
 /** Keeps the widget's top-left corner inside the viewport. */
 export function clampWidgetPosition(

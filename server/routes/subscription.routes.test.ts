@@ -115,7 +115,17 @@ describe("POST /api/subscription", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(h.calls.updateBusiness[0][1].plan).toBe("profesional");
+
+    // The keys must be the `businesses` column names: `updateBusiness` hands them
+    // straight to Drizzle, which drops anything that is not a column *without
+    // raising*. This assertion used to check `.plan` - which is exactly how the
+    // bug survived: the endpoint answered "Plan actualizado" while persisting
+    // nothing.
+    const updates = h.calls.updateBusiness[0][1];
+    expect(updates.subscriptionPlan).toBe("profesional");
+    expect(updates.subscriptionStatus).toBe("active");
+    expect(updates.planPeriod).toBe("monthly");
+    expect(updates.plan).toBeUndefined();
   });
 
   it("stays admin-only even with the escape hatch open", async () => {

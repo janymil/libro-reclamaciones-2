@@ -13,7 +13,10 @@ import { startTestApp, call } from "../test/routeTestHarness";
  *   2. a partially completed onboarding can be RESUMED (a RUC this login already
  *      created must not collide with its own unique constraint),
  *   3. a RUC owned by ANOTHER account is a 409 that names the way forward
- *      (access request), not a dead end.
+ *      (access request), not a dead end,
+ *   4. the company cannot be created from an UNCONFIRMED mailbox, because that
+ *      inbox is where every complaint notification lands
+ *      (services/verificationService.ts).
  */
 
 const OWNED_BY_OTHER = "20111111111";
@@ -100,6 +103,9 @@ const accountUser = (overrides: Record<string, unknown> = {}) => ({
   onboardingCompleted: false,
   isActive: true,
   isDemo: false,
+  // The normal case is a confirmed mailbox; the single test that needs an
+  // unconfirmed one overrides it.
+  isEmailVerified: true,
   ...overrides,
 });
 
@@ -256,6 +262,52 @@ describe("POST /api/auth/complete-onboarding", () => {
     expect(input.business.subscriptionPlan).toBe("gratis");
     expect(input.business.subscriptionStatus).toBe("trialing");
     expect(input.business.isActive).toBeUndefined();
+  });
+
+  it("refuses to publish from a mailbox nobody confirmed", async () => {
+    h.state.user = accountUser({ isEmailVerified: false });
+
+    const response = await call(app.url, "/api/auth/complete-onboarding", {
+      method: "POST",
+      userId: h.state.user.id,
+      body: payload(FREE_RUC),
+    });
+
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe("email_not_verified");
+    // The message must name the way forward, not just the refusal.
+    expect(response.body.message).toContain("Confirma tu correo");
+    // Nothing was created: the wizard can be retried after confirming.
+    expect(h.calls.completeOnboarding).toBeUndefined();
+  });
+
+  it("lets the shared demo account through, since there is nobody to confirm it", async () => {
+    h.state.user = accountUser({ isDemo: true, isEmailVerified: false });
+
+    const response = await call(app.url, "/api/auth/complete-onboarding", {
+      method: "POST",
+      userId: h.state.user.id,
+      body: payload(FREE_RUC),
+    });
+
+    expect(response.status).toBe(200);
+  });
+
+  it("honours ALLOW_UNVERIFIED_BUSINESSES for legacy tenants", async () => {
+    h.state.user = accountUser({ isEmailVerified: false });
+    vi.stubEnv("ALLOW_UNVERIFIED_BUSINESSES", "true");
+
+    try {
+      const response = await call(app.url, "/api/auth/complete-onboarding", {
+        method: "POST",
+        userId: h.state.user.id,
+        body: payload(FREE_RUC),
+      });
+
+      expect(response.status).toBe(200);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

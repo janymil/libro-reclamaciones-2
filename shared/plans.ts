@@ -274,18 +274,70 @@ export function isComplaintTypeAllowed(
   return getAllowedComplaintTypes(plan).includes(complaintType as "reclamo" | "queja");
 }
 
+/** The fields needed to place a business inside (or outside) its trial window. */
+export interface TrialWindow {
+  subscriptionStatus: string;
+  trialEndsAt?: Date | string | null;
+  /**
+   * Fallback when `trialEndsAt` was never stored. The column arrived with the
+   * trial lifecycle (0003) as a nullable addition, so every tenant that already
+   * existed kept NULL there and only `createdAt` describes its window.
+   */
+  createdAt?: Date | string | null;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The date a business's trial ends.
+ *
+ * `trialEndsAt` is the stored value. A trial is TRIAL_DAYS long *by
+ * definition*, so when the column is empty the window is reconstructed from
+ * registration instead of being left open — that data gap is what made an
+ * old tenant show "quedan 0 día(s)" while keeping every Pro feature unlocked
+ * forever. `null` therefore means "the window cannot be known at all", which
+ * callers must read as "no trial", never as "trial without end".
+ */
+export function resolveTrialEnd(
+  business: Pick<TrialWindow, "trialEndsAt" | "createdAt">,
+): Date | null {
+  if (business.trialEndsAt) {
+    const stored = new Date(business.trialEndsAt);
+    if (!Number.isNaN(stored.getTime())) {
+      return stored;
+    }
+  }
+
+  if (business.createdAt) {
+    const createdAt = new Date(business.createdAt);
+    if (!Number.isNaN(createdAt.getTime())) {
+      const derived = new Date(createdAt);
+      derived.setUTCDate(derived.getUTCDate() + TRIAL_DAYS);
+      return derived;
+    }
+  }
+
+  return null;
+}
+
 /** Whether the business is inside its trial window. */
-export function isTrialing(
-  business: Pick<Business, "subscriptionStatus" | "trialEndsAt">,
-  now: Date = new Date(),
-): boolean {
+export function isTrialing(business: TrialWindow, now: Date = new Date()): boolean {
   if (business.subscriptionStatus !== "trialing") {
     return false;
   }
-  if (!business.trialEndsAt) {
-    return true;
+
+  const endsAt = resolveTrialEnd(business);
+  return endsAt !== null && endsAt > now;
+}
+
+/** Whole days left in the trial (0 when the business is not trialing). */
+export function getTrialDaysRemaining(business: TrialWindow, now: Date = new Date()): number {
+  const endsAt = resolveTrialEnd(business);
+  if (endsAt === null || !isTrialing(business, now)) {
+    return 0;
   }
-  return new Date(business.trialEndsAt) > now;
+
+  return Math.max(0, Math.ceil((endsAt.getTime() - now.getTime()) / DAY_MS));
 }
 
 /**
@@ -295,7 +347,7 @@ export function isTrialing(
  * ends the stored plan applies.
  */
 export function getEffectivePlan(
-  business: Pick<Business, "subscriptionPlan" | "subscriptionStatus" | "trialEndsAt">,
+  business: Pick<Business, "subscriptionPlan"> & TrialWindow,
   now: Date = new Date(),
 ): PlanDefinition {
   return isTrialing(business, now) ? PLANS.profesional : getPlan(business.subscriptionPlan);

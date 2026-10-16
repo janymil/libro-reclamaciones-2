@@ -25,20 +25,23 @@ export const PRIMARY_MOBILE_NAV: MobileNavItem[] = [
   { name: 'Asistente', href: '/asistente', icon: 'smart_toy' },
 ];
 
-/** Everything else, reachable from the "Más" sheet. */
+/** Everything else, reachable from the "Más" sheet, grouped like the sidebar. */
 export const SECONDARY_MOBILE_NAV: MobileNavItem[] = [
+  // Libro de Reclamaciones
   { name: 'Libros', href: '/libros', icon: 'menu_book' },
-  { name: 'QR y enlace web', href: '/codigo-qr', icon: 'qr_code_2' },
-  { name: 'Cumplimiento', href: '/cumplimiento', icon: 'verified_user' },
-  { name: 'Integraciones', href: '/integraciones', icon: 'extension' },
-  { name: 'Personalización', href: '/personalizacion', icon: 'palette' },
   { name: 'Sucursales', href: '/sucursales', icon: 'share' },
+  { name: 'QR y enlace web', href: '/codigo-qr', icon: 'qr_code_2' },
+  // Configuración (de la app y del libro: plantillas, marca e integraciones)
+  { name: 'Personalización', href: '/personalizacion', icon: 'palette' },
+  { name: 'Integraciones', href: '/integraciones', icon: 'extension' },
+  // Cuenta (la persona, sus empresas, su equipo y su plan)
+  { name: 'Mi Perfil', href: '/perfil', icon: 'account_circle' },
   { name: 'Empresas', href: '/empresas', icon: 'business' },
   { name: 'Usuarios', href: '/usuarios', icon: 'people' },
   { name: 'Plan y Cuotas', href: '/plan', icon: 'workspace_premium' },
   { name: 'Pagos', href: '/pagos', icon: 'receipt_long' },
   { name: 'Historial', href: '/historial', icon: 'history' },
-  { name: 'Mi Perfil', href: '/perfil', icon: 'account_circle' },
+  { name: 'Cumplimiento', href: '/cumplimiento', icon: 'verified_user' },
 ];
 
 /**

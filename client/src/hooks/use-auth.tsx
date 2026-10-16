@@ -24,10 +24,25 @@ interface LoginData {
   password: string;
 }
 
+/** The six digits from the login-code email. */
+interface LoginCodeData {
+  email: string;
+  code: string;
+}
+
 interface RegisterData {
   firstName: string;
   lastName: string;
   email: string;
+  /**
+   * Proof-of-work CAPTCHA for an endpoint that creates accounts.
+   *
+   * Optional in the type only because the request is assembled in two steps (see
+   * `handleRegister`, which solves the puzzle first and attaches the result):
+   * the server rejects a registration that arrives without them.
+   */
+  captchaToken?: string;
+  captchaAnswer?: string;
 }
 
 type AuthContextType = {
@@ -38,6 +53,10 @@ type AuthContextType = {
   loginMutation: UseMutationResult<{ user: User; message: string }, Error, LoginData>;
   logoutMutation: UseMutationResult<{ message: string }, Error, void>;
   registerMutation: UseMutationResult<{ message: string; nextStep: string; userId: string }, Error, RegisterData>;
+  /** Code login step 1: ask for a one-time code by email. */
+  requestLoginCodeMutation: UseMutationResult<{ message: string }, Error, string>;
+  /** Code login step 2: exchange the six digits for a session. */
+  loginWithCodeMutation: UseMutationResult<{ user: User; message: string }, Error, LoginCodeData>;
 };
 
 export const AuthContext = createContext<AuthContextType | null>(null);
@@ -83,6 +102,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     onError: (error: Error) => {
       toast({
         title: "Error al iniciar sesión",
+        description: apiErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Code login ("entra con un código por email"). Two mutations instead of one
+  // state machine: the page shows the "enter the digits" step between them, and
+  // the failure of either one is rendered next to the form.
+  const requestLoginCodeMutation = useMutation({
+    mutationFn: async (email: string) => {
+      const response = await apiRequest("POST", "/api/auth/request-code", { email });
+      return await response.json();
+    },
+  });
+
+  const loginWithCodeMutation = useMutation({
+    mutationFn: async (credentials: LoginCodeData) => {
+      const response = await apiRequest("POST", "/api/auth/login-with-code", credentials);
+      return await response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["/api/auth/user"], data.user);
+      toast({
+        title: "¡Inicio de sesión exitoso!",
+        description: data.message,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "No se pudo entrar",
         description: apiErrorMessage(error),
         variant: "destructive",
       });
@@ -142,6 +192,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loginMutation,
         logoutMutation,
         registerMutation,
+        requestLoginCodeMutation,
+        loginWithCodeMutation,
       }}
     >
       {children}

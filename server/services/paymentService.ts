@@ -7,11 +7,14 @@ import {
   buildPaymentReference,
   computePeriodEnd,
   isPaymentSuccessful,
+  isPubliclyReachableBaseUrl,
   isSubscriptionLive,
   isSubscriptionStatus,
   planAmountCents,
   providerSupportsRecurring,
   referenceSuffix,
+  resolvePlanFromAmount,
+  resolvePlanFromCode,
   type PaymentProviderDefinition,
   type PaymentProviderId,
   type PaymentStatus,
@@ -22,6 +25,7 @@ import { getPlan, isPlanId, isTrialing } from "@shared/plans";
 import type { Business, Payment, Subscription } from "@shared/schema";
 
 import { storage } from "../storage";
+import { emailService } from "./emailService";
 import {
   getGateway,
   type CheckoutInput,
@@ -52,6 +56,31 @@ import {
 /** A readable code that no customer can guess from another one. */
 export function newPaymentReference(): string {
   return buildPaymentReference(referenceSuffix(crypto.randomBytes(6)));
+}
+
+/**
+ * Warns once per process when the configured base URL cannot be reached from the
+ * internet.
+ *
+ * This is the most expensive misconfiguration in the whole payment flow: the
+ * customer pays, Mercado Pago cannot deliver the webhook, and the plan never
+ * activates - with nothing in the logs to explain it. A warning at the moment the
+ * payment is created turns that into a five-second fix.
+ */
+let warnedAboutUnreachableBase = false;
+
+function warnIfBaseUrlUnreachable(baseUrl: string): void {
+  if (warnedAboutUnreachableBase || isPubliclyReachableBaseUrl(baseUrl)) {
+    return;
+  }
+
+  warnedAboutUnreachableBase = true;
+  console.warn(
+    `[payments] APP_URL es "${baseUrl}", que no es una dirección pública HTTPS. ` +
+      'Mercado Pago no podrá enviar las notificaciones de pago y el cliente volverá a una ' +
+      'dirección inalcanzable, así que el plan no se activará solo. ' +
+      'Configure APP_URL con el dominio real, o con un túnel público mientras prueba.',
+  );
 }
 
 export interface PaidPeriodResult {
@@ -155,6 +184,12 @@ export async function startPayment(input: StartPaymentInput): Promise<StartPayme
   const plan = getPlan(input.planId);
   const periodLabel = input.period === "annual" ? "anual" : "mensual";
   const amountCents = planAmountCents(plan.id, input.period);
+
+  // Same rule as the recurring path: a free plan is not a checkout.
+  if (amountCents <= 0) {
+    throw new Error("El plan seleccionado es gratuito: no requiere ningún pago.");
+  }
+
   const reference = newPaymentReference();
 
   // The row exists before we call the provider: if the network call fails we
@@ -175,6 +210,8 @@ export async function startPayment(input: StartPaymentInput): Promise<StartPayme
   });
 
   const base = input.baseUrl.replace(/\/+$/, "");
+  warnIfBaseUrlUnreachable(base);
+
   const checkoutInput: CheckoutInput = {
     reference,
     amountCents,
@@ -248,6 +285,13 @@ export async function startSubscription(input: StartSubscriptionInput): Promise<
 
   const plan = getPlan(input.planId);
   const amountCents = planAmountCents(plan.id, input.period);
+
+  // A free plan is not a payment: sending S/ 0 to the provider would be
+  // rejected there and reported as a confusing gateway error. Say it plainly.
+  if (amountCents <= 0) {
+    throw new Error("El plan seleccionado es gratuito: no requiere ningún pago.");
+  }
+
   const reference = newPaymentReference();
   const periodLabel = input.period === "annual" ? "anual" : "mensual";
 
@@ -265,6 +309,8 @@ export async function startSubscription(input: StartSubscriptionInput): Promise<
   });
 
   const base = input.baseUrl.replace(/\/+$/, "");
+  warnIfBaseUrlUnreachable(base);
+
   const checkoutInput: SubscriptionCheckoutInput = {
     reference,
     amountCents,
@@ -493,6 +539,167 @@ export async function syncSubscription(
 }
 
 /**
+ * Adopts a subscription the app never created.
+ *
+ * A plan created in the Mercado Pago panel can be paid through its own public
+ * link, and Mercado Pago then creates the subscription - so we have no record of
+ * it. Two things make it recognisable:
+ *
+ *   * WHICH plan: the panel code we configured (`external_reference`), or, when
+ *     that is missing, the amount plus the frequency, which identify a plan
+ *     unambiguously;
+ *   * WHOSE plan: the payer's Mercado Pago email. It is the only thread between a
+ *     payment made outside the app and one of our accounts, which is also the
+ *     limit of what can be automated - see `alertUnmatchedSubscription`.
+ */
+async function adoptSubscription(
+  providerId: PaymentProviderId,
+  state: SubscriptionState,
+): Promise<Subscription | undefined> {
+  const purchase =
+    resolvePlanFromCode(state.externalReference) ??
+    (state.amountCents !== undefined && state.period
+      ? resolvePlanFromAmount(state.amountCents, state.period)
+      : undefined);
+
+  if (!purchase) {
+    return undefined;
+  }
+
+  const user = state.payerEmail ? await storage.getUserByEmail(state.payerEmail) : undefined;
+  if (!user?.businessId) {
+    return undefined;
+  }
+
+  const plan = getPlan(purchase.planId);
+  // For a panel-created plan, the price the customer agreed to is the one the
+  // provider reports - not our catalogue. Book it as-is so the charge amount
+  // check downstream compares like with like.
+  const amountCents = state.amountCents ?? planAmountCents(plan.id, purchase.period);
+
+  const catalogueCents = planAmountCents(plan.id, purchase.period);
+  if (amountCents !== catalogueCents) {
+    console.warn(
+      `[payments] el precio del plan ${plan.name} (${purchase.period}) en Mercado Pago es ${amountCents} ` +
+        `y en el catálogo ${catalogueCents}. Revise el panel y shared/plans.ts.`,
+    );
+  }
+
+  const created = await storage.createSubscription({
+    businessId: user.businessId,
+    userId: user.id,
+    provider: providerId,
+    providerRef: state.providerRef,
+    reference: newPaymentReference(),
+    planId: plan.id,
+    period: purchase.period,
+    amountCents,
+    currency: PAYMENT_CURRENCY,
+    payerEmail: state.payerEmail ?? null,
+    status: "pending",
+    raw: state.raw,
+  });
+
+  console.warn(
+    `[payments] suscripción ${state.providerRef} adoptada: ${plan.id}/${purchase.period} para la empresa ${user.businessId}`,
+  );
+
+  return created;
+}
+
+/** One stray payment must not flood the operator's inbox. */
+const alertedSubscriptions = new Set<string>();
+
+/**
+ * Forgets which stray subscriptions were already reported.
+ *
+ * The cache is process-local and only exists to stop a provider retry from
+ * mailing the operator several times for the same payment, so it carries no
+ * state worth preserving. Exported so tests can exercise several stray
+ * subscriptions independently.
+ */
+export function clearPaymentAlertCache(): void {
+  alertedSubscriptions.clear();
+}
+
+/**
+ * Tells the operator about a paid subscription that belongs to nobody.
+ *
+ * This is the honest limit of the automation: if the customer pays with a
+ * Mercado Pago email that matches no account, we cannot know which business to
+ * activate. Someone must fix it by hand, so we make sure a human hears about it
+ * instead of letting the payment sit unnoticed.
+ */
+async function alertUnmatchedSubscription(
+  providerId: PaymentProviderId,
+  providerRef: string,
+  state: SubscriptionState,
+): Promise<void> {
+  const key = `${providerId}:${providerRef}`;
+  if (alertedSubscriptions.has(key)) {
+    return;
+  }
+  alertedSubscriptions.add(key);
+
+  const amount =
+    state.amountCents !== undefined ? `S/ ${(state.amountCents / 100).toFixed(2)}` : "desconocido";
+
+  console.error(
+    `[payments] suscripción ${providerRef} (${providerId}) sin empresa asociada: ${amount}, ` +
+      `código ${state.externalReference ?? "—"}, pagador ${state.payerEmail ?? "—"}.`,
+  );
+
+  const recipient = process.env.PAYMENTS_ALERT_EMAIL?.trim();
+  if (!recipient) {
+    return;
+  }
+
+  // Fire and forget: an alert must never break the webhook response.
+  void emailService
+    .sendPlatformAlert(recipient, "Suscripción pagada sin asignar", [
+      `Proveedor: ${providerId}`,
+      `Suscripción (id de Mercado Pago): ${providerRef}`,
+      `Estado: ${state.status}`,
+      `Importe: ${amount}`,
+      `Código del plan: ${state.externalReference ?? "—"}`,
+      `Correo del pagador: ${state.payerEmail ?? "—"}`,
+      "",
+      "Hay un pago que no se pudo asignar a ninguna empresa. Suele ocurrir cuando el cliente",
+      "paga con un correo de Mercado Pago que no es el de su cuenta: pídale registrarse con",
+      "ese mismo correo, o asígnele el plan manualmente.",
+    ])
+    .catch(() => {});
+}
+
+/**
+ * Finds the agreement a notification refers to, adopting it when the customer
+ * paid through a plan link rather than our own button. The state comes back with
+ * it so the caller does not have to ask the provider twice.
+ */
+async function resolveOrAdoptSubscription(
+  providerId: PaymentProviderId,
+  providerRef: string,
+): Promise<{ subscription: Subscription; state: SubscriptionState } | undefined> {
+  const gateway = getGateway(providerId);
+  const known = await storage.getSubscriptionByProviderRef(providerId, providerRef);
+
+  if (known) {
+    const state = await gateway.fetchSubscription(known.providerRef ?? providerRef);
+    return { subscription: known, state };
+  }
+
+  const state = await gateway.fetchSubscription(providerRef);
+  const adopted = await adoptSubscription(providerId, state);
+
+  if (!adopted) {
+    await alertUnmatchedSubscription(providerId, providerRef, state);
+    return undefined;
+  }
+
+  return { subscription: adopted, state };
+}
+
+/**
  * Books one charge of a recurring agreement and extends the paid period.
  *
  * Deduplicated by the provider's payment id: if the same charge is notified
@@ -684,13 +891,14 @@ async function handleSubscriptionNotification(
   providerId: PaymentProviderId,
   providerRef: string,
 ): Promise<WebhookOutcome> {
-  const subscription = await storage.getSubscriptionByProviderRef(providerId, providerRef);
-  if (!subscription) {
+  // Adopts the subscription when it was bought through a plan link, so a payment
+  // made outside the app still ends up on the right account.
+  const found = await resolveOrAdoptSubscription(providerId, providerRef);
+  if (!found) {
     return { handled: false, reason: "suscripción no encontrada" };
   }
 
-  const state = await getGateway(providerId).fetchSubscription(providerRef);
-  const synced = await syncSubscription(subscription, state);
+  const synced = await syncSubscription(found.subscription, found.state);
   return { handled: true, status: synced.status };
 }
 
@@ -706,15 +914,13 @@ async function handleSubscriptionChargeNotification(
     return { handled: false, reason: "cobro sin suscripción asociada" };
   }
 
-  const subscription = await storage.getSubscriptionByProviderRef(providerId, resolved.subscriptionRef);
-  if (!subscription) {
+  // Same adoption path: a charge can be the first thing we hear about.
+  const found = await resolveOrAdoptSubscription(providerId, resolved.subscriptionRef);
+  if (!found) {
     return { handled: false, reason: "suscripción no encontrada" };
   }
 
-  // Keep the agreement's own state fresh as well, so a paused/cancelled change
-  // notified on this topic is not missed.
-  const state = await gateway.fetchSubscription(subscription.providerRef ?? resolved.subscriptionRef);
-  const synced = await syncSubscription(subscription, state);
+  const synced = await syncSubscription(found.subscription, found.state);
 
   if (!resolved.paymentRef) {
     // Nothing was charged yet (the invoice is still scheduled).

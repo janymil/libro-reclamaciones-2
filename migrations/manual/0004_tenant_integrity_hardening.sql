@@ -59,7 +59,7 @@ END $$;
 -- break the application: the server connects as the table OWNER (the Neon
 -- connection in DATABASE_URL), and owners bypass RLS unless FORCE ROW LEVEL
 -- SECURITY is set. A safe rollout needs:
---   1. a dedicated non-owner application role (e.g. librovirtual_app) with the
+--   1. a dedicated non-owner application role (e.g. librodigital_app) with the
 --      right grants, and a second connection string for it;
 --   2. the data layer to set the tenant per transaction, e.g.
 --      `SET LOCAL app.current_business = '<uuid>'` at the start of every

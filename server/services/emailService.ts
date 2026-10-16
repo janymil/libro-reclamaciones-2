@@ -18,7 +18,7 @@ interface EmailConfig {
 /**
  * Per-business email customization (Phase 2.8). Values come from the
  * libro_configuration record; everything is optional and falls back to the
- * default LibroVirtual.pe wording.
+ * default LibroDigital.pe wording.
  */
 export interface EmailCustomization {
   subjectPrefix?: string | null;
@@ -27,6 +27,26 @@ export interface EmailCustomization {
 }
 
 /** Applies the subject prefix, if configured. */
+/**
+ * Escapes a value that is interpolated into an HTML email body.
+ *
+ * Names, company names and free-text notes come from users and end up in someone
+ * else's inbox: a registration first name, a tenant's business name, or the
+ * message a stranger attaches to an "acceso a esta empresa" request - the last one
+ * being delivered to that company's administrators, inside a notification they
+ * have every reason to trust. Unescaped, a crafted value can restructure that
+ * message (hide the real link, add a fake one), which is exactly how a
+ * notification email becomes a phishing page. Plain-text bodies need nothing.
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function applySubject(subject: string, customization?: EmailCustomization): string {
   const prefix = customization?.subjectPrefix?.trim();
   return prefix ? `${prefix} ${subject}` : subject;
@@ -50,7 +70,22 @@ export class EmailService {
   constructor() {
     const hasSmtpCredentials = Boolean(process.env.SMTP_USER && process.env.SMTP_PASSWORD);
 
-    if (!hasSmtpCredentials && process.env.NODE_ENV !== 'production') {
+    /**
+     * Whether "capture the email instead of sending it" is allowed.
+     *
+     * Deliberately an allow-list, never `NODE_ENV !== 'production'`: that check is
+     * true for an unset or misspelled value, and the capture transport prints the
+     * whole message body to the server log - which for a welcome email means the
+     * generated password, and for a reset means the reset link. A production
+     * deployment that forgot to set NODE_ENV would therefore leak credentials into
+     * its logs *and* deliver nothing, silently.
+     */
+    const captureEmails =
+      process.env.EMAIL_CAPTURE === 'true' ||
+      process.env.NODE_ENV === 'development' ||
+      process.env.NODE_ENV === 'test';
+
+    if (!hasSmtpCredentials && captureEmails) {
       // Local development without SMTP credentials. Instead of failing the whole
       // auth flow we capture the message with nodemailer's JSON transport and
       // print it to the terminal (the generated password / reset link is part of
@@ -78,19 +113,29 @@ export class EmailService {
       return;
     }
 
-    // SMTP configuration. Defaults suit Gmail; any other provider only needs
-    // SMTP_HOST and SMTP_PORT to change.
+    // SMTP configuration. Defaults suit Zoho Mail, the host of librodigital.pe
+    // (see the "Cloudflare + Zoho Mail" section of RUNBOOK.md); any other
+    // provider only needs SMTP_HOST and SMTP_PORT to change.
+    const smtpPort = parseInt(process.env.SMTP_PORT || '465', 10);
+
+    // 465 means implicit SSL; 587 (the other Zoho port) upgrades with STARTTLS.
+    // SMTP_SECURE overrides that guess for a provider which does not follow the
+    // convention.
+    const smtpSecure = process.env.SMTP_SECURE
+      ? process.env.SMTP_SECURE === 'true'
+      : smtpPort === 465;
+
     const emailConfig: EmailConfig = {
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: parseInt(process.env.SMTP_PORT || '465'),
-      secure: parseInt(process.env.SMTP_PORT || '465') === 465, // true for 465, false for other ports
+      host: process.env.SMTP_HOST || 'smtp.zoho.com',
+      port: smtpPort,
+      secure: smtpSecure,
       auth: {
         user: process.env.SMTP_USER || '',
         pass: process.env.SMTP_PASSWORD || ''
       }
     };
 
-    // Certificate verification stays ON by default (Gmail and every host with a
+    // Certificate verification stays ON by default (Zoho and every host with a
     // trusted certificate). The previous unconditional `rejectUnauthorized:
     // false` disabled it for everyone, which is a man-in-the-middle hazard; a
     // self-signed server now has to opt out explicitly with
@@ -121,7 +166,7 @@ export class EmailService {
     verificationToken?: string,
   ): Promise<void> {
     const verificationUrl = verificationToken
-      ? `${process.env.APP_URL || 'https://librovirtual.pe'}/acceso/verificar-email?token=${verificationToken}`
+      ? `${process.env.APP_URL || 'https://librodigital.pe'}/acceso/verificar-email?token=${verificationToken}`
       : null;
 
     const verificationHtml = verificationUrl
@@ -145,16 +190,16 @@ export class EmailService {
       : '';
 
     const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to: email,
-      subject: '¡Bienvenido a LibroVirtual.pe! - Tu contraseña de acceso',
+      subject: '¡Bienvenido a LibroDigital.pe! - Tu contraseña de acceso',
       html: `
         <!DOCTYPE html>
         <html>
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Bienvenido a LibroVirtual.pe</title>
+          <title>Bienvenido a LibroDigital.pe</title>
           <style>
             body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
             .container { max-width: 600px; margin: 0 auto; background-color: white; }
@@ -171,15 +216,15 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <h1>🛡️ LibroVirtual.pe</h1>
+              <h1>🛡️ LibroDigital.pe</h1>
               <p style="color: #e2e8f0; margin: 10px 0 0 0;">Plataforma de Libros de Reclamaciones</p>
             </div>
             
             <div class="content">
-              <h2 style="color: #1e293b; margin-bottom: 20px;">¡Hola ${firstName}!</h2>
+              <h2 style="color: #1e293b; margin-bottom: 20px;">¡Hola ${escapeHtml(firstName)}!</h2>
               
               <p style="color: #475569; line-height: 1.6;">
-                Tu cuenta en LibroVirtual.pe ha sido creada exitosamente. Para completar tu registro y configurar tu libro de reclamaciones, utiliza los siguientes datos de acceso:
+                Tu cuenta en LibroDigital.pe ha sido creada exitosamente. Para completar tu registro y configurar tu libro de reclamaciones, utiliza los siguientes datos de acceso:
               </p>
 
               <div class="password-box">
@@ -201,7 +246,7 @@ export class EmailService {
               ${verificationHtml}
 
               <div style="text-align: center;">
-                <a href="${process.env.APP_URL || 'https://librovirtual.pe'}/panel" class="button">
+                <a href="${process.env.APP_URL || 'https://librodigital.pe'}/panel" class="button">
                   Acceder a mi cuenta
                 </a>
               </div>
@@ -212,7 +257,7 @@ export class EmailService {
             </div>
 
             <div class="footer">
-              <p>© 2024 LibroVirtual.pe - Plataforma de gestión de libros de reclamaciones</p>
+              <p>© 2024 LibroDigital.pe - Plataforma de gestión de libros de reclamaciones</p>
               <p>Sistema desarrollado siguiendo las normativas peruanas de protección al consumidor</p>
             </div>
           </div>
@@ -222,15 +267,15 @@ export class EmailService {
       text: `
         ¡Hola ${firstName}!
 
-        Tu cuenta en LibroVirtual.pe ha sido creada exitosamente.
+        Tu cuenta en LibroDigital.pe ha sido creada exitosamente.
 
         Tu contraseña de acceso: ${password}
 ${verificationText}
-        Para acceder a tu cuenta, visita: ${process.env.APP_URL || 'https://librovirtual.pe'}/panel
+        Para acceder a tu cuenta, visita: ${process.env.APP_URL || 'https://librodigital.pe'}/panel
 
         Por seguridad, guarda esta contraseña en un lugar seguro.
 
-        ¡Bienvenido a LibroVirtual.pe!
+        ¡Bienvenido a LibroDigital.pe!
       `
     };
 
@@ -250,12 +295,12 @@ ${verificationText}
    * resend path) and by `POST /api/auth/resend-verification`.
    */
   async sendEmailVerification(email: string, firstName: string, verificationToken: string): Promise<void> {
-    const verificationUrl = `${process.env.APP_URL || 'https://librovirtual.pe'}/acceso/verificar-email?token=${verificationToken}`;
+    const verificationUrl = `${process.env.APP_URL || 'https://librodigital.pe'}/acceso/verificar-email?token=${verificationToken}`;
     
     const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to: email,
-      subject: 'Verifica tu dirección de email - LibroVirtual.pe',
+      subject: 'Verifica tu dirección de email - LibroDigital.pe',
       html: `
         <!DOCTYPE html>
         <html>
@@ -278,15 +323,15 @@ ${verificationText}
               <h1>✉️ Verifica tu Email</h1>
             </div>
             <div class="content">
-              <h2>¡Hola ${firstName}!</h2>
-              <p>Para completar tu registro en LibroVirtual.pe, necesitas verificar tu dirección de email.</p>
+              <h2>¡Hola ${escapeHtml(firstName)}!</h2>
+              <p>Para completar tu registro en LibroDigital.pe, necesitas verificar tu dirección de email.</p>
               <div style="text-align: center;">
                 <a href="${verificationUrl}" class="button">Verificar mi Email</a>
               </div>
               <p style="color: #64748b; font-size: 14px;">Este enlace expira en 24 horas. Si no solicitaste esta verificación, puedes ignorar este email.</p>
             </div>
             <div class="footer">
-              <p>© 2024 LibroVirtual.pe</p>
+              <p>© 2024 LibroDigital.pe</p>
             </div>
           </div>
         </body>
@@ -317,15 +362,80 @@ ${verificationText}
   }
 
   /**
+   * "Tu código de acceso" email: the second login option.
+   *
+   * The code is the whole message - no link - so it works on a phone that never
+   * opens the app's URL, and the plain-text part carries it too (the local dev
+   * transport prints only the text field).
+   */
+  async sendLoginCode(email: string, firstName: string, code: string, ttlMinutes: number): Promise<void> {
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to: email,
+      subject: 'Tu código de acceso - LibroDigital.pe',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Tu código de acceso</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
+            .container { max-width: 600px; margin: 0 auto; background-color: white; }
+            .header { background: linear-gradient(135deg, #1b1611, #5c5246); padding: 40px 20px; text-align: center; }
+            .header h1 { color: white; margin: 0; font-size: 28px; font-weight: bold; }
+            .content { padding: 40px 20px; }
+            .code { display: block; margin: 24px auto; padding: 18px 24px; width: fit-content; border-radius: 10px; background-color: #f3eadc; color: #1b1611; font-size: 34px; font-weight: bold; letter-spacing: 8px; }
+            .footer { background-color: #f1f5f9; padding: 20px; text-align: center; color: #64748b; font-size: 14px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🔑 Tu código de acceso</h1>
+            </div>
+            <div class="content">
+              <h2>¡Hola ${escapeHtml(firstName)}!</h2>
+              <p>Usa este código para entrar a tu Libro de Reclamaciones:</p>
+              <span class="code">${code}</span>
+              <p style="color: #64748b; font-size: 14px;">Vence en ${ttlMinutes} minutos y solo se puede usar una vez. Si no intentaste entrar, ignora este email y cambia tu contraseña.</p>
+            </div>
+            <div class="footer">
+              <p>© 2024 LibroDigital.pe</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `
+        ¡Hola ${firstName}!
+
+        Tu código de acceso es: ${code}
+
+        Vence en ${ttlMinutes} minutos y solo se puede usar una vez.
+        Si no intentaste entrar, ignora este email y cambia tu contraseña.
+      `,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+      console.log(`Login code email sent to ${email}`);
+    } catch (error) {
+      console.error('Error sending login code email:', error);
+      throw new Error('Failed to send login code email');
+    }
+  }
+
+  /**
    * Send password reset email
    */
   async sendPasswordReset(email: string, firstName: string, resetToken: string): Promise<void> {
-    const resetUrl = `${process.env.APP_URL || 'https://librovirtual.pe'}/acceso/restablecer-password?token=${resetToken}`;
+    const resetUrl = `${process.env.APP_URL || 'https://librodigital.pe'}/acceso/restablecer-password?token=${resetToken}`;
     
     const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to: email,
-      subject: 'Restablece tu contraseña - LibroVirtual.pe',
+      subject: 'Restablece tu contraseña - LibroDigital.pe',
       html: `
         <!DOCTYPE html>
         <html>
@@ -349,8 +459,8 @@ ${verificationText}
               <h1>🔒 Restablecer Contraseña</h1>
             </div>
             <div class="content">
-              <h2>¡Hola ${firstName}!</h2>
-              <p>Recibimos una solicitud para restablecer la contraseña de tu cuenta en LibroVirtual.pe.</p>
+              <h2>¡Hola ${escapeHtml(firstName)}!</h2>
+              <p>Recibimos una solicitud para restablecer la contraseña de tu cuenta en LibroDigital.pe.</p>
               <div style="text-align: center;">
                 <a href="${resetUrl}" class="button">Crear Nueva Contraseña</a>
               </div>
@@ -359,7 +469,7 @@ ${verificationText}
               </div>
             </div>
             <div class="footer">
-              <p>© 2024 LibroVirtual.pe</p>
+              <p>© 2024 LibroDigital.pe</p>
             </div>
           </div>
         </body>
@@ -375,9 +485,9 @@ ${verificationText}
    */
   async sendLoginNotification(email: string, firstName: string, ipAddress: string, userAgent: string): Promise<void> {
     const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to: email,
-      subject: 'Nuevo acceso a tu cuenta - LibroVirtual.pe',
+      subject: 'Nuevo acceso a tu cuenta - LibroDigital.pe',
       html: `
         <!DOCTYPE html>
         <html>
@@ -400,8 +510,8 @@ ${verificationText}
               <h1>🔐 Acceso Confirmado</h1>
             </div>
             <div class="content">
-              <h2>¡Hola ${firstName}!</h2>
-              <p>Se ha iniciado sesión en tu cuenta de LibroVirtual.pe.</p>
+              <h2>¡Hola ${escapeHtml(firstName)}!</h2>
+              <p>Se ha iniciado sesión en tu cuenta de LibroDigital.pe.</p>
               <div class="info-box">
                 <p><strong>Fecha y hora:</strong> ${new Date().toLocaleString('es-PE')}</p>
                 <p><strong>Dirección IP:</strong> ${ipAddress}</p>
@@ -410,7 +520,7 @@ ${verificationText}
               <p>Si fuiste tú, puedes ignorar este email. Si no reconoces este acceso, cambia tu contraseña inmediatamente.</p>
             </div>
             <div class="footer">
-              <p>© 2024 LibroVirtual.pe - Notificación de seguridad</p>
+              <p>© 2024 LibroDigital.pe - Notificación de seguridad</p>
             </div>
           </div>
         </body>
@@ -433,12 +543,12 @@ ${verificationText}
     message?: string | null;
   }): Promise<void> {
     const { to, businessName, requesterName, requesterEmail, message } = params;
-    const reviewUrl = `${process.env.APP_URL || 'https://librovirtual.pe'}/empresas`;
+    const reviewUrl = `${process.env.APP_URL || 'https://librodigital.pe'}/empresas`;
 
     const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to,
-      subject: `Solicitud de acceso a ${businessName} - LibroVirtual.pe`,
+      subject: `Solicitud de acceso a ${businessName} - LibroDigital.pe`,
       html: `
         <!DOCTYPE html>
         <html>
@@ -448,17 +558,17 @@ ${verificationText}
         </head>
         <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b;">
           <div style="max-width: 600px; margin: 0 auto; padding: 24px;">
-            <h2>Solicitud de acceso a ${businessName}</h2>
+            <h2>Solicitud de acceso a ${escapeHtml(businessName)}</h2>
             <p>
               <strong>${requesterName}</strong> (${requesterEmail}) solicita acceso al RUC
               registrado en esta cuenta para administrar el Libro de Reclamaciones.
             </p>
-            ${message ? `<p style="background: #f1f5f9; padding: 12px; border-radius: 6px;">"${message}"</p>` : ''}
+            ${message ? `<p style="background: #f1f5f9; padding: 12px; border-radius: 6px;">"${escapeHtml(message)}"</p>` : ''}
             <p>
               Revise la solicitud en <a href="${reviewUrl}">${reviewUrl}</a> (sección Empresas →
               Solicitudes recibidas). Si no reconoce a esta persona, rechácela.
             </p>
-            <p style="color: #64748b; font-size: 14px;">© 2024 LibroVirtual.pe</p>
+            <p style="color: #64748b; font-size: 14px;">© 2024 LibroDigital.pe</p>
           </div>
         </body>
         </html>
@@ -493,14 +603,14 @@ ${verificationText}
     note?: string | null;
   }): Promise<void> {
     const { to, requesterName, businessName, approved, note } = params;
-    const loginUrl = `${process.env.APP_URL || 'https://librovirtual.pe'}/acceso`;
+    const loginUrl = `${process.env.APP_URL || 'https://librodigital.pe'}/acceso`;
 
     const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to,
       subject: approved
-        ? `Acceso aprobado a ${businessName} - LibroVirtual.pe`
-        : 'Solicitud de acceso rechazada - LibroVirtual.pe',
+        ? `Acceso aprobado a ${businessName} - LibroDigital.pe`
+        : 'Solicitud de acceso rechazada - LibroDigital.pe',
       html: `
         <!DOCTYPE html>
         <html>
@@ -514,12 +624,12 @@ ${verificationText}
             <p>¡Hola ${requesterName}!</p>
             <p>
               ${approved
-                ? `Ya puede administrar el Libro de Reclamaciones de <strong>${businessName}</strong>. Inicie sesión y elija esa empresa en el selector de empresas.`
-                : `Su solicitud de acceso a <strong>${businessName}</strong> fue rechazada. Si cree que es un error, contacte a la empresa o inténtelo nuevamente más adelante.`}
+                ? `Ya puede administrar el Libro de Reclamaciones de <strong>${escapeHtml(businessName)}</strong>. Inicie sesión y elija esa empresa en el selector de empresas.`
+                : `Su solicitud de acceso a <strong>${escapeHtml(businessName)}</strong> fue rechazada. Si cree que es un error, contacte a la empresa o inténtelo nuevamente más adelante.`}
             </p>
             ${note ? `<p style="background: #f1f5f9; padding: 12px; border-radius: 6px;">"${note}"</p>` : ''}
             ${approved ? `<p>Ingrese en: <a href="${loginUrl}">${loginUrl}</a></p>` : ''}
-            <p style="color: #64748b; font-size: 14px;">© 2024 LibroVirtual.pe</p>
+            <p style="color: #64748b; font-size: 14px;">© 2024 LibroDigital.pe</p>
           </div>
         </body>
         </html>
@@ -548,9 +658,9 @@ ${verificationText}
    */
   async sendPasswordChangeConfirmation(email: string, firstName: string): Promise<void> {
     const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to: email,
-      subject: 'Contraseña actualizada - LibroVirtual.pe',
+      subject: 'Contraseña actualizada - LibroDigital.pe',
       html: `
         <!DOCTYPE html>
         <html>
@@ -573,7 +683,7 @@ ${verificationText}
               <h1>✅ Contraseña Actualizada</h1>
             </div>
             <div class="content">
-              <h2>¡Hola ${firstName}!</h2>
+              <h2>¡Hola ${escapeHtml(firstName)}!</h2>
               <div class="success-box">
                 <p><strong>✓ Tu contraseña ha sido actualizada exitosamente</strong></p>
                 <p>Fecha: ${new Date().toLocaleString('es-PE')}</p>
@@ -581,7 +691,7 @@ ${verificationText}
               <p>Si no realizaste este cambio, contacta con nuestro soporte inmediatamente.</p>
             </div>
             <div class="footer">
-              <p>© 2024 LibroVirtual.pe - Notificación de seguridad</p>
+              <p>© 2024 LibroDigital.pe - Notificación de seguridad</p>
             </div>
           </div>
         </body>
@@ -597,9 +707,9 @@ ${verificationText}
    */
   async sendAccountLockedNotification(email: string, firstName: string, unlockTime: Date): Promise<void> {
     const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to: email,
-      subject: '🔒 Cuenta temporalmente bloqueada - LibroVirtual.pe',
+      subject: '🔒 Cuenta temporalmente bloqueada - LibroDigital.pe',
       html: `
         <!DOCTYPE html>
         <html>
@@ -622,7 +732,7 @@ ${verificationText}
               <h1>🔒 Cuenta Bloqueada</h1>
             </div>
             <div class="content">
-              <h2>¡Hola ${firstName}!</h2>
+              <h2>¡Hola ${escapeHtml(firstName)}!</h2>
               <div class="warning-box">
                 <p><strong>Tu cuenta ha sido temporalmente bloqueada</strong></p>
                 <p>Motivo: Múltiples intentos de inicio de sesión fallidos</p>
@@ -631,7 +741,7 @@ ${verificationText}
               <p>Si necesitas acceso inmediato o no reconoces estos intentos, contacta con nuestro soporte.</p>
             </div>
             <div class="footer">
-              <p>© 2024 LibroVirtual.pe - Notificación de seguridad</p>
+              <p>© 2024 LibroDigital.pe - Notificación de seguridad</p>
             </div>
           </div>
         </body>
@@ -647,9 +757,9 @@ ${verificationText}
    */
   async sendComplaintResponse(email: string, complaint: Complaint, response: string, customization?: EmailCustomization): Promise<void> {
     const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to: email,
-      subject: applySubject(`Respuesta a tu ${complaint.complaintType} ${complaint.correlativeNumber} - LibroVirtual.pe`, customization),
+      subject: applySubject(`Respuesta a tu ${complaint.complaintType} ${complaint.correlativeNumber} - LibroDigital.pe`, customization),
       html: `
         <!DOCTYPE html>
         <html>
@@ -686,7 +796,7 @@ ${verificationText}
             </div>
             <div class="footer">
               ${renderFooter(customization)}
-              <p>© 2024 LibroVirtual.pe</p>
+              <p>© 2024 LibroDigital.pe</p>
             </div>
           </div>
         </body>
@@ -699,7 +809,7 @@ Respuesta a tu ${complaint.complaintType} ${complaint.correlativeNumber}:
 
 ${response}
 
-LibroVirtual.pe
+LibroDigital.pe
       `
     };
 
@@ -723,9 +833,9 @@ LibroVirtual.pe
     customization?: EmailCustomization,
   ): Promise<void> {
     const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to: email,
-      subject: applySubject(`Confirmación de ${complaint.complaintType} ${complaint.correlativeNumber} - LibroVirtual.pe`, customization),
+      subject: applySubject(`Confirmación de ${complaint.complaintType} ${complaint.correlativeNumber} - LibroDigital.pe`, customization),
       html: `
         <!DOCTYPE html>
         <html>
@@ -766,7 +876,7 @@ LibroVirtual.pe
             </div>
             <div class="footer">
               ${renderFooter(customization)}
-              <p>© 2024 LibroVirtual.pe</p>
+              <p>© 2024 LibroDigital.pe</p>
             </div>
           </div>
         </body>
@@ -786,7 +896,7 @@ Conforme al DS 101-2022-PCM la empresa cuenta con 15 días hábiles para respond
 Los datos de esta reclamación se conservan por 24 meses y luego se anonimizan,
 de acuerdo con la Ley N° 29733.
 
-LibroVirtual.pe
+LibroDigital.pe
       `,
       attachments: pdfBuffer
         ? [{
@@ -811,7 +921,7 @@ LibroVirtual.pe
    */
   async sendSlaEscalation(email: string, businessName: string, correlativeNumber: string, message: string): Promise<void> {
     const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to: email,
       subject: `⚠️ ESCALADO SLA: ${correlativeNumber} - ${businessName}`,
       text: `
@@ -822,7 +932,7 @@ ${message}
 El plazo legal de respuesta es de 15 días hábiles (DS 101-2022-PCM).
 Revise la reclamación en el panel de gestión: /reclamos
 
-LibroVirtual.pe
+LibroDigital.pe
       `,
     };
 
@@ -842,9 +952,9 @@ LibroVirtual.pe
     const greeting = firstName ? `¡Hola ${firstName}!` : '¡Hola!';
 
     const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME || 'LibroVirtual.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
       to: email,
-      subject: 'Prueba de correo - LibroVirtual.pe',
+      subject: 'Prueba de correo - LibroDigital.pe',
       html: `
         <!DOCTYPE html>
         <html>
@@ -857,7 +967,7 @@ LibroVirtual.pe
             <h2>${greeting}</h2>
             <p>Este es un correo de prueba enviado desde el Libro de Reclamaciones para verificar la configuración de envío.</p>
             <p>Si lo recibiste, el servicio de correo está configurado correctamente.</p>
-            <p style="color: #64748b; font-size: 14px;">© 2024 LibroVirtual.pe</p>
+            <p style="color: #64748b; font-size: 14px;">© 2024 LibroDigital.pe</p>
           </div>
         </body>
         </html>
@@ -875,6 +985,40 @@ Si lo recibiste, el servicio de correo está configurado correctamente.
     } catch (error) {
       console.error('Error sending test email:', error);
       throw new Error('Failed to send test email');
+    }
+  }
+
+  /**
+   * Operational alert to the platform operator (not to a customer).
+   *
+   * Used when something happens that only a human can fix - today: a
+   * subscription paid through a Mercado Pago plan link that could not be matched
+   * to any account. A payment nobody notices is worse than a noisy inbox, so the
+   * caller treats this as fire-and-forget.
+   */
+  async sendPlatformAlert(email: string, subject: string, details: string[]): Promise<void> {
+    const body = details.join('\n');
+
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to: email,
+      subject: `⚠️ ${subject} - LibroDigital.pe`,
+      text: `
+${subject}
+
+${body}
+
+Revise la sección "Pagos": /pagos
+
+LibroDigital.pe
+      `,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending platform alert:', error);
+      throw new Error('Failed to send platform alert');
     }
   }
 

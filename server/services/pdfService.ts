@@ -236,7 +236,7 @@ class PDFService {
           doc.addPage();
         }
         doc.fontSize(8).font('Helvetica').text(
-          `Generado automáticamente por LibroVirtual.pe el ${new Date().toLocaleString('es-PE')}`,
+          `Generado automáticamente por LibroDigital.pe el ${new Date().toLocaleString('es-PE')}`,
           { align: 'center' }
         );
 
@@ -283,7 +283,7 @@ class PDFService {
         doc.moveDown();
 
         doc.fontSize(12).font('Helvetica-Bold');
-        doc.text(`librovirtual.pe/${business.ruc}`, { align: 'center' });
+        doc.text(`librodigital.pe/${business.ruc}`, { align: 'center' });
         doc.moveDown(2);
 
         doc.fontSize(14).font('Helvetica');
@@ -371,7 +371,7 @@ class PDFService {
 
       doc.moveDown(2);
       doc.fontSize(8).font('Helvetica-Oblique').text(
-        `Formato generado por LibroVirtual.pe el ${new Date().toLocaleString('es-PE')} - ${business.businessName}`,
+        `Formato generado por LibroDigital.pe el ${new Date().toLocaleString('es-PE')} - ${business.businessName}`,
         { align: 'center' },
       );
     });
@@ -429,7 +429,7 @@ class PDFService {
 
       doc.moveDown(2);
       doc.fontSize(8).font('Helvetica-Oblique').text(
-        `Documento generado automáticamente por LibroVirtual.pe el ${new Date().toLocaleString('es-PE')}`,
+        `Documento generado automáticamente por LibroDigital.pe el ${new Date().toLocaleString('es-PE')}`,
         { align: 'center' },
       );
     });
@@ -500,7 +500,7 @@ class PDFService {
 
       doc.moveDown();
       doc.fontSize(8).font('Helvetica-Oblique').text(
-        `Documento generado automáticamente por LibroVirtual.pe el ${new Date().toLocaleString('es-PE')}`,
+        `Documento generado automáticamente por LibroDigital.pe el ${new Date().toLocaleString('es-PE')}`,
         { align: 'center' },
       );
     });
@@ -538,7 +538,7 @@ class PDFService {
 
       doc.moveDown();
       doc.fontSize(8).font('Helvetica-Oblique').text(
-        `Documento generado automáticamente por LibroVirtual.pe el ${new Date().toLocaleString('es-PE')}`,
+        `Documento generado automáticamente por LibroDigital.pe el ${new Date().toLocaleString('es-PE')}`,
         { align: 'center' },
       );
     });

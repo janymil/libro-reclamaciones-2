@@ -5,6 +5,7 @@ import { rankSlaRisk } from "../services/slaPredictionService";
 import { hasFeature } from "../services/subscriptionService";
 import { requireAuth } from "../middleware/requireAuth";
 import { aiLimiter, publicAiLimiter } from "../middleware/rateLimits";
+import { consumeCaptchaToken, verifyCaptcha } from "../services/captchaService";
 import { storage } from "../storage";
 
 /** Reusable 402 for the AI features that only Pro and up include. */
@@ -170,18 +171,33 @@ export function registerAiRoutes(app: Express): void {
     }
   });
 
-  // Consumer-side form assistant: public (no auth) but strictly rate-limited.
-  // Helps consumers write complete, well-structured complaints, which are far
-  // faster for the business to process and resolve.
+  // Consumer-side form assistant: public (no auth) but strictly rate-limited,
+  // and gated by the proof-of-work CAPTCHA. Every accepted call spends money on
+  // an upstream model, so this is the public endpoint where a challenge pays for
+  // itself: without one, a script can drain the AI budget from a single IP.
+  //
+  // The challenge is solved on demand (the button fetches and solves it), so it
+  // always opts out of the dwell-time rule: a deployment-wide
+  // CAPTCHA_MIN_DWELL_MS would otherwise break this endpoint, whose visitors
+  // legitimately solve and submit in the same interaction.
   app.post('/api/ai/public/assist', publicAiLimiter, async (req: any, res) => {
     try {
       const { text } = req.body;
+
+      const captcha = verifyCaptcha(req.body.captchaToken, req.body.captchaAnswer, { minDwellMs: 0 });
+      if (!captcha.ok) {
+        return res.status(400).json({ message: captcha.reason, code: "captcha_invalid" });
+      }
 
       if (!text || typeof text !== 'string' || text.trim().length < 10) {
         return res.status(400).json({
           message: "Se requiere el texto del borrador (mínimo 10 caracteres)",
         });
       }
+
+      // Single-use, and burned only now that the request is going to cost
+      // something: a rejected draft must not force the visitor to re-solve.
+      consumeCaptchaToken(req.body.captchaToken);
 
       const assistance = await aiService.assistConsumerDraft(text);
       res.json(assistance);

@@ -18,11 +18,15 @@ import {
   isPlanPeriod,
   isSubscriptionLive,
   isSubscriptionStatus,
+  isPubliclyReachableBaseUrl,
   periodMonths,
   planAmountCents,
+  PLAN_REFERENCE_CODES,
   providerSupportsRecurring,
   recurrenceForPeriod,
   referenceSuffix,
+  resolvePlanFromAmount,
+  resolvePlanFromCode,
   solesToCents,
 } from "./payments";
 
@@ -250,5 +254,93 @@ describe("subscription lifecycle", () => {
 
   it("says in plain Spanish that a live subscription renews by itself", () => {
     expect(SUBSCRIPTION_STATUS_LABELS.authorized).toContain("renueva");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Plans created in the Mercado Pago panel (public subscription links)
+// ---------------------------------------------------------------------------
+
+describe("resolvePlanFromCode - Mercado Pago panel plan codes", () => {
+  it("maps the panel code of every paid plan to a plan and a period", () => {
+    expect(resolvePlanFromCode("LV-ESENCIAL-M")).toEqual({ planId: "esencial", period: "monthly" });
+    expect(resolvePlanFromCode("LV-ESENCIAL-A")).toEqual({ planId: "esencial", period: "annual" });
+    expect(resolvePlanFromCode("LV-PROFESIONAL-M")).toEqual({ planId: "profesional", period: "monthly" });
+    expect(resolvePlanFromCode("LV-PROFESIONAL-A")).toEqual({ planId: "profesional", period: "annual" });
+    expect(resolvePlanFromCode("LV-CORPORATIVO-M")).toEqual({ planId: "corporativo", period: "monthly" });
+    expect(resolvePlanFromCode("LV-CORPORATIVO-A")).toEqual({ planId: "corporativo", period: "annual" });
+  });
+
+  it("tolerates stray spaces and lower case, because the panel is typed by hand", () => {
+    expect(resolvePlanFromCode("  lv-profesional-a ")).toEqual({
+      planId: "profesional",
+      period: "annual",
+    });
+  });
+
+  it("returns undefined for a reference the app does not know", () => {
+    // An in-app subscription reference must NOT be mistaken for a plan code.
+    expect(resolvePlanFromCode("LV-8F3A2B")).toBeUndefined();
+    expect(resolvePlanFromCode(undefined)).toBeUndefined();
+    expect(resolvePlanFromCode(42)).toBeUndefined();
+  });
+
+  it("never claims the free plan, which is not sold in the panel", () => {
+    const codes = Object.values(PLAN_REFERENCE_CODES).map((entry) => entry.planId);
+    expect(codes).not.toContain("gratis");
+  });
+});
+
+describe("resolvePlanFromAmount - when the panel code did not survive", () => {
+  it("recognises a monthly purchase from its price", () => {
+    expect(resolvePlanFromAmount(1500, "monthly")).toEqual({ planId: "esencial", period: "monthly" });
+    expect(resolvePlanFromAmount(2900, "monthly")).toEqual({ planId: "profesional", period: "monthly" });
+    expect(resolvePlanFromAmount(6900, "monthly")).toEqual({ planId: "corporativo", period: "monthly" });
+  });
+
+  it("recognises a yearly purchase from its price", () => {
+    expect(resolvePlanFromAmount(8900, "annual")).toEqual({ planId: "esencial", period: "annual" });
+    expect(resolvePlanFromAmount(18900, "annual")).toEqual({ planId: "profesional", period: "annual" });
+    expect(resolvePlanFromAmount(42900, "annual")).toEqual({ planId: "corporativo", period: "annual" });
+  });
+
+  it("does not confuse a tier's yearly price with another tier's monthly price", () => {
+    // Empresarial monthly is 69, and a Básico yearly launch offer would also be 69:
+    // the period is what keeps them apart.
+    expect(resolvePlanFromAmount(6900, "annual")).toBeUndefined();
+    expect(resolvePlanFromAmount(8900, "monthly")).toBeUndefined();
+  });
+
+  it("refuses to guess for an amount that matches nothing", () => {
+    expect(resolvePlanFromAmount(1234, "monthly")).toBeUndefined();
+    expect(resolvePlanFromAmount(0, "monthly")).toBeUndefined();
+    expect(resolvePlanFromAmount(-100, "monthly")).toBeUndefined();
+    expect(resolvePlanFromAmount(Number.NaN, "monthly")).toBeUndefined();
+  });
+});
+
+describe("isPubliclyReachableBaseUrl - can the provider call us back?", () => {
+  it("accepts a real HTTPS domain", () => {
+    expect(isPubliclyReachableBaseUrl("https://librodigital.pe")).toBe(true);
+    expect(isPubliclyReachableBaseUrl("https://libro.midominio.com")).toBe(true);
+  });
+
+  it("rejects localhost, because Mercado Pago can never reach it", () => {
+    // The exact value found in a local .env - the silent killer of webhooks.
+    expect(isPubliclyReachableBaseUrl("http://localhost:5000")).toBe(false);
+    expect(isPubliclyReachableBaseUrl("https://localhost:5000")).toBe(false);
+    expect(isPubliclyReachableBaseUrl("http://127.0.0.1:5000")).toBe(false);
+    expect(isPubliclyReachableBaseUrl("https://[::1]:5000")).toBe(false);
+    expect(isPubliclyReachableBaseUrl("https://caja.local")).toBe(false);
+  });
+
+  it("rejects plain HTTP, which Mercado Pago does not deliver to", () => {
+    expect(isPubliclyReachableBaseUrl("http://librodigital.pe")).toBe(false);
+  });
+
+  it("rejects junk instead of throwing", () => {
+    expect(isPubliclyReachableBaseUrl("")).toBe(false);
+    expect(isPubliclyReachableBaseUrl("localhost:5000")).toBe(false);
+    expect(isPubliclyReachableBaseUrl("no-es-una-url")).toBe(false);
   });
 });

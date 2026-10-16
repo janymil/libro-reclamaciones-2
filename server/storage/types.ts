@@ -73,6 +73,18 @@ export interface IStorage {
   setEmailVerificationToken(userId: string, token: string, expires: Date): Promise<void>;
   getUserByEmailVerificationToken(token: string): Promise<User | undefined>;
   completeEmailVerification(userId: string): Promise<void>;
+
+  // One-time login code (email + code sign-in)
+  setLoginCode(userId: string, codeHash: string, expires: Date): Promise<void>;
+  clearLoginCode(userId: string): Promise<void>;
+  /** Counts a wrong code and returns the new total for that code. */
+  registerFailedLoginCodeAttempt(userId: string): Promise<number>;
+
+  // Irreversible deletion ("abandon the app")
+  /** Removes one login: its business grants and the account row. */
+  deleteUserAccount(userId: string): Promise<void>;
+  /** Erases a tenant and its logins. Caller must have checked it holds no records. */
+  purgeBusiness(businessId: string): Promise<void>;
   
   // Auth audit logging
   createAuthAuditLog(auditLog: InsertAuthAuditLog): Promise<AuthAuditLog>;
@@ -297,13 +309,16 @@ export interface UserStats {
   complaintsManaged: number;
 }
 
+/**
+ * The account's own identity fields. The company's phone and address are NOT
+ * here: they belong to the business record and are edited through
+ * `PATCH /api/businesses/:id` ("Mi empresa"), so company data has exactly one
+ * write path instead of two that could disagree.
+ */
 export interface UpdateUserProfileData {
   email?: string;
   firstName?: string;
   lastName?: string;
-  /** null clears the value on the business record. */
-  phone?: string | null;
-  address?: string;
 }
 
 export interface UserWithBusiness {
@@ -315,6 +330,8 @@ export interface UserWithBusiness {
   businessId: string | null;
   isActive: boolean;
   isEmailVerified: boolean;
+  /** Shared demo account: its credentials are public and nobody can confirm it. */
+  isDemo: boolean;
   onboardingStep: number;
   onboardingCompleted: boolean;
   lastLoginAt: Date | null;

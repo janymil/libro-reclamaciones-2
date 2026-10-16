@@ -4,8 +4,11 @@ import {
   checkQuota,
   getAllowedComplaintTypes,
   getEffectivePlan,
+  getPlan,
+  getTrialDaysRemaining,
   isComplaintTypeAllowed,
   isTrialing,
+  resolveTrialEnd,
 } from "@shared/plans";
 import { monthWindowStart, resolvePlanChange, newBusinessTrialDefaults } from "./subscriptionService";
 import type { Business } from "@shared/schema";
@@ -67,6 +70,67 @@ describe("plans & quotas", () => {
     expect(isTrialing(expired)).toBe(false);
     expect(getEffectivePlan(expired).id).toBe("esencial");
   });
+
+  it("reconstructs the 15-day window when trial_ends_at was never stored", () => {
+    // 0003 added `trial_ends_at` as a nullable column to a populated table, so
+    // every tenant that already existed kept NULL while `subscription_status`
+    // defaulted to 'trialing'. That combination used to read as "still
+    // trialing" forever: the header showed "quedan 0 día(s)" and Pro stayed
+    // unlocked. The window now comes from registration.
+    const legacy = business({
+      subscriptionPlan: "gratis",
+      subscriptionStatus: "trialing",
+      trialEndsAt: null,
+      createdAt: new Date(Date.now() - 120 * 86_400_000),
+    });
+
+    const resolved = resolveTrialEnd(legacy);
+    expect(resolved).not.toBeNull();
+    expect(resolved!.getTime()).toBe(legacy.createdAt.getTime() + 15 * 86_400_000);
+
+    expect(isTrialing(legacy)).toBe(false);
+    expect(getTrialDaysRemaining(legacy)).toBe(0);
+    expect(getEffectivePlan(legacy).id).toBe("gratis");
+  });
+
+  it("keeps a reconstructed window open while its 15 days are still running", () => {
+    const recent = business({
+      subscriptionStatus: "trialing",
+      trialEndsAt: null,
+      createdAt: new Date(Date.now() - 3 * 86_400_000),
+    });
+
+    expect(isTrialing(recent)).toBe(true);
+    expect(getTrialDaysRemaining(recent)).toBe(12);
+    expect(getEffectivePlan(recent).id).toBe("profesional");
+  });
+
+  it("never treats a row with no trial window information as trialing", () => {
+    const unknown = business({
+      subscriptionStatus: "trialing",
+      trialEndsAt: null,
+      createdAt: null as unknown as Date,
+    });
+
+    expect(resolveTrialEnd(unknown)).toBeNull();
+    expect(isTrialing(unknown)).toBe(false);
+    expect(getEffectivePlan(unknown).id).toBe("esencial");
+  });
+
+  it("resolves a legacy stored plan id to the Free plan it already applies", () => {
+    // Pre-0003 rows keep the old `basic` DEFAULT from 0000_init.sql, an id that
+    // is not in the catalog. Such a tenant has always been granted Free, so the
+    // stored value must not leak any other tier into the UI.
+    // See migrations/manual/0009_normalize_plan_ids.sql.
+    const legacy = business({
+      subscriptionPlan: "basic",
+      subscriptionStatus: "trial_ended",
+    });
+
+    expect(getPlan("basic").id).toBe("gratis");
+    expect(getPlan(legacy.subscriptionPlan).id).toBe("gratis");
+    expect(getEffectivePlan(legacy).id).toBe("gratis");
+  });
 });
 
 describe("subscriptionService helpers", () => {
@@ -85,10 +149,27 @@ describe("subscriptionService helpers", () => {
     const result = resolvePlanChange(business(), "profesional", "annual", new Date("2026-01-01T00:00:00Z"));
     expect("error" in result).toBe(false);
     if (!("error" in result)) {
-      expect(result.plan).toBe("profesional");
+      expect(result.subscriptionPlan).toBe("profesional");
       expect(result.planPeriod).toBe("annual");
       expect(result.currentPeriodEnd.toISOString()).toBe("2027-01-01T00:00:00.000Z");
     }
+  });
+
+  it("returns the column names the caller persists", () => {
+    // Regression: the keys used to be `plan` / `status`, which are not columns of
+    // `businesses`. Callers pass this object to `storage.updateBusiness`, and
+    // Drizzle drops unknown keys silently - so the plan-change endpoint reported
+    // success and changed nothing.
+    const result = resolvePlanChange(business(), "profesional", "annual");
+
+    if ("error" in result) throw new Error("unexpected error result");
+
+    expect(Object.keys(result).sort()).toEqual([
+      "currentPeriodEnd",
+      "planPeriod",
+      "subscriptionPlan",
+      "subscriptionStatus",
+    ]);
   });
 
   it("rejects unknown plans", () => {

@@ -6,7 +6,7 @@ import { storage } from "../storage";
  * Outgoing webhooks (Phase 3.12).
  *
  * Businesses (Corporativo) register URLs that receive an HTTP POST with the
- * event payload, signed with an HMAC-SHA256 header (`X-LibroVirtual-Signature:
+ * event payload, signed with an HMAC-SHA256 header (`X-LibroDigital-Signature:
  * sha256=<hex>`) so the receiver can verify authenticity. Delivery is
  * fire-and-forget: failures are logged, never thrown, so the complaint flow
  * is never blocked by a broken customer endpoint.
@@ -145,9 +145,9 @@ export async function dispatchWebhookEvent(businessId: string, event: string, pa
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "User-Agent": "LibroVirtual-Webhooks/1.0",
-            "X-LibroVirtual-Event": event,
-            "X-LibroVirtual-Signature": signPayload(webhook.secret, body),
+            "User-Agent": "LibroDigital-Webhooks/1.0",
+            "X-LibroDigital-Event": event,
+            "X-LibroDigital-Signature": signPayload(webhook.secret, body),
           },
           body,
           signal: controller.signal,

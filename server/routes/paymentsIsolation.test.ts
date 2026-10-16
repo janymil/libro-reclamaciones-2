@@ -96,6 +96,14 @@ const h = vi.hoisted(() => {
       Object.assign(row, updates);
       return row;
     },
+    // Used only by the adoption path: matching a payer to an account.
+    getUserByEmail: async (email: string) => {
+      track("getUserByEmail", [email]);
+      return Object.values(state.usersById).find(
+        (user: any) => String(user.email).toLowerCase() === email.trim().toLowerCase(),
+      );
+    },
+
     // Not used by the payment routes, but the auth chain resolves the user.
     getUserBusinessAccess: async () => [],
     getAllUsers: async () => [],
@@ -172,10 +180,21 @@ const h = vi.hoisted(() => {
   return { calls, state, storageMock, authMock };
 });
 
+/** Captures the operational alerts instead of sending them. */
+const emailMock = vi.hoisted(() => ({ alerts: [] as Array<{ email: string; subject: string; details: string[] }> }));
+
 vi.mock("../storage", () => ({ storage: h.storageMock }));
 vi.mock("../services/authService", () => ({ authService: h.authMock }));
+vi.mock("../services/emailService", () => ({
+  emailService: {
+    sendPlatformAlert: async (email: string, subject: string, details: string[]) => {
+      emailMock.alerts.push({ email, subject, details });
+    },
+  },
+}));
 
 import { registerPaymentsRoutes } from "./payments.routes";
+import { clearPaymentAlertCache } from "../services/paymentService";
 
 function tenantBusiness(id: string, name: string) {
   return {
@@ -204,7 +223,7 @@ const users = {
   adminA: { id: "aaaaaaaa-1111-4111-8111-111111111111", email: "admin.a@example.com", firstName: "Admin", lastName: "A", role: "admin", businessId: A, isActive: true, isDemo: false },
   staffA: { id: "aaaaaaaa-2222-4222-8222-222222222222", email: "staff.a@example.com", firstName: "Staff", lastName: "A", role: "user", businessId: A, isActive: true, isDemo: false },
   adminB: { id: "bbbbbbbb-1111-4111-8111-111111111111", email: "admin.b@example.com", firstName: "Admin", lastName: "B", role: "admin", businessId: B, isActive: true, isDemo: false },
-  demoAdmin: { id: "dddddddd-1111-4111-8111-111111111111", email: "demo@librovirtual.pe", firstName: "Usuario", lastName: "Demo", role: "admin", businessId: A, isActive: true, isDemo: true },
+  demoAdmin: { id: "dddddddd-1111-4111-8111-111111111111", email: "demo@librodigital.pe", firstName: "Usuario", lastName: "Demo", role: "admin", businessId: A, isActive: true, isDemo: true },
 };
 
 let app: { url: string; close: () => Promise<void> };
@@ -222,6 +241,9 @@ beforeEach(async () => {
 
   delete process.env.MERCADOPAGO_ACCESS_TOKEN;
   delete process.env.APP_URL;
+  delete process.env.PAYMENTS_ALERT_EMAIL;
+  emailMock.alerts.length = 0;
+  clearPaymentAlertCache();
 
   app = await startTestApp((expressApp) => {
     registerPaymentsRoutes(expressApp);
@@ -232,6 +254,7 @@ afterEach(async () => {
   await app.close();
   vi.unstubAllGlobals();
   delete process.env.MERCADOPAGO_ACCESS_TOKEN;
+  delete process.env.PAYMENTS_ALERT_EMAIL;
 });
 
 /** Seeds a payment row directly, as the checkout would have left it. */
@@ -342,6 +365,20 @@ describe("POST /api/payments/checkout - input hardening", () => {
     });
 
     expect(res.status).toBe(400);
+  });
+
+  it("refuses to open a checkout for the free plan", async () => {
+    const res = await call(app.url, "/api/payments/checkout", {
+      method: "POST",
+      userId: users.adminA.id,
+      body: { plan: "gratis", period: "monthly", provider: "manual" },
+    });
+
+    // Nothing to charge: no gateway error, just a clear answer.
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("plan_is_free");
+    expect(h.calls.createPayment).toBeUndefined();
+    expect(h.calls.createSubscription).toBeUndefined();
   });
 
   it("ignores a client-supplied amount and uses the catalogue price", async () => {
@@ -1059,6 +1096,151 @@ describe("subscription endpoints", () => {
 
     expect(res.status).toBe(200);
     expect(providerCalls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Subscriptions bought through a Mercado Pago plan link (mpago.la/...)
+// ---------------------------------------------------------------------------
+
+/**
+ * A plan created in the panel is paid through its own public link, so Mercado
+ * Pago - not this app - creates the subscription. These tests are the guarantee
+ * that such a payment is not silently dropped.
+ */
+describe("subscriptions bought outside the app (panel plan link)", () => {
+  const planPreapproval = {
+    id: "pre-plan-1",
+    status: "authorized",
+    external_reference: "LV-PROFESIONAL-A",
+    payer_email: "admin.a@example.com",
+    preapproval_plan_id: "plan-abc",
+    auto_recurring: {
+      frequency: 12,
+      frequency_type: "months",
+      transaction_amount: 189,
+      currency_id: "PEN",
+    },
+  };
+
+  const notify = (body: unknown) =>
+    call(app.url, "/api/payments/webhook/mercadopago", { method: "POST", userId: null, body });
+
+  it("adopts it for the account that owns the payer email and activates the plan", async () => {
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    stubProviderByPath({ preapproval: planPreapproval });
+
+    const res = await notify({ type: "subscription_preapproval", data: { id: "pre-plan-1" } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.handled).toBe(true);
+    expect(res.body.status).toBe("authorized");
+
+    const created = h.calls.createSubscription[0][0];
+    expect(created.businessId).toBe(A);
+    expect(created.providerRef).toBe("pre-plan-1");
+    expect(created.planId).toBe("profesional");
+    expect(created.period).toBe("annual");
+    expect(created.amountCents).toBe(18900);
+
+    // The customer actually gets what they paid for.
+    expect(h.calls.updateBusiness[0][1].subscriptionPlan).toBe("profesional");
+  });
+
+  it("recognises the plan from the price when the panel code is missing", async () => {
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    stubProviderByPath({
+      preapproval: { ...planPreapproval, external_reference: "algo-inesperado" },
+    });
+
+    await notify({ type: "subscription_preapproval", data: { id: "pre-plan-1" } });
+
+    expect(h.calls.createSubscription[0][0].planId).toBe("profesional");
+    expect(h.calls.createSubscription[0][0].period).toBe("annual");
+  });
+
+  it("adopts it only once, however many notifications arrive", async () => {
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    stubProviderByPath({ preapproval: planPreapproval });
+
+    await notify({ type: "subscription_preapproval", data: { id: "pre-plan-1" } });
+    await notify({ type: "subscription_preapproval", data: { id: "pre-plan-1" } });
+
+    expect(h.calls.createSubscription).toHaveLength(1);
+  });
+
+  it("refuses to guess when the purchase is not identifiable", async () => {
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    stubProviderByPath({
+      preapproval: {
+        ...planPreapproval,
+        external_reference: "sin-codigo",
+        auto_recurring: { frequency: 1, frequency_type: "months", transaction_amount: 12.34 },
+      },
+    });
+
+    const res = await notify({ type: "subscription_preapproval", data: { id: "pre-plan-1" } });
+
+    expect(res.body.handled).toBe(false);
+    expect(h.calls.createSubscription).toBeUndefined();
+    expect(h.calls.updateBusiness).toBeUndefined();
+  });
+
+  it("alerts the operator when the payer email belongs to no account", async () => {
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.PAYMENTS_ALERT_EMAIL = "ops@librodigital.pe";
+    stubProviderByPath({
+      preapproval: { ...planPreapproval, payer_email: "desconocido@gmail.com" },
+    });
+
+    const res = await notify({ type: "subscription_preapproval", data: { id: "pre-plan-1" } });
+
+    // Nothing can be activated automatically, but a human is told.
+    expect(res.body.handled).toBe(false);
+    expect(h.calls.createSubscription).toBeUndefined();
+    expect(h.calls.updateBusiness).toBeUndefined();
+    expect(emailMock.alerts).toHaveLength(1);
+    expect(emailMock.alerts[0].email).toBe("ops@librodigital.pe");
+    expect(emailMock.alerts[0].details.join("\n")).toContain("desconocido@gmail.com");
+  });
+
+  it("does not alert twice for the same stray subscription", async () => {
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.PAYMENTS_ALERT_EMAIL = "ops@librodigital.pe";
+    stubProviderByPath({
+      preapproval: { ...planPreapproval, payer_email: "desconocido@gmail.com" },
+    });
+
+    await notify({ type: "subscription_preapproval", data: { id: "pre-plan-1" } });
+    await notify({ type: "subscription_preapproval", data: { id: "pre-plan-1" } });
+
+    expect(emailMock.alerts).toHaveLength(1);
+  });
+
+  it("books the first charge of an adopted subscription", async () => {
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    stubProviderByPath({
+      authorizedPayment: {
+        id: "inv-plan-1",
+        preapproval_id: "pre-plan-1",
+        status: "processed",
+        payment: { id: 909 },
+      },
+      preapproval: planPreapproval,
+      payment: { id: 909, status: "approved", transaction_amount: 189, external_reference: "LV-PROFESIONAL-A" },
+    });
+
+    const res = await notify({ type: "subscription_authorized_payment", data: { id: "inv-plan-1" } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.handled).toBe(true);
+    expect(res.body.status).toBe("paid");
+
+    // Adopted and paid in one go: a year of access from the panel link.
+    const created = h.calls.createSubscription[0][0];
+    expect(created.businessId).toBe(A);
+    expect(h.calls.updatePayment.at(-1)[1].status).toBe("paid");
+    expect(h.calls.updateBusiness.at(-1)[1].plan).toBe("profesional");
   });
 });
 

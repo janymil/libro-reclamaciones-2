@@ -39,6 +39,14 @@ export const users = pgTable("users", {
   // Email verification
   emailVerificationToken: varchar("email_verification_token", { length: 255 }),
   emailVerificationExpires: timestamp("email_verification_expires"),
+
+  // One-time login code ("entra con un código por email"). Stored bcrypt-hashed
+  // - like a password, because for ten minutes that is what it is - and only
+  // ever single-use, so an intercepted email is not a permanent key. The
+  // attempts counter is what burns a code that is being guessed.
+  loginCodeHash: text("login_code_hash"),
+  loginCodeExpires: timestamp("login_code_expires"),
+  loginCodeAttempts: integer("login_code_attempts").notNull().default(0),
   
   // Onboarding flow
   onboardingStep: integer("onboarding_step").notNull().default(1), // 1: user created, 2: business/libro configured
@@ -324,7 +332,7 @@ export const libroConfiguration = pgTable("libro_configuration", {
   
   // Basic configuration from screenshot
   libroName: text("libro_name").notNull(),
-  urlSlug: varchar("url_slug", { length: 100 }).notNull().unique(), // for librovirtual.pe/company-slug
+  urlSlug: varchar("url_slug", { length: 100 }).notNull().unique(), // for librodigital.pe/company-slug
   businessType: varchar("business_type", { length: 50 }).notNull(), // tienda_virtual, local_fisico
   
   // Contact info
@@ -707,7 +715,6 @@ export const businessUpdateSchema = businessProfileSchema
   .omit({ ruc: true }) // the RUC is the legal identity; it never changes here
   .partial()
   .extend({ isActive: z.boolean().optional() });
-
 export const insertEstablishmentSchema = createInsertSchema(establishments).omit({
   id: true,
   createdAt: true,
@@ -890,6 +897,22 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Contraseña requerida"),
 });
 
+/** Step 1 of the code login: ask for a one-time code by email. */
+export const requestLoginCodeSchema = z.object({
+  email: accountEmailSchema,
+});
+
+/**
+ * Step 2 of the code login: the six digits from the email.
+ *
+ * Digits only and a fixed length, so a mistyped paste fails validation instead
+ * of counting as a wrong code against the account's attempt counter.
+ */
+export const loginCodeSchema = z.object({
+  email: accountEmailSchema,
+  code: z.string().trim().regex(/^\d{6}$/, "El código tiene 6 dígitos"),
+});
+
 /**
  * Minimum password length, shared by every entry point that sets a password
  * (team-member creation, change-password, password reset) so the rule cannot
@@ -935,6 +958,10 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 
 export type Business = typeof businesses.$inferSelect;
 export type InsertBusiness = z.infer<typeof insertBusinessSchema>;
+/** What a tenant may submit when registering a company (no plan lifecycle). */
+export type BusinessProfile = z.infer<typeof businessProfileSchema>;
+/** Editable company profile fields (RUC and plan excluded by design). */
+export type BusinessUpdate = z.infer<typeof businessUpdateSchema>;
 
 export type Establishment = typeof establishments.$inferSelect;
 export type InsertEstablishment = z.infer<typeof insertEstablishmentSchema>;
@@ -995,5 +1022,7 @@ export type ApiKeyPublic = Omit<ApiKey, "keyHash">;
 
 export type UserRegistration = z.infer<typeof userRegistrationSchema>;
 export type LoginData = z.infer<typeof loginSchema>;
+export type RequestLoginCodeData = z.infer<typeof requestLoginCodeSchema>;
+export type LoginCodeData = z.infer<typeof loginCodeSchema>;
 export type ForgotPasswordData = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordData = z.infer<typeof resetPasswordSchema>;

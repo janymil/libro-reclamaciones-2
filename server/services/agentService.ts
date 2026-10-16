@@ -29,6 +29,12 @@ import type { Complaint } from "@shared/schema";
  * legal corpus.
  */
 
+/**
+ * The one mailbox that actually exists, on the domain's Zoho plan. The agent is
+ * told to name it (and only it) when a user asks for human help.
+ */
+const SUPPORT_EMAIL = "hola@librodigital.pe";
+
 export interface AgentContext {
   businessId: string;
   businessName?: string | null;
@@ -461,7 +467,7 @@ export async function executeAgentTool(
 function buildSystemPrompt(context: AgentContext): string {
   const business = context.businessName ? ` La empresa autenticada es "${context.businessName}".` : "";
   return [
-    "Eres el Copiloto de Cumplimiento de LibroVirtual.pe, un asistente experto en la normativa peruana del " +
+    "Eres el Copiloto de Cumplimiento de LibroDigital.pe, un asistente experto en la normativa peruana del " +
       "Libro de Reclamaciones y en la protección al consumidor (INDECOPI).",
     `Atiendes a un usuario autenticado de una sola empresa.${business}`,
     "",
@@ -480,6 +486,11 @@ function buildSystemPrompt(context: AgentContext): string {
     "7. No brindas asesoría legal vinculante; ofrece orientación informativa y, cuando el riesgo sea alto, " +
       "sugiere revisar el caso con un abogado o con INDECOPI.",
     "8. Si una herramienta devuelve un error o no encuentra datos, dilo con claridad y propón una alternativa.",
+    // The single mailbox that exists. Naming it here keeps the copilot from
+    // inventing a support address, which is how a customer ends up writing to a
+    // dead inbox and concluding the product is abandoned.
+    "9. Si el usuario necesita soporte humano o pedir ayuda con su cuenta, indícale que escriba a " +
+      `${SUPPORT_EMAIL}. No menciones ni inventes otros correos, teléfonos ni direcciones.`,
   ].join("\n");
 }
 

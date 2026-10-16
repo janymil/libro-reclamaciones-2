@@ -2,9 +2,12 @@ import {
   PLANS,
   TRIAL_DAYS,
   getEffectivePlan,
+  getPlan,
+  getTrialDaysRemaining,
   isComplaintTypeAllowed,
   isPlanId,
   isTrialing,
+  resolveTrialEnd,
   type PlanDefinition,
   type QuotaCheck,
   type QuotaResource,
@@ -87,17 +90,20 @@ export async function getSubscriptionInfo(business: Business, userId: string): P
   const usage = await getSubscriptionUsage(business.id, userId);
   const trial = isTrialing(business, now);
 
-  const trialDaysRemaining = trial && business.trialEndsAt
-    ? Math.max(0, Math.ceil((new Date(business.trialEndsAt).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
-    : 0;
-
   return {
     plan: getEffectivePlan(business, now),
-    storedPlanId: business.subscriptionPlan,
+    // The catalog id the row resolves to, so a legacy value (the pre-0003
+    // `basic` default) can never leave the UI without a matching plan card.
+    // See migrations/manual/0009_normalize_plan_ids.sql.
+    storedPlanId: getPlan(business.subscriptionPlan).id,
     status: business.subscriptionStatus,
     isTrial: trial,
-    trialEndsAt: business.trialEndsAt ? new Date(business.trialEndsAt) : null,
-    trialDaysRemaining,
+    // Both come from the resolved window, never from the raw column: legacy
+    // tenants carry a NULL trial_ends_at (0003 added the column without a
+    // default), which used to render as "activa - quedan 0 dia(s)" while the
+    // trial itself never expired. See migrations/manual/0008.
+    trialEndsAt: resolveTrialEnd(business),
+    trialDaysRemaining: getTrialDaysRemaining(business, now),
     planPeriod: business.planPeriod,
     currentPeriodEnd: business.currentPeriodEnd ? new Date(business.currentPeriodEnd) : null,
     usage,
@@ -200,13 +206,25 @@ export function newBusinessTrialDefaults(now: Date = new Date()): {
  * Applies a plan change. Plans are annual or monthly; the trial stays intact
  * when the change happens during the trial (paying customers keep their
  * remaining trial days on top of the new plan).
+ *
+ * The returned keys are the **`businesses` column names** on purpose
+ * (`subscriptionPlan` / `subscriptionStatus`), because callers hand the object
+ * straight to `storage.updateBusiness`, which passes it to Drizzle. Drizzle
+ * ignores keys that are not columns *without raising*, so returning `plan` /
+ * `status` here made `POST /api/subscription` answer "Plan actualizado a X"
+ * while persisting nothing - the tenant silently kept its old plan.
  */
 export function resolvePlanChange(
   current: Business,
   planId: string,
   period: string,
   now: Date = new Date(),
-): { plan: string; status: string; planPeriod: string; currentPeriodEnd: Date } | { error: string } {
+): {
+  subscriptionPlan: string;
+  subscriptionStatus: string;
+  planPeriod: string;
+  currentPeriodEnd: Date;
+} | { error: string } {
   if (!isPlanId(planId)) {
     return { error: "Plan inválido" };
   }
@@ -216,8 +234,8 @@ export function resolvePlanChange(
   currentPeriodEnd.setUTCMonth(currentPeriodEnd.getUTCMonth() + periodMonths);
 
   return {
-    plan: planId,
-    status: isTrialing(current, now) ? "trialing" : "active",
+    subscriptionPlan: planId,
+    subscriptionStatus: isTrialing(current, now) ? "trialing" : "active",
     planPeriod: period === "annual" ? "annual" : "monthly",
     currentPeriodEnd,
   };

@@ -11,6 +11,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { Loader2, Building2, Book, Upload, ExternalLink, Search } from "lucide-react";
 import { departments, getProvinces, getDistricts } from '@/data/peru-locations';
+import { safeInternalPath } from "@/lib/subscribe-link";
 
 interface BusinessData {
   ruc: string;
@@ -43,14 +44,18 @@ export default function OnboardingPage() {
   const [availableProvinces, setAvailableProvinces] = useState<string[]>([]);
   const [availableDistricts, setAvailableDistricts] = useState<string[]>([]);
 
+  // Where to send the user once onboarding is done (for example back to the
+  // subscription link they arrived from). Validated to stay on this site.
+  const nextPath = safeInternalPath(new URLSearchParams(window.location.search).get('next'));
+
   // Redirect if not authenticated or onboarding already completed
   useEffect(() => {
     if (!isAuthenticated) {
-      setLocation('/acceso');
+      setLocation(nextPath ? `/acceso?next=${encodeURIComponent(nextPath)}` : '/acceso');
     } else if (user?.onboardingCompleted) {
-      setLocation('/panel');
+      setLocation(nextPath ?? '/panel');
     }
-  }, [isAuthenticated, user, setLocation]);
+  }, [isAuthenticated, user, setLocation, nextPath]);
 
   // Business form state
   const [businessForm, setBusinessForm] = useState<BusinessData>({
@@ -98,6 +103,11 @@ export default function OnboardingPage() {
   // then offer "solicitar acceso" instead of leaving the user stuck.
   const [accessRequest, setAccessRequest] = useState<{ businessName: string } | null>(null);
   const [isRequestingAccess, setIsRequestingAccess] = useState(false);
+
+  // Set when the server refuses to publish because the account's mailbox is not
+  // confirmed yet. Same idea: a way forward (resend the link) instead of a toast.
+  const [verificationRequired, setVerificationRequired] = useState(false);
+  const [isResendingVerification, setIsResendingVerification] = useState(false);
 
   // Prefill from whatever a previous attempt already saved. If the libro itself
   // exists, the user only has to confirm it: jump straight to step 2.
@@ -209,10 +219,27 @@ export default function OnboardingPage() {
           description: `Razón social: ${data.razon_social}`,
           variant: "default",
         });
-      } else {
+      } else if (data?.code === 'ruc_not_found') {
+        // Definitive: SUNAT has no record for this RUC, so retyping it is useless.
         toast({
           title: "RUC no encontrado",
-          description: data.message || "No se pudo encontrar información para este RUC",
+          description: data.message || "SUNAT no tiene información para ese RUC. Verifica el número.",
+          variant: "destructive",
+        });
+      } else if (data?.code === 'provider_rate_limited') {
+        // The lookup service is saturated: not the user's fault, and the reason
+        // the razón social field has to stay manually editable.
+        toast({
+          title: "Consulta SUNAT ocupada",
+          description: data.message || "Intenta de nuevo en un minuto o ingresa la razón social manualmente.",
+          variant: "destructive",
+        });
+      } else {
+        // Provider down or not configured: never reported as a wrong RUC, which
+        // used to send users hunting for a "typo" that did not exist.
+        toast({
+          title: "No se pudo consultar el RUC",
+          description: data?.message || "Ingresa la razón social manualmente.",
           variant: "destructive",
         });
       }
@@ -249,7 +276,7 @@ export default function OnboardingPage() {
         title: "¡Configuración completada!",
         description: "Tu libro de reclamaciones está listo para usar",
       });
-      setLocation('/panel');
+      setLocation(nextPath ?? '/panel');
     },
     onError: (error: Error) => {
       const raw = error.message;
@@ -270,7 +297,15 @@ export default function OnboardingPage() {
 
       // Already configured (for instance in another tab): nothing to redo.
       if (raw.includes('already_onboarded')) {
-        setLocation('/panel');
+        setLocation(nextPath ?? '/panel');
+        return;
+      }
+
+      // Unconfirmed mailbox: the wizard cannot publish anything yet
+      // (services/verificationService.ts), so it needs the way forward, not a
+      // toast that disappears.
+      if (raw.includes('email_not_verified')) {
+        setVerificationRequired(true);
         return;
       }
 
@@ -339,7 +374,7 @@ export default function OnboardingPage() {
 
   const handleLibroSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Validate URL slug
     if (!/^[a-z0-9-]+$/.test(libroForm.urlSlug)) {
       toast({
@@ -349,13 +384,32 @@ export default function OnboardingPage() {
       });
       return;
     }
-    
+
     onboardingMutation.mutate({
       businessData: businessForm,
       libroData: libroForm
     });
   };
 
+  // Asks for a fresh "confirma tu correo" link. The mailbox is the address that
+  // will receive every complaint notification, so it has to be real before the
+  // Libro goes live.
+  const resendVerification = async () => {
+    setIsResendingVerification(true);
+    try {
+      const response = await apiRequest('POST', '/api/auth/resend-verification');
+      const body = await response.json();
+      toast({ title: 'Enlace enviado', description: body.message });
+    } catch (error) {
+      toast({
+        title: 'No se pudo enviar',
+        description: apiErrorMessage(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsResendingVerification(false);
+    }
+  };
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50">
       <div className="container mx-auto px-4 py-8">
@@ -392,6 +446,33 @@ export default function OnboardingPage() {
               <p className="mt-1">
                 Revisa los datos y continúa donde quedaste: al finalizar, tu Libro queda publicado.
               </p>
+            </div>
+          )}
+
+          {/* The book cannot be published from an unconfirmed mailbox: the link is
+              the way forward, not a message the user cannot act on. */}
+          {verificationRequired && (
+            <div
+              className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+              data-testid="notice-email-not-verified"
+            >
+              <p className="font-medium">Confirma tu correo para publicar tu Libro.</p>
+              <p className="mt-1">
+                Te enviamos un enlace de confirmación cuando creaste tu cuenta. Es la dirección que
+                recibirá el aviso de cada reclamación, así que debe estar confirmada antes de
+                publicar tu Libro de Reclamaciones.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-3"
+                disabled={isResendingVerification}
+                onClick={resendVerification}
+                data-testid="button-resend-verification-onboarding"
+              >
+                {isResendingVerification ? 'Enviando…' : 'Reenviar enlace de confirmación'}
+              </Button>
             </div>
           )}
 
@@ -619,7 +700,7 @@ export default function OnboardingPage() {
                   <div className="space-y-2">
                     <Label htmlFor="urlSlug">URL de acceso público *</Label>
                     <div className="flex items-center space-x-2">
-                      <span className="text-sm text-gray-500">librovirtual.pe/</span>
+                      <span className="text-sm text-gray-500">librodigital.pe/</span>
                       <Input
                         id="urlSlug"
                         data-testid="input-urlSlug"
@@ -696,7 +777,7 @@ export default function OnboardingPage() {
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <h4 className="font-semibold text-blue-900 mb-2">Vista previa</h4>
                     <div className="space-y-1 text-sm text-blue-800">
-                      <p><strong>URL pública:</strong> librovirtual.pe/{libroForm.urlSlug}</p>
+                      <p><strong>URL pública:</strong> librodigital.pe/{libroForm.urlSlug}</p>
                       <p><strong>Nombre:</strong> {libroForm.libroName}</p>
                       <p><strong>Tipo:</strong> {libroForm.businessType.replace('_', ' ')}</p>
                     </div>

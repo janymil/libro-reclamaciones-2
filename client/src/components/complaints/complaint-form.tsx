@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,14 +15,11 @@ import { useToast } from "@/hooks/use-toast";
 import { complaintFormSchema, type ComplaintFormData } from "@/lib/validation";
 import { DOCUMENT_TYPES, COMPLAINT_TYPES, LEGAL_NOTICES } from "@/lib/constants";
 import { useCreateComplaint, useAIPublicAssist } from "@/hooks/use-complaints";
+import { useCaptchaChallenge } from "@/hooks/use-captcha";
+import { requestSolvedCaptcha } from "@/lib/pow";
 
 const MAX_FILE_SIZE_MB = 5;
 const MAX_FILES = 5;
-
-interface CaptchaChallenge {
-  token: string;
-  question: string;
-}
 
 /** Parses the error message a failed apiRequest carries (JSON body text). */
 function parseApiError(error: unknown, fallback: string): string {
@@ -72,34 +68,19 @@ export default function ComplaintForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
-  const [captchaAnswer, setCaptchaAnswer] = useState("");
-  const [captchaFailed, setCaptchaFailed] = useState(false);
+  // The AI button needs its own solved challenge and its own spinner: it is a
+  // separate, costlier request than the submission.
+  const [isAssistPreparing, setIsAssistPreparing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const createComplaint = useCreateComplaint();
   const aiAssist = useAIPublicAssist();
 
-  // Math CAPTCHA (Phase 1.5): challenge is issued by the server and verified
-  // on submit; a new one is fetched whenever the previous one failed.
-  const { data: captcha, refetch: refetchCaptcha } = useQuery<CaptchaChallenge>({
-    queryKey: ["/api/public/captcha"],
-    queryFn: async () => {
-      const response = await fetch("/api/public/captcha");
-      if (!response.ok) {
-        throw new Error("No se pudo cargar el captcha");
-      }
-      return response.json() as Promise<CaptchaChallenge>;
-    },
-    staleTime: 0,
-  });
-
-  // A failed captcha expires the challenge: fetch a fresh one
-  useEffect(() => {
-    if (captchaFailed) {
-      setCaptchaAnswer("");
-      setCaptchaFailed(false);
-      void refetchCaptcha();
-    }
-  }, [captchaFailed, refetchCaptcha]);
+  // CAPTCHA (Phase 1.5): a proof-of-work challenge is fetched when the form
+  // renders and solved in the background, so the visitor has nothing to read or
+  // type - the submission simply carries the solution. It is replaced on demand
+  // whenever the server rejects one (expired, already used, or submitted too
+  // fast for a human to have filled the form).
+  const proof = useCaptchaChallenge();
 
   const form = useForm<ComplaintFormData>({
     resolver: zodResolver(complaintFormSchema),
@@ -180,11 +161,17 @@ export default function ComplaintForm({
     try {
       setIsSubmitting(true);
 
-      if (!captcha || !captchaAnswer.trim()) {
-        setCaptchaFailed(true);
+      // Automatic verification: wait for the solved challenge (usually already
+      // done) before sending anything.
+      let solved;
+      try {
+        solved = await proof.ensureSolved();
+      } catch {
         toast({
-          title: "Captcha requerido",
-          description: "Responda la pregunta de verificación para enviar su reclamación.",
+          title: "Verificación de seguridad pendiente",
+          description:
+            proof.error ??
+            "No se pudo completar la verificación automática. Reintente en unos segundos.",
           variant: "destructive",
         });
         return;
@@ -204,9 +191,9 @@ export default function ComplaintForm({
         establishmentId,
         purchaseAmount: data.purchaseAmount ? String(data.purchaseAmount) : undefined,
         purchaseDate: data.purchaseDate ? new Date(data.purchaseDate) : undefined,
-        // Anti-spam (Phase 1.5)
-        captchaToken: captcha.token,
-        captchaAnswer: captchaAnswer.trim(),
+        // Anti-spam (Phase 1.5): the solved proof of work + the honeypot.
+        captchaToken: solved.token,
+        captchaAnswer: solved.solution,
         website: "", // honeypot: must stay empty
       };
 
@@ -225,13 +212,12 @@ export default function ComplaintForm({
       }
 
       form.reset();
-      setCaptchaAnswer("");
-      void refetchCaptcha();
+      proof.refresh();
     } catch (error) {
       const message = parseApiError(error, "Hubo un problema al procesar su solicitud. Intente nuevamente.");
-      // A bad/expired captcha needs a fresh challenge
+      // A rejected challenge (expired, consumed, too fast) needs a fresh one.
       if (/captcha/i.test(message)) {
-        setCaptchaFailed(true);
+        proof.refresh();
       }
       toast({
         title: "Error al enviar reclamación",
@@ -575,12 +561,49 @@ export default function ComplaintForm({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => aiAssist.mutate(form.watch("complaintDetail") || "")}
-                disabled={aiAssist.isPending || (form.watch("complaintDetail") || "").trim().length < 10}
+                onClick={async () => {
+                  // Each accepted call costs money on the upstream model, so the
+                  // endpoint is CAPTCHA-gated: fetch a dedicated challenge for
+                  // this click (the submission keeps its own).
+                  setIsAssistPreparing(true);
+                  try {
+                    const solved = await requestSolvedCaptcha();
+                    aiAssist.mutate(
+                      {
+                        text: form.watch("complaintDetail") || "",
+                        captchaToken: solved.token,
+                        captchaAnswer: solved.solution,
+                      },
+                      {
+                        onError: (error: unknown) =>
+                          toast({
+                            title: "No se pudo revisar el borrador",
+                            description: parseApiError(
+                              error,
+                              "Intente nuevamente en unos segundos."
+                            ),
+                            variant: "destructive",
+                          }),
+                      }
+                    );
+                  } catch (error) {
+                    toast({
+                      title: "No se pudo verificar la solicitud",
+                      description:
+                        error instanceof Error
+                          ? error.message
+                          : "Intente nuevamente en unos segundos.",
+                      variant: "destructive",
+                    });
+                  } finally {
+                    setIsAssistPreparing(false);
+                  }
+                }}
+                disabled={aiAssist.isPending || isAssistPreparing || (form.watch("complaintDetail") || "").trim().length < 10}
                 data-testid="button-ai-review"
               >
                 <span className="material-icons mr-1 text-sm">psychology</span>
-                {aiAssist.isPending ? "Revisando..." : "Revisar mi borrador con IA"}
+                {aiAssist.isPending || isAssistPreparing ? "Revisando..." : "Revisar mi borrador con IA"}
               </Button>
 
               {aiAssist.data && (
@@ -724,29 +747,56 @@ export default function ComplaintForm({
           </CardContent>
         </Card>
 
-        {/* Verification: math CAPTCHA + honeypot (Phase 1.5) */}
+        {/* Verification: proof-of-work CAPTCHA + honeypot (Phase 1.5) */}
         <Card>
           <CardHeader>
             <CardTitle>Verificación de Seguridad</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="captcha-answer" className="mb-1 block">
-                {captcha ? captcha.question : "Cargando verificación..."} *
-              </Label>
-              <Input
-                id="captcha-answer"
-                inputMode="numeric"
-                className="w-32"
-                value={captchaAnswer}
-                onChange={(e) => setCaptchaAnswer(e.target.value)}
-                placeholder="Respuesta"
-                data-testid="input-captcha-answer"
-                aria-required="true"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Ayuda a evitar envíos automatizados de spam.
-              </p>
+            {/* Nothing to answer: the browser solves the puzzle in the
+                background while the form is filled in. Rendered as a status so
+                it is announced by screen readers and needs no input at all. */}
+            <div
+              className="flex items-center gap-2"
+              data-testid="captcha-status"
+              data-status={proof.status}
+              aria-live="polite"
+            >
+              {proof.status === "solving" && (
+                <>
+                  <span className="material-icons text-gray-400 animate-spin">progress_activity</span>
+                  <p className="text-sm text-gray-600">
+                    Verificando que eres una persona… (automático, no requiere ninguna acción)
+                  </p>
+                </>
+              )}
+
+              {proof.status === "ready" && (
+                <>
+                  <span className="material-icons text-green-600">verified_user</span>
+                  <p className="text-sm text-green-700">
+                    Verificación completada automáticamente. No requiere ninguna acción de su parte.
+                  </p>
+                </>
+              )}
+
+              {proof.status === "error" && (
+                <>
+                  <span className="material-icons text-red-600">report_problem</span>
+                  <div className="space-y-2">
+                    <p className="text-sm text-red-600">{proof.error}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={proof.refresh}
+                      data-testid="button-captcha-retry"
+                    >
+                      Reintentar verificación
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Honeypot: invisible to humans, irresistible to bots */}

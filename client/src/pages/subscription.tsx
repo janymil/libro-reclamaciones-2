@@ -4,10 +4,12 @@ import AppLayout from "@/components/layout/app-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import CheckoutDialog from "@/components/payments/checkout-dialog";
+import { UsageMeter } from "@/components/subscription/usage-meter";
+import { useToast } from "@/hooks/use-toast";
 import { usePlans, useSubscription } from "@/hooks/use-subscription";
-import type { PlanDefinition } from "@shared/plans";
+import { buildSubscribeUrl } from "@/lib/subscribe-link";
+import { TRIAL_DAYS, type PlanDefinition } from "@shared/plans";
 
 /**
  * Plan y Cuotas: the sellable SaaS surface. Shows the trial state,
@@ -16,23 +18,6 @@ import type { PlanDefinition } from "@shared/plans";
  * planes + IA en Pro" — competitors limit claims or charge per case.
  * Annual is pre-selected because it saves ~50% vs monthly.
  */
-
-function UsageMeter({ label, used, limit }: { label: string; used: number; limit: number | null }) {
-  const unlimited = limit === null;
-  const percent = unlimited || limit === 0 ? 0 : Math.min(100, Math.round((used / limit) * 100));
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-sm text-gray-600">{label}</span>
-        <span className="text-sm font-medium">
-          {used}{unlimited ? '' : ` / ${limit}`} {unlimited && <span className="text-green-600">· ilimitado</span>}
-        </span>
-      </div>
-      {!unlimited && <Progress value={percent} className="h-2" />}
-    </div>
-  );
-}
 
 function PlanCard({
   plan,
@@ -47,6 +32,27 @@ function PlanCard({
 }) {
   const price = period === 'annual' ? plan.priceAnnual : plan.priceMonthly;
   const isFree = plan.id === 'gratis';
+  const { toast } = useToast();
+
+  /**
+   * The link to hand out (WhatsApp, e-mail, an ad).
+   *
+   * It points at our own page, not at the provider: whoever opens it is asked to
+   * log in first, so the subscription always lands on the right company. That is
+   * why this link can be trusted to activate the plan by itself.
+   */
+  const shareUrl = buildSubscribeUrl(window.location.origin, plan.id, period);
+
+  const copyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      toast({ title: "Enlace copiado", description: shareUrl });
+    } catch {
+      // The clipboard can be blocked (permissions, insecure context). Show the
+      // link instead of losing it.
+      toast({ title: "Copie este enlace", description: shareUrl });
+    }
+  };
 
   return (
     <Card className={isCurrent ? "border-primary ring-2 ring-primary/30" : ""}>
@@ -94,6 +100,19 @@ function PlanCard({
         >
           {isFree ? 'Gratis, no se paga' : isCurrent ? "Plan activo" : `Pagar y activar ${plan.name}`}
         </Button>
+
+        {!isFree && (
+          <Button
+            className="w-full"
+            variant="ghost"
+            size="sm"
+            onClick={copyShareLink}
+            data-testid={`button-copy-subscribe-link-${plan.id}`}
+          >
+            <span className="material-icons mr-1 text-base">link</span>
+            Copiar enlace para compartir
+          </Button>
+        )}
       </CardContent>
     </Card>
   );
@@ -107,6 +126,11 @@ export default function SubscriptionPage() {
 
   const { data: plans } = usePlans();
   const { data: subscription, isLoading } = useSubscription();
+
+  // A finished trial is its own state: without it the header would read like a
+  // plan the customer never bought (the stored plan is "gratis"), and a trial
+  // that was never given an end date used to show "activa - quedan 0 dia(s)".
+  const trialEnded = !!subscription && !subscription.isTrial && subscription.status === 'trial_ended';
 
   const handleSelect = (planId: string) => {
     const plan = (plans ?? []).find((candidate) => candidate.id === planId) ?? null;
@@ -129,11 +153,21 @@ export default function SubscriptionPage() {
                     <CardDescription>
                       {subscription.isTrial
                         ? `Prueba gratuita activa — quedan ${subscription.trialDaysRemaining} día(s). Todas las funciones de Pro desbloqueadas.`
-                        : `Plan ${subscription.plan.name} · ${subscription.planPeriod === 'annual' ? 'anual' : 'mensual'}`}
+                        : trialEnded
+                          ? `Su prueba gratuita de ${TRIAL_DAYS} días terminó. Está en el plan ${subscription.plan.name}: sus reclamos y datos siguen ahí, pero las funciones de Pro requieren un plan pagado.`
+                          : `Plan ${subscription.plan.name} · ${subscription.planPeriod === 'annual' ? 'anual' : 'mensual'}`}
                     </CardDescription>
                   </div>
-                  <Badge className={subscription.isTrial ? "bg-purple-100 text-purple-800" : "bg-green-100 text-green-800"}>
-                    {subscription.isTrial ? "Prueba gratuita" : "Activo"}
+                  <Badge
+                    className={
+                      subscription.isTrial
+                        ? "bg-purple-100 text-purple-800"
+                        : trialEnded
+                          ? "bg-amber-100 text-amber-800"
+                          : "bg-green-100 text-green-800"
+                    }
+                  >
+                    {subscription.isTrial ? "Prueba gratuita" : trialEnded ? "Prueba finalizada" : "Activo"}
                   </Badge>
                 </div>
               </CardHeader>
@@ -203,6 +237,11 @@ export default function SubscriptionPage() {
                 El plan se activa cuando el pago queda confirmado: con tarjeta o
                 Yape suele ser inmediato y, si elige transferencia, un administrador lo confirma en «Pagos».
                 Consejo: el anual ahorra ~50% frente al mensual. Paga 2 años y llévate el 3ro al 50%.
+              </p>
+              <p className="text-xs text-gray-500 text-center">
+                Con «Copiar enlace para compartir» obtiene el enlace de venta de ese plan: quien lo abra inicia
+                sesión o crea su cuenta y vuelve solo al pago, así el plan queda activado en su empresa. Use ese
+                enlace (no uno de Mercado Pago): los enlaces de Mercado Pago no dicen a qué empresa pertenece el pago.
               </p>
             </div>
           </>

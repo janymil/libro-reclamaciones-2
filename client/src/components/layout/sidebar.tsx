@@ -47,21 +47,9 @@ const navigationSections: NavigationSection[] = [
     ]
   },
   {
-    title: 'EMPRESAS',
-    items: [
-      {
-        name: 'Empresas',
-        href: '/empresas',
-        icon: 'business'
-      },
-      {
-        name: 'Sucursales',
-        href: '/sucursales',
-        icon: 'share'
-      }
-    ]
-  },
-  {
+    // The book itself: where it lives (sucursales), what it is made of (libros)
+    // and how consumers reach it (QR / enlace).
+    title: 'LIBRO DE RECLAMACIONES',
     items: [
       {
         name: 'Libros',
@@ -69,10 +57,23 @@ const navigationSections: NavigationSection[] = [
         icon: 'menu_book'
       },
       {
+        name: 'Sucursales',
+        href: '/sucursales',
+        icon: 'share'
+      },
+      {
         name: 'QR y enlace web',
         href: '/codigo-qr',
         icon: 'qr_code_2'
-      },
+      }
+    ]
+  },
+  {
+    // Settings of the app's own output (templates, branding, integration rails).
+    // Company and team administration does NOT live here: that is the tenant's
+    // data and belongs to "Cuenta" (see the groups below).
+    title: 'CONFIGURACIÓN',
+    items: [
       {
         name: 'Personalización',
         href: '/personalizacion',
@@ -86,22 +87,24 @@ const navigationSections: NavigationSection[] = [
     ]
   },
   {
-    title: 'USUARIOS',
-    items: [
-      {
-        name: 'Usuarios',
-        href: '/usuarios',
-        icon: 'people'
-      }
-    ]
-  },
-  {
+    // Everything about "who we are and what we pay for": the person, the tenants
+    // they manage, their team and the subscription.
     title: 'CUENTA',
     items: [
       {
         name: 'Mi Perfil',
         href: '/perfil',
         icon: 'account_circle'
+      },
+      {
+        name: 'Empresas',
+        href: '/empresas',
+        icon: 'business'
+      },
+      {
+        name: 'Usuarios',
+        href: '/usuarios',
+        icon: 'people'
       },
       {
         name: 'Plan y Cuotas',
@@ -140,7 +143,7 @@ export default function Sidebar({ className }: SidebarProps) {
             </span>
             <span className="min-w-0">
               <span className="block font-display text-[17px] font-semibold leading-none tracking-tight text-[#1b1611]">
-                LibroVirtual<span className="text-[#c02b0a]">.pe</span>
+                LibroDigital<span className="text-[#c02b0a]">.pe</span>
               </span>
               <span className="mt-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-[#5c5246]">
                 Gestión legal

@@ -11,3 +11,12 @@ vite.config.ts.*
 backups/
 # Evidence attachments uploaded by consumers (Phase 1.1)
 uploads/
+
+# Playwright: reports, traces and the cached demo session (e2e/.auth/demo.json)
+test-results/
+playwright-report/
+e2e/.auth/
+
+# Captured test output pasted/redirected to a file (local only, never source)
+final-run.txt
+

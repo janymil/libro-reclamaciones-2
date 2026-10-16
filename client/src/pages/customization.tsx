@@ -142,7 +142,7 @@ export default function CustomizationPage() {
           <CardHeader>
             <CardTitle>Plantillas y voz de marca</CardTitle>
             <CardDescription>
-              Todo es opcional: sin configurar se usan los textos estándar de LibroVirtual.pe.
+              Todo es opcional: sin configurar se usan los textos estándar de LibroDigital.pe.
               Las plantillas de correo y el color requieren plan Pro; la voz de la IA está disponible
               con la IA activa.
             </CardDescription>

@@ -17,6 +17,16 @@ export interface PlanErrorInfo {
   message: string;
 }
 
+export interface ApiErrorInfo extends PlanErrorInfo {
+  /**
+   * Field-level messages from a 400 Zod rejection (`errors[].message`).
+   *
+   * "Datos inválidos" on its own tells the customer nothing about which field
+   * is wrong, which is how a 6-character password looked like a random failure.
+   */
+  fieldErrors: string[];
+}
+
 export const UPGRADE_PATH = '/plan';
 
 /** Every code the API uses when the plan (not the request) is the problem. */
@@ -34,27 +44,55 @@ export const PLAN_ERROR_CODES = [
  * alone is still enough to know this was a plan rejection, and the caller then
  * uses its own sentence instead of leaking HTML into a toast.
  */
-export function parsePlanError(error: unknown): PlanErrorInfo {
+export function parseApiError(error: unknown): ApiErrorInfo {
   const raw =
     error instanceof Error ? error.message : typeof error === 'string' ? error : '';
   const match = raw.match(/^(\d{3}):\s*([\s\S]*)$/);
 
   if (!match) {
-    return { status: null, code: null, message: raw };
+    return { status: null, code: null, message: raw, fieldErrors: [] };
   }
 
   const status = Number(match[1]);
 
   try {
-    const body = JSON.parse(match[2]) as { message?: unknown; code?: unknown };
+    const body = JSON.parse(match[2]) as {
+      message?: unknown;
+      code?: unknown;
+      errors?: Array<{ message?: unknown }>;
+    };
+
     return {
       status,
       code: typeof body.code === 'string' ? body.code : null,
       message: typeof body.message === 'string' ? body.message : '',
+      fieldErrors: Array.isArray(body.errors)
+        ? body.errors
+            .map((entry) => (typeof entry?.message === 'string' ? entry.message : ''))
+            .filter((entry) => entry.length > 0)
+        : [],
     };
   } catch {
-    return { status, code: null, message: '' };
+    return { status, code: null, message: '', fieldErrors: [] };
   }
+}
+
+/**
+ * Reads the `"402: {"message":"…","code":"…"}"` string that `apiRequest`
+ * throws (see lib/queryClient.ts) and returns its parts.
+ *
+ * A 402 from a proxy or a load balancer may carry a non-JSON body; the status
+ * alone is still enough to know this was a plan rejection, and the caller then
+ * uses its own sentence instead of leaking HTML into a toast.
+ */
+export function parsePlanError(error: unknown): PlanErrorInfo {
+  const { status, code, message } = parseApiError(error);
+  return { status, code, message };
+}
+
+/** The field-level messages of a rejected form, ready to show to the customer. */
+export function apiFieldErrors(error: unknown): string[] {
+  return parseApiError(error).fieldErrors;
 }
 
 /** True when the request was rejected because of the plan or one of its limits. */

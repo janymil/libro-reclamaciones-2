@@ -167,5 +167,54 @@ export const authStorage = {
       .where(eq(users.id, userId));
   },
 
+  // One-time login code ("entra con un código por email")
+
+  /**
+   * Stores a fresh code. Issuing a new one always resets the attempt counter, so
+   * a code that was being guessed cannot hand its exhausted counter to the code
+   * the user just asked for.
+   */
+  async setLoginCode(userId: string, codeHash: string, expires: Date): Promise<void> {
+    await db
+      .update(users)
+      .set({
+        loginCodeHash: codeHash,
+        loginCodeExpires: expires,
+        loginCodeAttempts: 0,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  },
+
+  /**
+   * Consumes (or burns) the code. Called on a successful sign-in, when the code
+   * has been guessed too many times, and on account lockout - all three mean the
+   * same thing: this code must never work again.
+   */
+  async clearLoginCode(userId: string): Promise<void> {
+    await db
+      .update(users)
+      .set({
+        loginCodeHash: null,
+        loginCodeExpires: null,
+        loginCodeAttempts: 0,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  },
+
+  async registerFailedLoginCodeAttempt(userId: string): Promise<number> {
+    const [row] = await db
+      .update(users)
+      .set({
+        loginCodeAttempts: sql`${users.loginCodeAttempts} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+      .returning({ attempts: users.loginCodeAttempts });
+
+    return row?.attempts ?? 0;
+  },
+
   // Libro configuration for onboarding step 2
 };

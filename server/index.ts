@@ -2,6 +2,7 @@ import "./env";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { isPubliclyReachableBaseUrl } from "@shared/payments";
 import { setupRUCLookup } from "./ruc-lookup";
 import { startScheduler } from "./services/scheduler";
 
@@ -38,6 +39,23 @@ app.use((req, res, next) => {
   setupRUCLookup(app);
   
   const server = await registerRoutes(app);
+
+  // The exact address to paste into the Mercado Pago panel, printed once at boot.
+  // Guessing it is a common source of "the plan never activates": the panel needs
+  // the same base URL the app builds its notifications and return URLs from.
+  const configuredAppUrl = process.env.APP_URL?.trim().replace(/\/+$/, '');
+  if (!configuredAppUrl) {
+    log('[payments] APP_URL is not set: Mercado Pago notifications will not work.');
+  } else {
+    log(`[payments] Mercado Pago webhook to register: ${configuredAppUrl}/api/payments/webhook/mercadopago`);
+    if (!isPubliclyReachableBaseUrl(configuredAppUrl)) {
+      log(
+        `[payments] WARNING: APP_URL "${configuredAppUrl}" is not a public HTTPS address, so ` +
+          'Mercado Pago cannot deliver payment notifications there. Use a public tunnel (ngrok, ' +
+          'cloudflared) while developing, and the real domain in production.',
+      );
+    }
+  }
 
   // Background jobs: 2-year retention sweep (daily) + SLA monitoring (hourly)
   startScheduler();

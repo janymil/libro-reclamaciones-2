@@ -348,7 +348,7 @@ Considera la gravedad, la urgencia legal y el impacto reputacional.`,
    *
    * `businessContext` (Phase 3.10) carries the business's own brand tone and
    * policies so drafts read like the company wrote them, not a generic
-   * template - the differentiator librovirtual promises but has not built.
+   * template - the differentiator librodigital promises but has not built.
    */
   async suggestResponse(
     complaintText: string,

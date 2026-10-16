@@ -6,6 +6,7 @@ import type {
   User, 
   UserRegistration, 
   LoginData,
+  LoginCodeData,
   InsertAuthAuditLog,
   InsertLoginAttempt 
 } from '@shared/schema';
@@ -18,6 +19,10 @@ const PASSWORD_LENGTH = 12;
 const PASSWORD_RESET_TTL_MINUTES = 60;
 /** Lifetime of an email-verification link (the email says "24 horas"). */
 const EMAIL_VERIFICATION_TTL_MINUTES = 24 * 60;
+/** Lifetime of a login code (the email says "10 minutos"). */
+const LOGIN_CODE_TTL_MINUTES = 10;
+/** Wrong codes tolerated for one code before it is burned. */
+const MAX_LOGIN_CODE_ATTEMPTS = 5;
 
 export class AuthService {
   
@@ -360,8 +365,9 @@ export class AuthService {
         { onboardingStep: user.onboardingStep, onboardingCompleted: user.onboardingCompleted }
       );
 
-      // Return user without password
-      const { password: _, ...userWithoutPassword } = user;
+      // Return the user without any credential material: neither the password
+      // hash nor the one-time login code (hash + expiry) ever leave the server.
+      const { password: _, loginCodeHash: _codeHash, loginCodeExpires: _codeExpires, ...userWithoutPassword } = user;
       return { success: true, message: "Login exitoso", user: userWithoutPassword as User };
 
     } catch (error) {
@@ -390,6 +396,172 @@ export class AuthService {
       userAgent,
       userId
     );
+  }
+
+  // ---- Code login ("entra con un código por email") --------------------------
+
+  /** Six digits from the CSPRNG: 1,000,000 combinations, valid for minutes. */
+  private generateLoginCode(): string {
+    return randomInt(0, 1_000_000).toString().padStart(6, '0');
+  }
+
+  /**
+   * Step 1 of the code login: email a single-use code.
+   *
+   * Answers exactly the same thing for a known and an unknown address (account
+   * enumeration), and swallows delivery failures for the same reason: the
+   * caller's response must never depend on whether the account exists.
+   */
+  async requestLoginCode(email: string, ipAddress: string, userAgent: string): Promise<void> {
+    try {
+      const user = await storage.getUserByEmail(email);
+
+      // A deactivated account gets no code, exactly like it gets no reset link.
+      if (!user || !user.isActive) {
+        await this.logAuthEvent(
+          'login_code_blocked',
+          email,
+          false,
+          ipAddress,
+          userAgent,
+          undefined,
+          'no_active_account',
+        );
+        return;
+      }
+
+      const code = this.generateLoginCode();
+      const codeHash = await this.hashPassword(code);
+      const expires = new Date(Date.now() + LOGIN_CODE_TTL_MINUTES * 60 * 1000);
+
+      await storage.setLoginCode(user.id, codeHash, expires);
+      await emailService.sendLoginCode(user.email, user.firstName, code, LOGIN_CODE_TTL_MINUTES);
+      await this.logAuthEvent('login_code_requested', user.email, true, ipAddress, userAgent, user.id);
+    } catch (error) {
+      console.error('[auth] login code request failed:', error);
+      await this.logAuthEvent(
+        'login_code_error',
+        email,
+        false,
+        ipAddress,
+        userAgent,
+        undefined,
+        error instanceof Error ? error.message : 'unknown_error',
+      );
+    }
+  }
+
+  /**
+   * Step 2 of the code login: exchange the code for a session.
+   *
+   * Same guards as the password path (recent failures, lockout, inactive
+   * account) so neither route can be used to sidestep the other's throttling,
+   * and the code is single-use: cleared on success AND once it has been guessed
+   * too many times, so a leaked mailbox cannot be brute-forced over its
+   * ten-minute lifetime.
+   */
+  async loginWithCode(
+    loginData: LoginCodeData,
+    ipAddress: string,
+    userAgent: string,
+  ): Promise<{ success: boolean; message: string; user?: User }> {
+    try {
+      // The failure counter belongs to the account, not to the method used to
+      // attack it, so both login routes share it.
+      const recentFailedAttempts = await this.getRecentFailedAttempts(loginData.email, ipAddress);
+      if (recentFailedAttempts >= MAX_LOGIN_ATTEMPTS) {
+        await this.logLoginAttempt(loginData.email, ipAddress, userAgent, false, 'rate_limited');
+        return { success: false, message: "Demasiados intentos fallidos. Intenta más tarde." };
+      }
+
+      if (await this.isAccountLocked(loginData.email)) {
+        await this.logLoginAttempt(loginData.email, ipAddress, userAgent, false, 'account_locked');
+        return { success: false, message: "Cuenta temporalmente bloqueada. Intenta más tarde." };
+      }
+
+      const user = await storage.getUserByEmail(loginData.email);
+      if (!user) {
+        await this.logLoginAttempt(loginData.email, ipAddress, userAgent, false, 'user_not_found');
+        return { success: false, message: "Credenciales inválidas" };
+      }
+
+      if (!user.isActive) {
+        await this.logLoginAttempt(loginData.email, ipAddress, userAgent, false, 'user_inactive');
+        return { success: false, message: "Cuenta desactivada. Contacta al soporte." };
+      }
+
+      const codeIsValid =
+        !!user.loginCodeHash &&
+        !!user.loginCodeExpires &&
+        user.loginCodeExpires.getTime() > Date.now() &&
+        (await this.verifyPassword(loginData.code, user.loginCodeHash));
+
+      if (!codeIsValid) {
+        const attempts = await storage.registerFailedLoginCodeAttempt(user.id);
+        await storage.incrementFailedLoginAttempts(user.id);
+
+        // Too many wrong tries for one code: burn it, whatever its remaining
+        // lifetime says.
+        if (attempts >= MAX_LOGIN_CODE_ATTEMPTS) {
+          await storage.clearLoginCode(user.id);
+        }
+
+        // Same lockout policy as a wrong password.
+        if (user.failedLoginAttempts + 1 >= MAX_LOGIN_ATTEMPTS) {
+          const lockUntil = new Date(Date.now() + LOCKOUT_DURATION_MINUTES * 60 * 1000);
+          await storage.lockUserAccount(user.id, lockUntil);
+          await storage.clearLoginCode(user.id);
+
+          void emailService
+            .sendAccountLockedNotification(user.email, user.firstName, lockUntil)
+            .catch((error) => console.error('[email] account-locked notification failed:', error));
+        }
+
+        await this.logLoginAttempt(loginData.email, ipAddress, userAgent, false, 'invalid_login_code');
+        await this.logAuthEvent('login_code_failed', loginData.email, false, ipAddress, userAgent, user.id, 'invalid_code');
+        return { success: false, message: "El código es incorrecto o ya venció. Solicita uno nuevo." };
+      }
+
+      // Single use, plus the same successful-login bookkeeping as the password
+      // path, so the audit trail reads the same either way.
+      await storage.clearLoginCode(user.id);
+      await storage.resetFailedLoginAttempts(user.id);
+      await storage.updateLastLogin(user.id);
+
+      void emailService
+        .sendLoginNotification(user.email, user.firstName, ipAddress, userAgent)
+        .catch((error) => console.error('[email] login notification failed:', error));
+
+      await this.logLoginAttempt(loginData.email, ipAddress, userAgent, true);
+      await this.logAuthEvent(
+        'login_success',
+        loginData.email,
+        true,
+        ipAddress,
+        userAgent,
+        user.id,
+        undefined,
+        {
+          method: 'email_code',
+          onboardingStep: user.onboardingStep,
+          onboardingCompleted: user.onboardingCompleted,
+        },
+      );
+
+      const { password: _, loginCodeHash: _codeHash, loginCodeExpires: _codeExpires, ...userWithoutPassword } = user;
+      return { success: true, message: "Login exitoso", user: userWithoutPassword as User };
+    } catch (error) {
+      await this.logAuthEvent(
+        'login_error',
+        loginData.email,
+        false,
+        ipAddress,
+        userAgent,
+        undefined,
+        error instanceof Error ? error.message : 'unknown_error',
+      );
+      throw error;
+    }
   }
 
   /**
@@ -602,7 +774,9 @@ export class AuthService {
       return null;
     }
 
-    const { password: _, ...userWithoutPassword } = user;
+    // Credential material is stripped before the row becomes `req.user`: it
+    // reaches /api/auth/user on every page load.
+    const { password: _, loginCodeHash: _codeHash, loginCodeExpires: _codeExpires, ...userWithoutPassword } = user;
     return userWithoutPassword as User;
   }
 }

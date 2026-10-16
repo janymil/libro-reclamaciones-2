@@ -14,7 +14,7 @@ import ws from "ws";
  */
 neonConfig.webSocketConstructor = ws;
 
-const DEMO_EMAIL = process.env.DEMO_EMAIL || "demo@librovirtual.pe";
+const DEMO_EMAIL = process.env.DEMO_EMAIL || "demo@librodigital.pe";
 const DEMO_PASSWORD = process.env.DEMO_PASSWORD || "Demo2026!";
 const DEMO_BUSINESS_ID = process.env.DEMO_BUSINESS_ID || "d9c631c2-b7d7-47de-b672-be95ca1acfd3";
 const DEMO_SLUG = process.env.DEMO_SLUG || "empresa-demo";

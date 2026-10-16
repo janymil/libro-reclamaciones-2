@@ -6,6 +6,7 @@ import { businessDayCalculator } from "../services/businessDayCalculator";
 import { storage } from "../storage";
 import { requireAuth } from "../middleware/requireAuth";
 import { arcoLimiter } from "../middleware/rateLimits";
+import { consumeCaptchaToken, verifyCaptcha } from "../services/captchaService";
 
 /**
  * ARCO requests (Ley 29733 personal data rights).
@@ -22,11 +23,22 @@ export function registerArcoRoutes(app: Express): void {
     }
   });
 
-  // Public intake (unauthenticated by design): rate-limited, and the target
-  // business must exist and be active - otherwise anyone could attach PII
-  // requests (and in-app notifications) to arbitrary or nonexistent tenants.
+  // Public intake (unauthenticated by design): rate-limited, gated by the
+  // proof-of-work CAPTCHA, and the target business must exist and be active -
+  // otherwise anyone could attach PII requests (and in-app notifications) to
+  // arbitrary or nonexistent tenants.
+  //
+  // Unlike the consumer portal, this endpoint has no page to render the puzzle
+  // on: a caller fetches GET /api/public/captcha and posts the solved nonce as
+  // `captchaToken`/`captchaAnswer`, so it is expected to solve and submit
+  // immediately (the dwell-time rule is off - see captchaService).
   app.post('/api/arco-requests', arcoLimiter, async (req, res) => {
     try {
+      const captcha = verifyCaptcha(req.body?.captchaToken, req.body?.captchaAnswer);
+      if (!captcha.ok) {
+        return res.status(400).json({ message: captcha.reason, code: "captcha_invalid" });
+      }
+
       // Only the requester's own fields: status/response/dueDate are managed
       // by the business and the server, never by the public caller.
       const data = insertArcoRequestSchema
@@ -45,6 +57,9 @@ export function registerArcoRoutes(app: Express): void {
         ...data,
         dueDate,
       });
+
+      // The challenge is single-use: burn it now that it produced a record.
+      consumeCaptchaToken(req.body.captchaToken);
 
       // Notify business
       await storage.createNotification({

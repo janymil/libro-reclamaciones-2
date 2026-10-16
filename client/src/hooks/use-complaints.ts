@@ -227,11 +227,27 @@ export interface ConsumerAssistanceResult {
   source: 'ai' | 'fallback';
 }
 
-/** Consumer-side form assistant (public endpoint, no auth). */
+/** Consumer-side form assistant (public endpoint, no auth).
+ *
+ * Carries its own solved CAPTCHA: the server spends money on every accepted
+ * call, so the endpoint refuses a request that does not prove the work. The
+ * caller solves one puzzle per click (they are single-use). */
 export function useAIPublicAssist() {
   return useMutation({
-    mutationFn: async (text: string) => {
-      const response = await apiRequest('POST', '/api/ai/public/assist', { text });
+    mutationFn: async ({
+      text,
+      captchaToken,
+      captchaAnswer,
+    }: {
+      text: string;
+      captchaToken: string;
+      captchaAnswer: string;
+    }) => {
+      const response = await apiRequest('POST', '/api/ai/public/assist', {
+        text,
+        captchaToken,
+        captchaAnswer,
+      });
       return response.json() as Promise<ConsumerAssistanceResult>;
     },
   });

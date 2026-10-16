@@ -1,9 +1,23 @@
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
-// Rate limiting for authentication routes
+/**
+ * Login attempts (the password form and the one-time-code form share it).
+ *
+ * Relaxed to 500 per window ONLY when the process was explicitly told to: local
+ * development and the e2e suite run through `npm run dev`, which sets
+ * `RATE_LIMIT_RELAXED=true`. Production never sets it, so the limit there is 5.
+ *
+ * Do not derive this from `NODE_ENV`. `NODE_ENV !== "production"` is true for an
+ * unset, misspelled or platform-specific value, so a single misconfigured
+ * deployment would silently raise the login ceiling 100x: unlimited password
+ * guessing, and nobody notices because every login still works. An explicit
+ * opt-in fails closed instead - strict unless someone deliberately relaxed it.
+ */
+const RELAXED_LIMITS = process.env.RATE_LIMIT_RELAXED === "true";
+
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Maximum 5 attempts per window
+  max: RELAXED_LIMITS ? 500 : 5,
   message: { message: "Demasiados intentos de login. Intenta en 15 minutos." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -63,7 +77,10 @@ export const evidenceUploadLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// CAPTCHA challenge issuance (Phase 1.5): cheap but unauthenticated.
+// CAPTCHA challenge issuance (Phase 1.5): cheap but unauthenticated. Shared by
+// every public flow that needs it - complaint intake, the public AI assistant,
+// ARCO intake and registration - so the ceiling is per source address, not per
+// form: one office behind a single NAT still has room for several visitors.
 export const captchaLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,
@@ -72,9 +89,32 @@ export const captchaLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Public complaint submission: the math CAPTCHA slows bots down but its
-// stateless token can be reused inside its 10-minute window, so the endpoint
-// itself is throttled too.
+/**
+ * Public complaint tracking (`/api/public/libro/:slug/consultar/:correlative`).
+ *
+ * The correlative is sequential and the only other key is the consumer's
+ * document number, so an unthrottled endpoint is a lookup oracle: walk the
+ * correlativos, guess an 8-digit DNI, read somebody else's complaint. Keyed per
+ * source + book so one noisy caller cannot lock every tenant's portal, and
+ * `documento` is required by the route so a guess still needs both halves.
+ *
+ * `ipKeyGenerator` (not `req.ip`) is what makes the source half trustworthy: a
+ * raw IPv6 address would let one caller walk through its own /64 and reset the
+ * counter on every request.
+ */
+export const consultaRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30, // Maximum 30 lookups per book per source address
+  keyGenerator: (req: any) =>
+    `consulta:${ipKeyGenerator(req.ip ?? "0.0.0.0")}:${req.params?.slug ?? "unknown"}`,
+  message: { message: "Demasiadas consultas. Intenta en 15 minutos." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Public complaint submission: gated by the proof-of-work CAPTCHA (whose token
+// is single-use, consumed when a record is created) and throttled anyway, so a
+// spam wave has to pay twice: CPU per attempt, then this ceiling per address.
 export const publicComplaintLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 20, // Maximum 20 complaint submissions per window per IP

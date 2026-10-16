@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Restablecer la aplicación · LibroDigital.pe</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: #f7f2e8;
+        color: #1b1611;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      main {
+        width: 100%;
+        max-width: 32rem;
+        border: 1px solid #e3d9c6;
+        border-radius: 12px;
+        background: #fdfaf3;
+        padding: 28px;
+        box-shadow: 0 24px 60px -30px rgba(27, 22, 17, 0.35);
+      }
+      h1 { margin: 0 0 8px; font-size: 22px; }
+      p { margin: 0 0 12px; line-height: 1.6; color: #5c5246; }
+      code { background: #f3eadc; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+      #details { font-size: 13px; color: #8a7d6d; }
+      button {
+        margin-top: 8px;
+        border: 0;
+        border-radius: 999px;
+        background: #c02b0a;
+        color: #fff;
+        font-size: 15px;
+        font-weight: 600;
+        padding: 12px 22px;
+        cursor: pointer;
+      }
+      #manual { margin-top: 18px; border-top: 1px dashed #e3d9c6; padding-top: 14px; display: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Restablecer la aplicación</h1>
+      <p>
+        Este navegador guardó una copia del panel (un <em>service worker</em>) y a veces sigue
+        mostrándola aunque el servidor ya tenga la versión nueva. Esta página la borra y vuelve a
+        entrar.
+      </p>
+      <p id="status" role="status">Limpiando la copia guardada…</p>
+      <p id="details"></p>
+      <button id="retry" type="button" onclick="location.replace('/')">Entrar a la aplicación</button>
+
+      <div id="manual">
+        <p>
+          Si sigue viendo la versión antigua, ábrala en una <strong>ventana de incógnito</strong> (no
+          usa copias guardadas) o vacíe los datos del sitio desde DevTools →
+          <code>Application</code> → <code>Storage</code> → <em>Clear site data</em>.
+        </p>
+      </div>
+    </main>
+
+    <script>
+      /**
+       * Kill-switch for a stale service worker.
+       *
+       * This file exists because a worker registered by an earlier build keeps
+       * answering navigations with its cached shell, and a page served BY that
+       * shell can never carry the fix. A URL this worker has never seen is
+       * fetched from the network instead (cache miss), so its inline script gets
+       * to run: unregister every worker on this origin, delete every cache it
+       * filled, then load the app again.
+       *
+       * See client/src/main.tsx (dev unregisters on boot) and client/public/sw.js
+       * (v2: documents are network-first, so this should not be needed again).
+       */
+      (async function reset() {
+        const status = document.getElementById('status');
+        const details = document.getElementById('details');
+        const retry = document.getElementById('retry');
+        const manual = document.getElementById('manual');
+        const steps = [];
+
+        // A stuck user must always have a way out, even if the cleanup itself fails.
+        const escapeHatch = setTimeout(() => {
+          manual.style.display = 'block';
+        }, 4000);
+
+        try {
+          if ('serviceWorker' in navigator) {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            steps.push(registrations.length + ' service worker(s)');
+            await Promise.all(registrations.map((registration) => registration.unregister()));
+          }
+
+          if ('caches' in window) {
+            const keys = await caches.keys();
+            steps.push(keys.length + ' caché(s)');
+            await Promise.all(keys.map((key) => caches.delete(key)));
+          }
+
+          clearTimeout(escapeHatch);
+          details.textContent = steps.length ? 'Limpiado: ' + steps.join(' · ') : 'No había nada que limpiar.';
+          status.textContent = 'Listo. Abriendo la aplicación actualizada…';
+          setTimeout(() => location.replace('/'), 700);
+        } catch (error) {
+          clearTimeout(escapeHatch);
+          manual.style.display = 'block';
+          status.textContent = 'No se pudo limpiar automáticamente.';
+          details.textContent = error && error.message ? error.message : String(error);
+        }
+      })();
+    </script>
+  </body>
+</html>

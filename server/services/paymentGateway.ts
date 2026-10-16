@@ -141,6 +141,22 @@ export interface SubscriptionState {
   nextPaymentAt?: Date;
   /** The recurring amount the provider confirms, in céntimos. */
   amountCents?: number;
+  /** Billing period, derived from the provider's own frequency. */
+  period?: PlanPeriod;
+  /**
+   * Our own code (Mercado Pago `external_reference`). For a subscription this app
+   * created it is the `LV-XXXXXX` reference; for one bought through a plan link it
+   * is the plan's panel code - which is how an unknown subscription is recognised.
+   */
+  externalReference?: string;
+  /**
+   * The payer's Mercado Pago account email. Used ONLY to match a subscription the
+   * app did not create to the account that paid for it. Kept out of `raw` on
+   * purpose, so the stored provider payload holds no personal data.
+   */
+  payerEmail?: string;
+  /** Set when the subscription came from a plan created in the panel. */
+  planRef?: string;
   raw: Record<string, unknown>;
 }
 
@@ -204,7 +220,7 @@ export function mercadopagoPreferenceBody(input: CheckoutInput): Record<string, 
     ],
     payer: { email: input.payerEmail },
     external_reference: input.reference,
-    statement_descriptor: "LIBROVIRTUAL",
+    statement_descriptor: "LIBRODIGITAL",
     notification_url: input.notificationUrl,
     back_urls: {
       success: input.successUrl,
@@ -367,6 +383,7 @@ export function sanitizeMercadoPagoPreapproval(payload: Record<string, unknown>)
     id: payload.id,
     status: payload.status,
     external_reference: payload.external_reference,
+    preapproval_plan_id: payload.preapproval_plan_id,
     frequency: auto.frequency,
     frequency_type: auto.frequency_type,
     transaction_amount: auto.transaction_amount,
@@ -374,6 +391,23 @@ export function sanitizeMercadoPagoPreapproval(payload: Record<string, unknown>)
     date_created: payload.date_created,
     last_modified: payload.last_modified,
   };
+}
+
+/**
+ * Billing period derived from the provider's frequency (so we never assume
+ * monthly for a yearly plan the customer actually bought).
+ */
+export function periodFromRecurrence(frequency: unknown, frequencyType: unknown): PlanPeriod {
+  const amount = Number(frequency);
+  const type = String(frequencyType ?? "").toLowerCase();
+
+  if (type === "years") {
+    return "annual";
+  }
+  if (type === "months" && Number.isFinite(amount) && amount >= 12) {
+    return "annual";
+  }
+  return "monthly";
 }
 
 /** Mercado Pago's preapproval vocabulary mapped onto our own. */
@@ -414,6 +448,14 @@ export function parseMercadoPagoPreapproval(json: unknown): SubscriptionState & 
   const amount = auto.transaction_amount;
   const initPoint = typeof payload.init_point === "string" ? payload.init_point : undefined;
 
+  const externalReference =
+    typeof payload.external_reference === "string" ? payload.external_reference : undefined;
+  const payerEmail = typeof payload.payer_email === "string" ? payload.payer_email : undefined;
+  const planRef =
+    payload.preapproval_plan_id === undefined || payload.preapproval_plan_id === null
+      ? undefined
+      : String(payload.preapproval_plan_id);
+
   return {
     providerRef,
     status: mapMercadoPagoSubscriptionStatus(payload.status),
@@ -422,7 +464,13 @@ export function parseMercadoPagoPreapproval(json: unknown): SubscriptionState & 
     nextPaymentAt:
       parseOptionalDate(payload.next_payment_date) ?? parseOptionalDate(auto.next_payment_date),
     amountCents: typeof amount === "number" ? Math.round(amount * 100) : undefined,
+    period: periodFromRecurrence(auto.frequency, auto.frequency_type),
+    externalReference,
+    payerEmail,
+    planRef,
     initPoint,
+    // `raw` is the sanitized copy: the payer email above is used for matching and
+    // never written into the stored provider payload.
     raw: sanitizeMercadoPagoPreapproval(payload),
   };
 }

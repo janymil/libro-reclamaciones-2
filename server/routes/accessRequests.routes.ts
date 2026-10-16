@@ -39,7 +39,7 @@ export function registerAccessRequestRoutes(app: Express): void {
         // document, so "that RUC is not registered here" is the useful answer.
         if (!business) {
           return res.status(404).json({
-            message: "No existe una empresa con ese RUC en LibroVirtual.pe. Regístrala como empresa nueva.",
+            message: "No existe una empresa con ese RUC en LibroDigital.pe. Regístrala como empresa nueva.",
             code: "ruc_not_found",
           });
         }

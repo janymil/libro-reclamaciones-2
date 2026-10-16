@@ -8,10 +8,11 @@ import {
   isPaymentProviderId,
   isPaymentStatus,
   isPlanPeriod,
+  planAmountCents,
   type PaymentProviderId,
   type PlanPeriod,
 } from "@shared/payments";
-import { isPlanId } from "@shared/plans";
+import { getPlan, isPlanId } from "@shared/plans";
 import type { Payment, Subscription } from "@shared/schema";
 
 import { storage } from "../storage";
@@ -184,6 +185,16 @@ export function registerPaymentsRoutes(app: Express): void {
       }
       if (!isPlanPeriod(period)) {
         return res.status(400).json({ message: "Periodo inválido" });
+      }
+
+      // The free plan is chosen, not bought. Saying so beats asking the provider
+      // to charge S/ 0 and reporting its rejection as a gateway failure.
+      const selectedPlan = getPlan(plan);
+      if (planAmountCents(selectedPlan.id, period) <= 0) {
+        return res.status(400).json({
+          message: `El plan ${selectedPlan.name} es gratuito: no necesita ningún pago.`,
+          code: "plan_is_free",
+        });
       }
       if (!isPaymentProviderId(provider)) {
         return res.status(400).json({ message: "Método de pago inválido" });

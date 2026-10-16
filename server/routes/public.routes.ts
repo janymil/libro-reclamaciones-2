@@ -2,8 +2,9 @@ import type { Express } from "express";
 
 import { getAllowedComplaintTypes, getEffectivePlan } from "@shared/plans";
 import { storage } from "../storage";
-import { captchaLimiter } from "../middleware/rateLimits";
+import { captchaLimiter, consultaRateLimiter } from "../middleware/rateLimits";
 import { issueCaptcha } from "../services/captchaService";
+import { isBusinessPublished } from "../services/verificationService";
 
 /**
  * Consumer facing endpoints. Deliberately unauthenticated: only public-safe fields are returned.
@@ -30,6 +31,12 @@ export function registerPublicRoutes(app: Express): void {
 
       const establishments = await storage.getEstablishmentsByBusiness(business.id);
 
+      // Whether the public book accepts complaints at all: a tenant whose
+      // administrator never confirmed the notification mailbox is not published
+      // (see services/verificationService.ts). The portal shows this instead of
+      // a form that the intake route would reject.
+      const acceptingComplaints = await isBusinessPublished(business.id);
+
       res.json({
         libro: {
           name: config.libroName,
@@ -37,6 +44,7 @@ export function registerPublicRoutes(app: Express): void {
           whatsappNumber: config.whatsappNumber,
           websiteUrl: config.websiteUrl,
           logoUrl: config.logoUrl,
+          acceptingComplaints,
           // NOTE: the business's notification inbox is deliberately NOT exposed
           // publicly any more - it is internal contact data that only enabled
           // scraping/spam. The consumer-facing portal never displayed it.
@@ -69,8 +77,14 @@ export function registerPublicRoutes(app: Express): void {
     }
   });
 
-  // Public tracking of a registered complaint (requires correlative + document)
-  app.get('/api/public/libro/:slug/consultar/:correlative', async (req, res) => {
+  // Public tracking of a registered complaint (requires correlative + document).
+  //
+  // Throttled because it is the one public read that takes *two* guessable
+  // values (the correlative is sequential, the document number is short): with
+  // no ceiling it doubles as an oracle for other consumers' complaints. The
+  // 404 below is deliberately identical for "no such folio" and "wrong
+  // document", so a caller cannot even learn which half was right.
+  app.get('/api/public/libro/:slug/consultar/:correlative', consultaRateLimiter, async (req, res) => {
     try {
       const config = await storage.getLibroConfigurationBySlug(req.params.slug);
       if (!config) {

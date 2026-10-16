@@ -13,11 +13,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Plus, Building2, MapPin, Users, Settings, Save, MailQuestion, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
-import { insertBusinessSchema, type InsertBusiness } from '@shared/schema';
+import { Plus, Building2, MapPin, Users, Settings, Save, MailQuestion, CheckCircle2, XCircle, Loader2, Trash2 } from 'lucide-react';
+import { businessProfileSchema, type BusinessProfile, type InsertBusiness } from '@shared/schema';
 import type { BusinessSummary } from '@/lib/api-types';
 import { useToast } from '@/hooks/use-toast';
 import { useUpgradeToast } from '@/hooks/use-plan-upgrade';
+import { useSubscription } from '@/hooks/use-subscription';
+import { PlanLockedAction, PlanUsageHint, planLimitReason } from '@/components/subscription/plan-limit';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/hooks/use-auth';
 
 export default function Businesses() {
@@ -38,9 +41,27 @@ export default function Businesses() {
     queryKey: ['/api/businesses'],
   });
 
-  const form = useForm<InsertBusiness>({
-    resolver: zodResolver(insertBusinessSchema.extend({
-      ruc: insertBusinessSchema.shape.ruc.min(11, 'RUC debe tener 11 dígitos'),
+  // Plan quota on RUCs (gratis/básico = 1, pro = 2, empresarial = 5). Shown
+  // BEFORE the click so a free account never completes a form it cannot submit.
+  const { data: subscription } = useSubscription();
+  const businessLimit = subscription?.plan.limits.businesses ?? null;
+  const businessesUsed = subscription?.usage.businesses ?? businesses?.length ?? 0;
+  const atBusinessLimit = businessLimit !== null && businessesUsed >= businessLimit;
+  const businessLimitReason = atBusinessLimit
+    ? planLimitReason(subscription?.plan.name ?? null, businessLimit as number, 'empresa(s) (RUC)')
+    : '';
+
+  // Set when the admin starts "Cerrar empresa" on a card.
+  const [closeTarget, setCloseTarget] = useState<BusinessSummary | null>(null);
+  const [closeConfirmation, setCloseConfirmation] = useState('');
+
+  // Exactly the shape the server accepts (businessProfileSchema). Plan,
+  // subscription status, trial dates and isActive are server-assigned, so the
+  // form does not carry them at all - a legacy `subscriptionPlan: 'basic'`
+  // default used to travel in every create request.
+  const form = useForm<BusinessProfile>({
+    resolver: zodResolver(businessProfileSchema.extend({
+      ruc: businessProfileSchema.shape.ruc.min(11, 'RUC debe tener 11 dígitos'),
     })),
     defaultValues: {
       ruc: '',
@@ -52,13 +73,11 @@ export default function Businesses() {
       provincia: '',
       departamento: '',
       website: '',
-      subscriptionPlan: 'basic',
-      isActive: true,
     },
   });
 
   const createBusinessMutation = useMutation({
-    mutationFn: async (data: InsertBusiness) => {
+    mutationFn: async (data: BusinessProfile) => {
       return apiRequest('POST', '/api/businesses', data);
     },
     onSuccess: () => {
@@ -91,7 +110,7 @@ export default function Businesses() {
     },
   });
 
-  const onSubmit = (data: InsertBusiness) => {
+  const onSubmit = (data: BusinessProfile) => {
     createBusinessMutation.mutate(data);
   };
 
@@ -114,6 +133,37 @@ export default function Businesses() {
         title: "Error",
         description: "No se pudieron guardar los cambios. Intente nuevamente.",
         variant: "destructive",
+      });
+    },
+  });
+
+  // "Cerrar empresa": the customer abandons the app. The server decides what
+  // happens to the data (a tenant with no complaints is erased; one with records
+  // keeps them for the legal 2-year retention), so the dialog explains both
+  // outcomes instead of promising a deletion it may not perform.
+  const closeBusinessMutation = useMutation({
+    mutationFn: async (businessId: string) => {
+      const response = await apiRequest('POST', `/api/businesses/${businessId}/close`);
+      return response.json() as Promise<{ message: string; purged: boolean; complaintCount: number }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/businesses'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/businesses/current'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/auth/user'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/auth/businesses'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/subscription'] });
+      setCloseTarget(null);
+      setCloseConfirmation('');
+      toast({
+        title: data.purged ? 'Empresa eliminada' : 'Empresa cerrada',
+        description: data.message,
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'No se pudo cerrar la empresa',
+        description: apiErrorMessage(error),
+        variant: 'destructive',
       });
     },
   });
@@ -211,7 +261,7 @@ export default function Businesses() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-gray-900" data-testid="businesses-title">
               Gestión de Empresas
@@ -219,19 +269,27 @@ export default function Businesses() {
             <p className="text-gray-600">
               Administra las empresas registradas en el sistema
             </p>
+            <PlanUsageHint
+              label="Empresas (RUCs)"
+              used={businessesUsed}
+              limit={businessLimit}
+              planName={subscription?.plan.name ?? null}
+            />
           </div>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
-              <Button
-                className="flex items-center gap-2"
-                data-testid="button-add-business"
-                disabled={!isAdmin}
-                title={isAdmin ? undefined : adminOnlyHint}
-              >
-                <Plus className="h-4 w-4" />
-                Nueva Empresa
-              </Button>
-            </DialogTrigger>
+            <PlanLockedAction locked={atBusinessLimit} reason={businessLimitReason}>
+              <DialogTrigger asChild>
+                <Button
+                  className="flex items-center gap-2"
+                  data-testid="button-add-business"
+                  disabled={!isAdmin || atBusinessLimit}
+                  title={isAdmin ? (atBusinessLimit ? businessLimitReason : undefined) : adminOnlyHint}
+                >
+                  <Plus className="h-4 w-4" />
+                  Nueva Empresa
+                </Button>
+              </DialogTrigger>
+            </PlanLockedAction>
             <DialogContent className="max-w-2xl">
               {takenRuc && (
                 <div
@@ -479,17 +537,33 @@ export default function Businesses() {
                     <span className="text-sm font-medium text-blue-600">
                       {business.establishmentCount || 0} sucursales
                     </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openManage(business)}
-                      disabled={!isAdmin}
-                      title={isAdmin ? undefined : adminOnlyHint}
-                      data-testid={`button-manage-${business.id}`}
-                    >
-                      <Settings className="h-4 w-4 mr-1" />
-                      Gestionar
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openManage(business)}
+                        disabled={!isAdmin}
+                        title={isAdmin ? undefined : adminOnlyHint}
+                        data-testid={`button-manage-${business.id}`}
+                      >
+                        <Settings className="h-4 w-4 mr-1" />
+                        Gestionar
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                        onClick={() => {
+                          setCloseConfirmation('');
+                          setCloseTarget(business);
+                        }}
+                        disabled={!isAdmin}
+                        title={isAdmin ? 'Cerrar y eliminar esta empresa' : adminOnlyHint}
+                        data-testid={`button-close-${business.id}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -499,10 +573,12 @@ export default function Businesses() {
               <Building2 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No hay empresas registradas</h3>
               <p className="text-gray-600 mb-4">Comience registrando su primera empresa en el sistema.</p>
-              <Button onClick={() => setIsDialogOpen(true)} disabled={!isAdmin} title={isAdmin ? undefined : adminOnlyHint} data-testid="button-add-first-business">
-                <Plus className="h-4 w-4 mr-2" />
-                Registrar Primera Empresa
-              </Button>
+              <PlanLockedAction locked={atBusinessLimit} reason={businessLimitReason}>
+                <Button onClick={() => setIsDialogOpen(true)} disabled={!isAdmin || atBusinessLimit} title={isAdmin ? (atBusinessLimit ? businessLimitReason : undefined) : adminOnlyHint} data-testid="button-add-first-business">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Registrar Primera Empresa
+                </Button>
+              </PlanLockedAction>
             </div>
           )}
         </div>
@@ -679,6 +755,72 @@ export default function Businesses() {
           </DialogContent>
         </Dialog>
 
+        {/* Cerrar empresa: irreversible, so it asks for the name in writing and
+            explains the two possible outcomes before the click. */}
+        <AlertDialog
+          open={!!closeTarget}
+          onOpenChange={(open) => {
+            if (!open) {
+              setCloseTarget(null);
+              setCloseConfirmation('');
+            }
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Cerrar y eliminar {closeTarget?.businessName}</AlertDialogTitle>
+              <AlertDialogDescription className="space-y-2 leading-relaxed">
+                <span className="block">
+                  Se da de baja el RUC {closeTarget?.ruc}: su Libro de Reclamaciones deja de estar en
+                  línea y no se le cobrará más.
+                </span>
+                <span className="block">
+                  Si la empresa <strong>nunca recibió reclamos</strong>, se elimina todo (datos y
+                  usuarios). Si <strong>tiene reclamos</strong>, estos se conservan 2 años por
+                  obligación legal —usted aún puede responderlos— y se eliminan al terminar ese plazo.
+                </span>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <div className="space-y-2">
+              <Label htmlFor="close-confirmation">
+                Escriba <strong>{closeTarget?.businessName}</strong> para confirmar
+              </Label>
+              <Input
+                id="close-confirmation"
+                value={closeConfirmation}
+                onChange={(event) => setCloseConfirmation(event.target.value)}
+                placeholder={closeTarget?.businessName ?? ''}
+                data-testid="input-close-confirmation"
+              />
+            </div>
+
+            <AlertDialogFooter>
+              <AlertDialogCancel data-testid="button-cancel-close-business">Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-red-600 hover:bg-red-700"
+                disabled={
+                  closeBusinessMutation.isPending ||
+                  closeConfirmation.trim().toLowerCase() !== (closeTarget?.businessName ?? '').trim().toLowerCase()
+                }
+                onClick={(event) => {
+                  event.preventDefault();
+                  if (closeTarget) closeBusinessMutation.mutate(closeTarget.id);
+                }}
+                data-testid="button-confirm-close-business"
+              >
+                {closeBusinessMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Cerrando…
+                  </>
+                ) : (
+                  'Cerrar empresa'
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
       </div>
     </AppLayout>

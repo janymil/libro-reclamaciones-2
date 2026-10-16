@@ -1,6 +1,6 @@
 {
-  "name": "LibroVirtual.pe - Libro de Reclamaciones",
-  "short_name": "LibroVirtual",
+  "name": "LibroDigital.pe - Libro de Reclamaciones",
+  "short_name": "LibroDigital",
   "description": "Gestión del Libro de Reclamaciones conforme a la normativa peruana (DS 011-2011-PCM, DS 101-2022-PCM y Ley 29733).",
   "start_url": "/panel",
   "scope": "/",

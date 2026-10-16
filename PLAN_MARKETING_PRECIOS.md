@@ -1,4 +1,4 @@
-# Plan de Marketing y Precios — LibroVirtual.pe
+# Plan de Marketing y Precios — LibroDigital.pe
 Mercado: Peru, negocios chicos de 1 local y tiendas online de 1 sede.
 Meta: ser lo mas barato y con mejor valor, ganando con los planes altos.
 Fecha: octubre 2026. Precios en soles (S/).

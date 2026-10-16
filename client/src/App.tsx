@@ -23,6 +23,7 @@ import Compliance from "@/pages/compliance";
 import AssistantPage from "@/pages/assistant";
 import SubscriptionPage from "@/pages/subscription";
 import PaymentsPage from "@/pages/payments";
+import SubscribePage from "@/pages/subscribe";
 import CustomizationPage from "@/pages/customization";
 import IntegrationsPage from "@/pages/integrations";
 import StatusPage from "@/pages/status";
@@ -39,6 +40,10 @@ function Router() {
       {/* Libro de Reclamaciones público: los consumidores registran y consultan
           sus reclamos sin necesidad de iniciar sesión. */}
       <Route path="/libro/:slug" component={PublicPortal} />
+
+      {/* Enlace de suscripción compartible: público, para pegar en WhatsApp,
+          correo o publicidad. Identifica al cliente antes de enviarlo a pagar. */}
+      <Route path="/suscribir" component={SubscribePage} />
 
       {/* Paso 2 de la recuperación de contraseña: el enlace del correo apunta aquí.
           Va antes de `/acceso` para que la ruta exacta gane siempre. */}
@@ -60,6 +65,7 @@ function Router() {
       <Route path="/asistente" component={AssistantPage} />
       <Route path="/plan" component={SubscriptionPage} />
       <Route path="/pagos" component={PaymentsPage} />
+      <Route path="/subscribe"><Redirect to="/suscribir" /></Route>
       <Route path="/personalizacion" component={CustomizationPage} />
       <Route path="/integraciones" component={IntegrationsPage} />
 

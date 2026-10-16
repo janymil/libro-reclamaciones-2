@@ -1,4 +1,4 @@
-import { PLANS, isPlanId } from "./plans";
+import { PLANS, PLAN_LIST, isPlanId } from "./plans";
 
 /**
  * Peruvian payment catalog (Phase 2.7).
@@ -384,3 +384,94 @@ export function computePeriodEnd(start: Date, period: PlanPeriod): Date {
   end.setUTCMonth(end.getUTCMonth() + periodMonths(period));
   return end;
 }
+
+// ---------------------------------------------------------------------------
+// Plans created in the Mercado Pago panel (the public subscription links)
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a base URL is something Mercado Pago can actually call back.
+ *
+ * Webhooks and return URLs are useless when they point at localhost: the provider
+ * cannot reach it, and the customer would be redirected to their own machine. The
+ * point of this check is to turn a silent failure ("the plan never activates and
+ * nobody knows why") into a loud one at the moment the payment is created.
+ */
+export function isPubliclyReachableBaseUrl(rawUrl: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+
+  // Mercado Pago only delivers to HTTPS.
+  if (parsed.protocol !== "https:") {
+    return false;
+  }
+
+  // IPv6 hosts arrive wrapped in brackets ("[::1]"), so strip them first.
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".local")) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * The "Código de referencia" (`external_reference`) of every plan created in the
+ * Mercado Pago panel, mapped onto our own plan and billing period.
+ *
+ * Why this exists: a plan created in the panel can be paid through its own public
+ * link (`mpago.la/...`). That subscription is created by Mercado Pago, so we have
+ * never seen it and we cannot tell from an id which plan was bought. This code -
+ * or, failing that, the amount plus the frequency - is what lets the webhook
+ * recognise the purchase instead of dropping a paid subscription on the floor.
+ *
+ * Keep it in sync with the panel. The codes below are the ones the panel was
+ * configured with; changing a code in the panel means changing it here too.
+ */
+export const PLAN_REFERENCE_CODES: Record<string, { planId: string; period: PlanPeriod }> = {
+  "LV-ESENCIAL-M": { planId: "esencial", period: "monthly" },
+  "LV-ESENCIAL-A": { planId: "esencial", period: "annual" },
+  "LV-PROFESIONAL-M": { planId: "profesional", period: "monthly" },
+  "LV-PROFESIONAL-A": { planId: "profesional", period: "annual" },
+  "LV-CORPORATIVO-M": { planId: "corporativo", period: "monthly" },
+  "LV-CORPORATIVO-A": { planId: "corporativo", period: "annual" },
+};
+
+export interface ResolvedPlanPurchase {
+  planId: string;
+  period: PlanPeriod;
+}
+
+/** Reads a plan code such as `LV-PROFESIONAL-A` (trimmed, case-insensitive). */
+export function resolvePlanFromCode(code: unknown): ResolvedPlanPurchase | undefined {
+  if (typeof code !== "string") {
+    return undefined;
+  }
+  return PLAN_REFERENCE_CODES[code.trim().toUpperCase()];
+}
+
+/**
+ * Fallback for when the code did not survive the trip.
+ *
+ * Price and frequency together identify a plan unambiguously (15/29/69 per month,
+ * 89/189/429 per year), so a purchase is still recognised if the panel code is
+ * missing or was typed differently. Note that the period is always required: the
+ * monthly and annual prices of a tier are different, and one tier's annual price
+ * can equal another tier's monthly price.
+ */
+export function resolvePlanFromAmount(
+  amountCents: number,
+  period: PlanPeriod,
+): ResolvedPlanPurchase | undefined {
+  if (!Number.isFinite(amountCents) || amountCents <= 0) {
+    return undefined;
+  }
+
+  const match = PLAN_LIST.find((plan) => planAmountCents(plan.id, period) === amountCents);
+  return match ? { planId: match.id, period } : undefined;
+}
+

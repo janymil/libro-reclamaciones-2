@@ -19,6 +19,21 @@ export function log(message: string, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
+/**
+ * The service worker and the recovery page must never come from a cache.
+ *
+ * A browser that keeps an old worker can otherwise never be told about a new
+ * deploy: it answers navigations with its cached shell, and the cached shell
+ * points at the old code. `no-store` keeps the update check honest.
+ * (See client/public/sw.js, client/public/reset.html and client/src/main.tsx.)
+ */
+function noStoreForWorkerFiles(app: Express) {
+  app.use(["/sw.js", "/reset.html"], (_req, res, next) => {
+    res.set("Cache-Control", "no-store");
+    next();
+  });
+}
+
 export async function setupVite(app: Express, server: Server) {
   const serverOptions = {
     middlewareMode: true,
@@ -40,6 +55,7 @@ export async function setupVite(app: Express, server: Server) {
     appType: "custom",
   });
 
+  noStoreForWorkerFiles(app);
   app.use(vite.middlewares);
   app.use("*", async (req, res, next) => {
     const url = req.originalUrl;
@@ -76,6 +92,7 @@ export function serveStatic(app: Express) {
     );
   }
 
+  noStoreForWorkerFiles(app);
   app.use(express.static(distPath));
 
   // fall through to index.html if the file doesn't exist

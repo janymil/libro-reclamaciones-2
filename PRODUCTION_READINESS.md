@@ -1,4 +1,4 @@
-# LibroVirtual.pe — Production Readiness Assessment & Roadmap
+# LibroDigital.pe — Production Readiness Assessment & Roadmap
 
 > Read-only audit of the repository, with the concrete work remaining to bring the
 > app live for paying customers. Generated 2026-10-13.
@@ -80,7 +80,11 @@ required before launch:
 - Production must inject `DATABASE_URL`, `SESSION_SECRET`, `AI_API_KEY`, `SMTP_*`,
   `APP_URL` from the platform's secret store — never a file on disk.
 - Confirm `SESSION_SECRET` and `APP_URL` are set to the real domain in prod
-  (`APP_URL=http://localhost:5000` today → reset/confirmation emails will link to localhost).
+  (`APP_URL=https://librodigital.pe`; the local `.env` keeps `http://localhost:5000`, where
+  reset/confirmation emails would link to localhost).
+- Confirm the Cloudflare proxy is configured for this app before the first deploy:
+  `TRUST_PROXY` matching the topology, SSL/TLS mode *Full (strict)*, Rocket Loader and
+  Email Address Obfuscation off. RUNBOOK.md §9.1 lists the records and settings.
 
 ### 2.4 No error monitoring / uptime alerting / real health probe
 
@@ -127,9 +131,11 @@ hide/disable any self-serve "upgrade" CTA that implies instant paid activation.
 ## 3. P1 — Should do before or immediately after launch
 
 1. **Email deliverability.** With `SMTP_*` unset the app prints emails to the terminal and
-   `/api/status` reports `email: degraded`. Set real SMTP, then configure **SPF, DKIM and
-   DMARC** for the sending domain and send a live test to Gmail/Outlook — transactional mail
-   from a new domain lands straight in spam otherwise.
+   `/api/status` reports `email: degraded`. The sending domain is `librodigital.pe`, hosted
+   on **Zoho Mail** (SMTP `smtp.zoho.com`, an app-specific password — see RUNBOOK.md §9.2),
+   with DNS in **Cloudflare**. Then configure **SPF, DKIM and DMARC** for the sending domain
+   and send a live test to Gmail/Outlook — transactional mail from a new domain lands
+   straight in spam otherwise.
 2. **Code-split the 863 KB bundle.** Vite already warns `Some chunks are larger than 500 kB`.
    Route-level `React.lazy()` + `manualChunks` will roughly halve first load and improve the
    PWA experience on mobile, which is the primary channel for Peruvian consumers.
@@ -185,7 +191,7 @@ closes the question. Cover, per role (admin / user / viewer) and per plan tier:
 
 | Flow | What to assert |
 |---|---|
-| Public intake `/libro/:slug` | CAPTCHA renders + validates, honeypot works, submit returns a constancia, attachment upload by document number |
+| Public intake `/libro/:slug` | CAPTCHA solves automatically and shows "Verificado", honeypot works, submit returns a constancia, attachment upload by document number |
 | Consumer consult | Lookup by correlative + document returns the right complaint |
 | Auth | Register → onboarding → login → logout; **session-expiry redirect**; wrong password shows an error |
 | Dashboard `/panel` | Stats, alerts and recent complaints render real data |
@@ -217,9 +223,9 @@ end-to-end; add `/health` + real DB readiness; wire an error tracker + uptime mo
 add CI running `verify + build + audit`; rehearse a DB restore.
 
 **Week 2 — verify & polish:** add Playwright with the smoke suite above (this is the
-direct answer to "are there bugs"); configure SMTP + SPF/DKIM/DMARC; decide payments
-(integrate, or explicitly go manual); legal sign-off on the generated documents; apply
-the manual migration + least-privilege DB role.
+direct answer to "are there bugs"); configure Zoho SMTP + SPF/DKIM/DMARC in Cloudflare
+(RUNBOOK.md §9); decide payments (integrate, or explicitly go manual); legal sign-off on
+the generated documents; apply the manual migration + least-privilege DB role.
 
 **Week 3+ — harden & scale:** code-split the bundle; component tests for the complaint
 form; enable RLS; `<ProtectedRoute>`; staged pilot rollout with monitoring.
@@ -244,7 +250,7 @@ Status of each P0 blocker after the remediation pass.
 | 2.4 Monitoring / probes | 🟡 **Partially fixed** | `GET /health` (liveness) and `GET /ready` (real `select 1`, answers 503 when the DB is down) added; `/api/status` no longer hard-codes `database: 'operational'`. Error tracking, uptime monitoring and alerting are still to be wired — RUNBOOK.md §3. |
 | 2.5 Backups | 🟡 **Partially fixed** | `scripts/restore-tables.mjs` + `npm run db:restore` added, with a documented drill. The drill itself still needs to be run once against a scratch database — RUNBOOK.md §4. |
 | 2.6 CI | ✅ **Fixed** | `.github/workflows/ci.yml` runs `check → test → build → audit:security` on every push to `main` and every pull request. |
-| 2.7 Payments | ✅ **Implemented** | Peruvian-first payment layer, **with recurring billing**. `shared/payments.ts` is the provider catalog (Mercado Pago wired for both one-off charges and subscriptions; Culqi/Niubiz/Izipay catalogued with their requirements), prices are handled as integer céntimos, and a plan is applied only by a confirmed payment. `POST /api/payments/checkout` creates a Mercado Pago **subscription** (preapproval) by default, so monthly/yearly plans renew without anyone sending a reminder; `subscriptions` holds the authorisation and each charge lands in `payments` linked to it (migrations `0004_payments.sql`, `0005_subscriptions.sql`). `POST /api/payments/webhook/:provider` settles everything and always re-reads the authoritative state from the provider API instead of trusting the webhook body — an unknown charge is matched to its agreement through `external_reference`, so renewals work even when only the `payment` topic arrives. `POST /api/payments/subscription/cancel` stops future charges while the already-paid period keeps running. The old no-charge `POST /api/subscription` answers 402 unless `PAYMENTS_ALLOW_FREE_PLAN_CHANGE=true`. Transferencia/Yape directo works with no credentials (an admin confirms in `/pagos`). **Remaining:** paste `MERCADOPAGO_ACCESS_TOKEN` (test first, `MERCADOPAGO_SANDBOX=true`) and register `{APP_URL}/api/payments/webhook/mercadopago` for the events `payment`, `subscription_preapproval` and `subscription_authorized_payment`. Covered by `shared/payments.test.ts`, `server/services/paymentGateway.test.ts`, `server/services/paymentService.test.ts`, `server/routes/paymentsIsolation.test.ts` and `server/routes/subscription.routes.test.ts`. |
+| 2.7 Payments | ✅ **Implemented** | Peruvian-first payment layer, **with recurring billing**. `shared/payments.ts` is the provider catalog (Mercado Pago wired for both one-off charges and subscriptions; Culqi/Niubiz/Izipay catalogued with their requirements), prices are handled as integer céntimos, and a plan is applied only by a confirmed payment. `POST /api/payments/checkout` creates a Mercado Pago **subscription** (preapproval) by default, so monthly/yearly plans renew without anyone sending a reminder; `subscriptions` holds the authorisation and each charge lands in `payments` linked to it (migrations `0004_payments.sql`, `0005_subscriptions.sql`). `POST /api/payments/webhook/:provider` settles everything and always re-reads the authoritative state from the provider API instead of trusting the webhook body — an unknown charge is matched to its agreement through `external_reference`, so renewals work even when only the `payment` topic arrives. `POST /api/payments/subscription/cancel` stops future charges while the already-paid period keeps running. Subscriptions bought through a **panel plan link** (`mpago.la/...`, created by Mercado Pago rather than by the app) are adopted on the webhook: the plan is recognised from its panel code (`PLAN_REFERENCE_CODES` in `shared/payments.ts`) or, failing that, from the amount plus the frequency, and the account is matched by the payer's email; a payer that matches no account raises an alert to `PAYMENTS_ALERT_EMAIL` instead of vanishing. The old no-charge `POST /api/subscription` answers 402 unless `PAYMENTS_ALLOW_FREE_PLAN_CHANGE=true`. Transferencia/Yape directo works with no credentials (an admin confirms in `/pagos`). **Remaining:** paste `MERCADOPAGO_ACCESS_TOKEN` (test first, `MERCADOPAGO_SANDBOX=true`) and register `{APP_URL}/api/payments/webhook/mercadopago` for the events `payment`, `subscription_preapproval` and `subscription_authorized_payment`. Covered by `shared/payments.test.ts`, `server/services/paymentGateway.test.ts`, `server/services/paymentService.test.ts`, `server/routes/paymentsIsolation.test.ts` and `server/routes/subscription.routes.test.ts`. |
 
 Also cleaned up in this pass: `MIN_PASSWORD_LENGTH` is now defined once in
 `@shared/schema.ts` instead of being duplicated in `server/routes/users.routes.ts`.
@@ -295,9 +301,14 @@ scoping has a single chokepoint. The gaps were operational, not architectural.
    token today. `sameSite=lax` plus a same-site JSON API is a reasonable defence, but an
    explicit same-origin check on POST/PATCH/PUT/DELETE is a few lines of middleware and
    closes the remaining gap for older browsers.
-2. **Decide on email verification enforcement.** `users.is_email_verified` and
-   `emailService.sendEmailVerification` both exist, but registration does not require
-   verification before onboarding. Pick a policy and enforce it.
+2. **Email verification is enforced (done).** `users.is_email_verified` now gates publication:
+   `POST /api/auth/complete-onboarding` refuses an unconfirmed account
+   (`403 email_not_verified`) and the public intake refuses consumer submissions while no active
+   administrator of the tenant is verified (`403 libro_not_published`) - see
+   `server/services/verificationService.ts`. `ALLOW_UNVERIFIED_BUSINESSES=true` is the documented
+   escape hatch for a legacy tenant whose book is already live. Open edge: nothing re-checks the
+   flag periodically, so a confirmed mailbox that later bounces stays "verified" until someone
+   acts on the bounce.
 3. **Support a rolling `SESSION_SECRET`.** Rotating the secret invalidates every session;
    `express-session` accepts `secret: [current, previous]`, which lets you rotate without
    logging everyone out.

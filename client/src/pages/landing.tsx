@@ -41,8 +41,8 @@ import {
 /* Content constants                                                           */
 /* -------------------------------------------------------------------------- */
 
-// CONTACT: replace with the real business address before going to production.
-const CONTACT_EMAIL = 'hola@librovirtual.pe';
+// Contacto oficial de la plataforma (buzón Zoho, ver "Cloudflare + Zoho Mail" en RUNBOOK.md).
+const CONTACT_EMAIL = 'hola@librodigital.pe';
 const REGISTER_URL = '/acceso?modo=registro';
 const LOGIN_URL = '/acceso?modo=ingresar';
 
@@ -123,7 +123,7 @@ const SECTORS = ['Restaurantes', 'Colegios', 'Hoteles', 'Tiendas online', 'Clín
 const FAQ_ITEMS = [
   {
     q: '¿INDECOPI certifica o registra mi Libro de Reclamaciones?',
-    a: 'No. INDECOPI no registra ni certifica libros de reclamaciones, y tampoco se exige legalización notarial. El proveedor es responsable de implementar el formato oficial, mantenerlo disponible y atender las solicitudes. LibroVirtual.pe facilita ese cumplimiento; no constituye un aval del Estado.',
+    a: 'No. INDECOPI no registra ni certifica libros de reclamaciones, y tampoco se exige legalización notarial. El proveedor es responsable de implementar el formato oficial, mantenerlo disponible y atender las solicitudes. LibroDigital.pe facilita ese cumplimiento; no constituye un aval del Estado.',
   },
   {
     q: '¿Cuál es el plazo para responder un reclamo?',
@@ -1179,9 +1179,9 @@ function Footer() {
         </div>
 
         <div className="mt-12 flex flex-col gap-3 border-t border-[#f7f2e8]/10 pt-7 text-xs text-[#f7f2e8]/45 md:flex-row md:items-center md:justify-between">
-          <p translate="no">© 2026 LibroVirtual.pe</p>
+          <p translate="no">© 2026 LibroDigital.pe</p>
           <p className="max-w-xl">
-            LibroVirtual.pe es un servicio privado independiente y no constituye ni reemplaza a
+            LibroDigital.pe es un servicio privado independiente y no constituye ni reemplaza a
             ningún organismo del Estado. Los textos normativos se citan con fines informativos.
           </p>
         </div>

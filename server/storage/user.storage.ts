@@ -87,6 +87,7 @@ export const userStorage = {
         businessId: users.businessId,
         isActive: users.isActive,
         isEmailVerified: users.isEmailVerified,
+        isDemo: users.isDemo,
         onboardingStep: users.onboardingStep,
         onboardingCompleted: users.onboardingCompleted,
         lastLoginAt: users.lastLoginAt,
@@ -117,6 +118,7 @@ export const userStorage = {
         businessId: users.businessId,
         isActive: users.isActive,
         isEmailVerified: users.isEmailVerified,
+        isDemo: users.isDemo,
         onboardingStep: users.onboardingStep,
         onboardingCompleted: users.onboardingCompleted,
         lastLoginAt: users.lastLoginAt,
@@ -179,23 +181,22 @@ export const userStorage = {
     if (data.lastName !== undefined) userUpdates.lastName = data.lastName;
     if (data.email !== undefined) userUpdates.email = data.email;
 
+    // A different address is a different mailbox: the confirmed flag and any
+    // pending link describe the OLD one, so the account starts unverified again
+    // and the caller sends a fresh link to the new address. Without this, the
+    // account kept receiving (and trusting) notifications at an address nobody
+    // had ever proven belonged to it.
+    if (data.email !== undefined && data.email !== existing.email) {
+      userUpdates.isEmailVerified = false;
+      userUpdates.emailVerificationToken = null;
+      userUpdates.emailVerificationExpires = null;
+    }
+
     const [user] = await db
       .update(users)
       .set({ ...userUpdates, updatedAt: new Date() })
       .where(eq(users.id, id))
       .returning();
-
-    // Phone and address belong to the business record, not the user
-    if (existing.businessId && (data.phone !== undefined || data.address !== undefined)) {
-      const businessUpdates: Partial<InsertBusiness> = {};
-      if (data.phone !== undefined) businessUpdates.phone = data.phone;
-      if (data.address !== undefined) businessUpdates.address = data.address;
-
-      await db
-        .update(businesses)
-        .set({ ...businessUpdates, updatedAt: new Date() })
-        .where(eq(businesses.id, existing.businessId));
-    }
 
     return user;
   },

@@ -174,7 +174,7 @@ export const historyStorage = {
       push(
         'sys-libro-config',
         'Libro de Reclamaciones configurado',
-        `Se habilitó el libro "${config.libroName}" en librovirtual.pe/${config.urlSlug}.`,
+        `Se habilitó el libro "${config.libroName}" en librodigital.pe/${config.urlSlug}.`,
         'configuración',
         config.createdAt,
       );
@@ -223,7 +223,7 @@ export const historyStorage = {
     if (business) {
       push(
         'sys-platform',
-        'Plataforma LibroVirtual.pe',
+        'Plataforma LibroDigital.pe',
         'Servicio del Libro de Reclamaciones (DS 011-2011-PCM) con respuestas en 15 días hábiles (DS 101-2022-PCM).',
         'plataforma',
         business.createdAt,

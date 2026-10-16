@@ -9,6 +9,7 @@ import { requireAuth, requireNonDemo, requireAdmin } from "../middleware/require
 import { enforceQuota, newBusinessTrialDefaults } from "../services/subscriptionService";
 import { provisionDefaultEstablishment } from "../services/establishmentProvisioning";
 import { getManageableBusinessIds } from "../services/tenantAccess";
+import { closeBusiness } from "../services/accountClosureService";
 
 /**
  * Business records: read the current tenant, list, create and update.
@@ -135,6 +136,65 @@ export function registerBusinessesRoutes(app: Express): void {
       }
       console.error('Error updating business:', error);
       res.status(500).json({ message: "Failed to update business" });
+    }
+  });
+
+  /**
+   * Cierra (elimina) una empresa: la acción de "abandonar la app".
+   *
+   * Admin-only and tenant-scoped. What happens to the data is decided by
+   * `closeBusiness` (services/accountClosureService.ts): a tenant with no
+   * complaints is erased outright; a tenant with records is closed - book
+   * offline, subscription cancelled - and its complaints are kept for the legal
+   * 2-year retention.
+   */
+  app.post('/api/businesses/:id/close', requireAuth, requireAdmin, requireNonDemo, async (req: any, res) => {
+    try {
+      const allowed = await getManageableBusinessIds(req.user);
+      if (!allowed.has(req.params.id)) {
+        return res.status(404).json({ message: "Empresa no encontrada" });
+      }
+
+      const business = await storage.getBusiness(req.params.id);
+      if (!business) {
+        return res.status(404).json({ message: "Empresa no encontrada" });
+      }
+
+      const result = await closeBusiness(business);
+
+      // The caller must not keep pointing at a tenant that no longer exists
+      // (purged) - send them to another one they manage, or to onboarding.
+      if (req.user.businessId === business.id) {
+        const remaining = (await storage.getUserBusinessAccess(req.user.id))
+          .map((entry) => entry.businessId)
+          .filter((businessId) => businessId !== business.id);
+
+        await storage.updateUser(req.user.id, { businessId: remaining[0] ?? null });
+      }
+
+      await storage.createAuthAuditLog({
+        action: 'business_closed',
+        email: req.user.email,
+        ipAddress: req.ip || req.connection.remoteAddress || '',
+        userAgent: req.get('User-Agent') || '',
+        success: true,
+        userId: req.user.id,
+        metadata: {
+          businessId: business.id,
+          ruc: business.ruc,
+          purged: result.purged,
+          complaintCount: result.complaintCount,
+        },
+      });
+
+      res.json({
+        message: result.message,
+        purged: result.purged,
+        complaintCount: result.complaintCount,
+      });
+    } catch (error) {
+      console.error('Error closing business:', error);
+      res.status(500).json({ message: "No se pudo cerrar la empresa" });
     }
   });
 }

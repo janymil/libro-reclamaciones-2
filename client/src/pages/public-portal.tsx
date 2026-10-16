@@ -20,6 +20,12 @@ interface PublicLibro {
     brandColor?: string | null;
     confirmationMessage?: string | null;
     allowedComplaintTypes?: Array<"reclamo" | "queja">;
+    /**
+     * False while no administrator of the business has confirmed the
+     * notification mailbox: the intake route refuses submissions, so the portal
+     * shows the reason instead of a form that would fail.
+     */
+    acceptingComplaints?: boolean;
   };
   business: {
     id: string;
@@ -205,28 +211,42 @@ export default function PublicPortal() {
                   </Card>
                 )}
 
-                {selectedEstablishment && (
-                  <ComplaintForm
-                    businessId={data.business.id}
-                    establishmentId={selectedEstablishment.id}
-                    businessInfo={{
-                      businessName: data.business.businessName,
-                      ruc: data.business.ruc,
-                      address: data.business.address,
-                    }}
-                    establishmentInfo={{
-                      name: selectedEstablishment.name,
-                      address: selectedEstablishment.address,
-                    }}
-                    allowedComplaintTypes={data.libro.allowedComplaintTypes}
-                    onSuccess={(result) => {
-                      setSubmitted({
-                        correlativeNumber: result.correlativeNumber,
-                        dueDate: result.dueDate,
-                      });
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
-                  />
+                {data.libro.acceptingComplaints === false ? (
+                  <Card data-testid="notice-libro-not-published">
+                    <CardHeader>
+                      <CardTitle className="text-base">Este Libro aún no está en línea</CardTitle>
+                      <CardDescription className="leading-relaxed">
+                        La empresa debe confirmar su correo de notificaciones antes de recibir
+                        reclamos en línea. Mientras tanto, puede dirigirse directamente a{' '}
+                        {data.business.businessName}
+                        {data.business.address ? ` (${data.business.address})` : ''}.
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+                ) : (
+                  selectedEstablishment && (
+                    <ComplaintForm
+                      businessId={data.business.id}
+                      establishmentId={selectedEstablishment.id}
+                      businessInfo={{
+                        businessName: data.business.businessName,
+                        ruc: data.business.ruc,
+                        address: data.business.address,
+                      }}
+                      establishmentInfo={{
+                        name: selectedEstablishment.name,
+                        address: selectedEstablishment.address,
+                      }}
+                      allowedComplaintTypes={data.libro.allowedComplaintTypes}
+                      onSuccess={(result) => {
+                        setSubmitted({
+                          correlativeNumber: result.correlativeNumber,
+                          dueDate: result.dueDate,
+                        });
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                    />
+                  )
                 )}
               </>
             )}

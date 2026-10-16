@@ -18,7 +18,7 @@ export function BrandMark({ dark = false }: { dark?: boolean }) {
           dark ? 'text-[#f7f2e8]' : 'text-[#1b1611]'
         }`}
       >
-        LibroVirtual<span className="text-[#c02b0a]">.pe</span>
+        LibroDigital<span className="text-[#c02b0a]">.pe</span>
       </span>
     </span>
   );
@@ -48,7 +48,7 @@ export function StampMark({ className = '' }: { className?: string }) {
             letterSpacing: '3.5px',
           }}
         >
-          <textPath href="#stamp-circle">CONSTANCIA DE RECEPCIÓN · LIBROVIRTUAL.PE ·</textPath>
+          <textPath href="#stamp-circle">CONSTANCIA DE RECEPCIÓN · LIBRODIGITAL.PE ·</textPath>
         </text>
       </svg>
       <div className="flex h-20 w-20 items-center justify-center rounded-full border-2 border-dashed border-[#c02b0a]">

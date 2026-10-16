@@ -190,7 +190,7 @@ const users = {
   adminB: { id: "bbbbbbbb-1111-4111-8111-111111111111", email: "admin.b@example.com", firstName: "Admin", lastName: "B", role: "admin", businessId: B, isActive: true, isDemo: false },
   multiAdmin: { id: "cccccccc-1111-4111-8111-111111111111", email: "multi@example.com", firstName: "Multi", lastName: "Admin", role: "admin", businessId: A, isActive: true, isDemo: false },
   // The publicly shared demo account (credentials published with the product).
-  demoAdmin: { id: "dddddddd-1111-4111-8111-111111111111", email: "demo@librovirtual.pe", firstName: "Usuario", lastName: "Demo", role: "admin", businessId: A, isActive: true, isDemo: true },
+  demoAdmin: { id: "dddddddd-1111-4111-8111-111111111111", email: "demo@librodigital.pe", firstName: "Usuario", lastName: "Demo", role: "admin", businessId: A, isActive: true, isDemo: true },
 };
 
 let app: { url: string; close: () => Promise<void> };
@@ -261,7 +261,7 @@ describe("GET /api/users - cross-tenant staff PII disclosure", () => {
     expect(h.calls.getUsersByBusinessIds[0][0]).toEqual([A]);
 
     const body = JSON.stringify(res.body);
-    expect(body).toContain("demo@librovirtual.pe"); // its own staff is visible
+    expect(body).toContain("demo@librodigital.pe"); // its own staff is visible
     expect(body).not.toContain("admin.b@example.com"); // tenant B staff is not
     expect(body).not.toContain(B);
   });

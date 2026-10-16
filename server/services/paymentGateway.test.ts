@@ -13,6 +13,7 @@ import {
   parseMercadoPagoPayment,
   parseMercadoPagoPreapproval,
   parseMercadoPagoPreference,
+  periodFromRecurrence,
   type CheckoutInput,
   type SubscriptionCheckoutInput,
 } from "./paymentGateway";
@@ -33,10 +34,10 @@ const input: CheckoutInput = {
   period: "monthly",
   payerEmail: "admin@empresa.pe",
   businessName: "Empresa SAC",
-  successUrl: "https://librovirtual.pe/pagos?estado=ok",
-  failureUrl: "https://librovirtual.pe/pagos?estado=error",
-  pendingUrl: "https://librovirtual.pe/pagos?estado=pendiente",
-  notificationUrl: "https://librovirtual.pe/api/payments/webhook/mercadopago",
+  successUrl: "https://librodigital.pe/pagos?estado=ok",
+  failureUrl: "https://librodigital.pe/pagos?estado=error",
+  pendingUrl: "https://librodigital.pe/pagos?estado=pendiente",
+  notificationUrl: "https://librodigital.pe/api/payments/webhook/mercadopago",
 };
 
 describe("mercadopagoPreferenceBody", () => {
@@ -297,8 +298,8 @@ const subscriptionInput: SubscriptionCheckoutInput = {
   period: "monthly",
   payerEmail: "admin@empresa.pe",
   businessName: "Empresa SAC",
-  backUrl: "https://librovirtual.pe/pagos?pago=ok&ref=LV-8F3A2B",
-  notificationUrl: "https://librovirtual.pe/api/payments/webhook/mercadopago",
+  backUrl: "https://librodigital.pe/pagos?pago=ok&ref=LV-8F3A2B",
+  notificationUrl: "https://librodigital.pe/api/payments/webhook/mercadopago",
 };
 
 describe("mercadopagoPreapprovalBody", () => {
@@ -392,6 +393,57 @@ describe("parseMercadoPagoPreapproval", () => {
 
   it("throws when there is no subscription id at all", () => {
     expect(() => parseMercadoPagoPreapproval({ status: "authorized" })).toThrow(/id de la suscripción/i);
+  });
+
+  it("keeps the panel plan code and the payer email available for matching", () => {
+    const parsed = parseMercadoPagoPreapproval({
+      ...preapproval,
+      preapproval_plan_id: "plan-abc",
+      payer_email: "dueno@empresa.pe",
+    });
+
+    // These two are what let an unknown subscription be recognised.
+    expect(parsed.externalReference).toBe("LV-8F3A2B");
+    expect(parsed.payerEmail).toBe("dueno@empresa.pe");
+    expect(parsed.planRef).toBe("plan-abc");
+  });
+
+  it("still keeps the payer email out of the stored payload", () => {
+    const parsed = parseMercadoPagoPreapproval({
+      ...preapproval,
+      payer_email: "dueno@empresa.pe",
+      preapproval_plan_id: "plan-abc",
+    });
+    expect(parsed.raw).not.toHaveProperty("payer_email");
+    expect(JSON.stringify(parsed.raw)).not.toContain("dueno@empresa.pe");
+    // The plan id is not personal data, so it is kept for diagnostics.
+    expect(parsed.raw.preapproval_plan_id).toBe("plan-abc");
+  });
+
+  it("reports the billing period the provider is actually using", () => {
+    expect(parseMercadoPagoPreapproval(preapproval).period).toBe("monthly");
+    expect(parseMercadoPagoPreapproval({
+      ...preapproval,
+      auto_recurring: { ...preapproval.auto_recurring, frequency: 12 },
+    }).period).toBe("annual");
+  });
+});
+
+describe("periodFromRecurrence", () => {
+  it("treats a monthly frequency as monthly", () => {
+    expect(periodFromRecurrence(1, "months")).toBe("monthly");
+    expect(periodFromRecurrence(3, "months")).toBe("monthly");
+  });
+
+  it("treats twelve months (and a year) as annual", () => {
+    expect(periodFromRecurrence(12, "months")).toBe("annual");
+    expect(periodFromRecurrence(1, "years")).toBe("annual");
+  });
+
+  it("is case-insensitive and falls back to monthly on junk", () => {
+    expect(periodFromRecurrence("12", "Months")).toBe("annual");
+    expect(periodFromRecurrence(undefined, undefined)).toBe("monthly");
+    expect(periodFromRecurrence("abc", "months")).toBe("monthly");
   });
 });
 

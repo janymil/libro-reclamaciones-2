@@ -19,7 +19,7 @@
 
   var slug = script.getAttribute("data-slug");
   if (!slug) {
-    console.error("[librovirtual-widget] falta el atributo data-slug");
+    console.error("[librodigital-widget] falta el atributo data-slug");
     return;
   }
 

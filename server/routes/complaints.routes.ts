@@ -10,6 +10,7 @@ import { requireAuth, requireStaff } from "../middleware/requireAuth";
 import { publicComplaintLimiter } from "../middleware/rateLimits";
 import { intakeComplaint, IntakeError } from "../services/complaintIntakeService";
 import { enforceQuota, enforceComplaintType, hasFeature } from "../services/subscriptionService";
+import { isBusinessPublished } from "../services/verificationService";
 import { verifyCaptcha, isHoneypotTriggered, consumeCaptchaToken } from "../services/captchaService";
 import { buildExpedienteZip } from "../services/expedienteService";
 
@@ -221,9 +222,11 @@ export function registerComplaintsRoutes(app: Express): void {
 
   // Public complaint submission (no auth required).
   //
-  // Phase 1.5: every submission must pass the math CAPTCHA and leave the
-  // honeypot field empty; the rate limits in middleware/rateLimits.ts still
-  // apply. Phase 2.6: the business's monthly complaint quota is enforced.
+  // Phase 1.5: every submission must pass the proof-of-work CAPTCHA (solved by
+  // the visitor's browser while the form is filled in, so there is nothing to
+  // read or type) and leave the honeypot field empty; the rate limits in
+  // middleware/rateLimits.ts still apply. Phase 2.6: the business's monthly
+  // complaint quota is enforced.
   app.post('/api/public/complaints', publicComplaintLimiter, async (req, res) => {
     try {
       const data = complaintSubmissionSchema.parse(req.body);
@@ -238,6 +241,18 @@ export function registerComplaintsRoutes(app: Express): void {
       const captcha = verifyCaptcha(req.body.captchaToken, req.body.captchaAnswer);
       if (!captcha.ok) {
         return res.status(400).json({ message: captcha.reason, code: "captcha_invalid" });
+      }
+
+      // Published book? The tenant must have a confirmed notification mailbox
+      // (verificationService.ts): recording a legal notice whose email nobody
+      // can receive would start the response clock against the company without
+      // it ever finding out.
+      if (!(await isBusinessPublished(data.businessId))) {
+        return res.status(403).json({
+          message:
+            "Este Libro de Reclamaciones aún no está publicado. La empresa debe confirmar su correo de notificaciones antes de recibir reclamos.",
+          code: "libro_not_published",
+        });
       }
 
       // Quota (Phase 2.6)

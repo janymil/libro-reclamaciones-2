@@ -6,9 +6,12 @@ import { useAuth } from "@/hooks/use-auth";
 import { Link, useLocation } from "wouter";
 import { Loader2, Mail, UserPlus, LogIn, ShieldCheck, Timer, LockKeyhole, ArrowLeft } from "lucide-react";
 import { BrandMark, StampMark, HojaDocument } from "@/components/landing/brand";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { apiRequest, apiErrorMessage } from "@/lib/queryClient";
+import { requestSolvedCaptcha } from "@/lib/pow";
+import { safeInternalPath } from "@/lib/subscribe-link";
 
-type AuthMode = 'login' | 'register' | 'email-sent' | 'forgot-password';
+type AuthMode = 'login' | 'register' | 'email-sent' | 'forgot-password' | 'code';
 
 interface RegisterData {
   firstName: string;
@@ -42,6 +45,10 @@ const TITLES: Record<AuthMode, { title: string; subtitle: string }> = {
     title: "Recupera tu acceso",
     subtitle: "Te enviaremos un enlace para crear una contraseña nueva.",
   },
+  code: {
+    title: "Entra con un código",
+    subtitle: "Te enviamos 6 dígitos a tu correo. Sin contraseña.",
+  },
 };
 
 const TRUST_POINTS = [
@@ -71,7 +78,17 @@ export default function AuthPage() {
 
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [, setLocation] = useLocation();
-  const { user, isAuthenticated, loginMutation, registerMutation } = useAuth();
+  // Where to send the visitor after they log in. Validated: only a same-site path
+  // is accepted, so this can never become an open redirect.
+  const nextPath = safeInternalPath(urlParams.get('next'));
+  const {
+    user,
+    isAuthenticated,
+    loginMutation,
+    registerMutation,
+    requestLoginCodeMutation,
+    loginWithCodeMutation,
+  } = useAuth();
 
   const [registerForm, setRegisterForm] = useState<RegisterData>({ firstName: '', lastName: '', email: '' });
   const [loginForm, setLoginForm] = useState<LoginData>({ email: '', password: '' });
@@ -79,6 +96,17 @@ export default function AuthPage() {
   // Shown inline (not only as a toast) because the most common failure - "ese
   // email ya tiene una cuenta" - needs a way forward, not a disappearing notice.
   const [registerError, setRegisterError] = useState<string | null>(null);
+  // Registration solves a CAPTCHA before it can call the API; this covers that
+  // short pause so the button does not look frozen (the button's own pending
+  // flag only starts once the request is in flight).
+  const [registerVerifying, setRegisterVerifying] = useState(false);
+
+  // Code login ("entra con un código por email"). The address is kept after the
+  // code is sent so both the resend and the verification use the same one.
+  const [codeEmail, setCodeEmail] = useState('');
+  const [codeDigits, setCodeDigits] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
+  const [codeError, setCodeError] = useState<string | null>(null);
 
   // Password recovery (self-service). `forgotSent` is intentionally sticky: the
   // endpoint answers identically for known and unknown addresses, so there is
@@ -90,22 +118,83 @@ export default function AuthPage() {
   // Redirect authenticated users
   useEffect(() => {
     if (isAuthenticated && user) {
-      setLocation(!user.onboardingCompleted ? '/registro' : '/panel');
+      if (!user.onboardingCompleted) {
+        // A brand new account still has to finish onboarding, so carry the
+        // destination through instead of dropping the visitor at /panel.
+        setLocation(nextPath ? `/registro?next=${encodeURIComponent(nextPath)}` : '/registro');
+        return;
+      }
+      setLocation(nextPath ?? '/panel');
     }
-  }, [isAuthenticated, user, setLocation]);
+  }, [isAuthenticated, user, setLocation, nextPath]);
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setRegisterError(null);
-    registerMutation.mutate(registerForm, {
-      onSuccess: () => setMode('email-sent'),
-      onError: (error) => setRegisterError(apiErrorMessage(error)),
-    });
+
+    // Registration is CAPTCHA-gated: solve the proof of work first, then send
+    // both halves with the payload. Failure here is reported inline next to the
+    // form, like every other registration failure.
+    setRegisterVerifying(true);
+
+    let solved;
+    try {
+      solved = await requestSolvedCaptcha();
+    } catch (error) {
+      setRegisterVerifying(false);
+      setRegisterError(apiErrorMessage(error));
+      return;
+    }
+
+    // `registerVerifying` stays on until the request settles, so the button reads
+    // "Verificando…" and then "Creando cuenta…" without a flicker in between.
+    registerMutation.mutate(
+      { ...registerForm, captchaToken: solved.token, captchaAnswer: solved.solution },
+      {
+        onSuccess: () => {
+          setRegisterVerifying(false);
+          setMode('email-sent');
+        },
+        onError: (error) => {
+          setRegisterVerifying(false);
+          setRegisterError(apiErrorMessage(error));
+        },
+      }
+    );
   };
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     loginMutation.mutate(loginForm);
+  };
+
+  // Step 1 of the code login. Kept separate from the submit handler so the
+  // "reenviar código" link can call it without a form event.
+  const sendLoginCode = () => {
+    setCodeError(null);
+    requestLoginCodeMutation.mutate(codeEmail, {
+      onSuccess: () => {
+        setCodeDigits('');
+        setCodeSent(true);
+      },
+      onError: (error) => setCodeError(apiErrorMessage(error)),
+    });
+  };
+
+  const handleRequestCode = (e: React.FormEvent) => {
+    e.preventDefault();
+    sendLoginCode();
+  };
+
+  // Step 2: the digits become a session, so the success path (toast + redirect)
+  // lives in the mutation.
+  const handleSubmitCode = (e: React.FormEvent) => {
+    e.preventDefault();
+    setCodeError(null);
+    loginWithCodeMutation.mutate(
+      { email: codeEmail, code: codeDigits },
+      { onError: (error) => setCodeError(apiErrorMessage(error)) },
+    );
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {
@@ -235,13 +324,13 @@ export default function AuthPage() {
                   <Button
                     type="submit"
                     className="h-12 w-full rounded-full bg-[#c02b0a] text-base font-semibold text-white shadow-[0_10px_24px_-10px_rgba(192,43,10,0.7)] hover:bg-[#9c2107]"
-                    disabled={registerMutation.isPending}
+                    disabled={registerMutation.isPending || registerVerifying}
                     data-testid="button-register"
                   >
-                    {registerMutation.isPending ? (
+                    {registerMutation.isPending || registerVerifying ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Creando cuenta…
+                        {registerMutation.isPending ? "Creando cuenta…" : "Verificando…"}
                       </>
                     ) : (
                       <>
@@ -339,6 +428,26 @@ export default function AuthPage() {
                     <Button
                       type="button"
                       variant="link"
+                      onClick={() => {
+                        // Prefilled with what they already typed: the two options
+                        // are two ways into the SAME account.
+                        setCodeEmail(loginForm.email);
+                        setCodeDigits('');
+                        setCodeSent(false);
+                        setCodeError(null);
+                        setMode('code');
+                      }}
+                      data-testid="link-login-with-code"
+                      className="text-sm text-[#5c5246] hover:text-[#c02b0a]"
+                    >
+                      Entrar con un código por email
+                    </Button>
+                  </div>
+
+                  <div className="text-center">
+                    <Button
+                      type="button"
+                      variant="link"
                       onClick={() => setMode('register')}
                       data-testid="link-register"
                       className="text-sm text-[#5c5246] hover:text-[#c02b0a]"
@@ -349,6 +458,157 @@ export default function AuthPage() {
                 </form>
               )}
 
+              {mode === 'code' && (
+                <div className="space-y-4">
+                  {!codeSent ? (
+                    <form onSubmit={handleRequestCode} className="space-y-4">
+                      <p className="text-sm leading-relaxed text-[#5c5246]">
+                        Te enviaremos un código de 6 dígitos a tu correo y entrarás con él, sin
+                        contraseña.
+                      </p>
+
+                      {codeError && (
+                        <div
+                          role="alert"
+                          data-testid="notice-code-error"
+                          className="rounded-xl border border-[#c02b0a]/25 bg-[#c02b0a]/5 px-4 py-3 text-sm leading-relaxed text-[#1b1611]"
+                        >
+                          {codeError}
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        <Label htmlFor="codeEmail" className="text-sm font-medium text-[#1b1611]">
+                          Email
+                        </Label>
+                        <Input
+                          id="codeEmail"
+                          type="email"
+                          required
+                          autoComplete="email"
+                          value={codeEmail}
+                          onChange={(event) => setCodeEmail(event.target.value)}
+                          placeholder="tu@email.com…"
+                          className={`h-12 ${inputCls}`}
+                          data-testid="input-code-email"
+                        />
+                      </div>
+
+                      <Button
+                        type="submit"
+                        disabled={requestLoginCodeMutation.isPending || !codeEmail}
+                        className="h-12 w-full rounded-full bg-[#1b1611] text-base font-semibold text-[#f7f2e8] hover:bg-black"
+                        data-testid="button-request-code"
+                      >
+                        {requestLoginCodeMutation.isPending ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Enviando…
+                          </>
+                        ) : (
+                          <>
+                            <Mail className="mr-2 h-4 w-4" />
+                            Enviar código
+                          </>
+                        )}
+                      </Button>
+                    </form>
+                  ) : (
+                    <form onSubmit={handleSubmitCode} className="space-y-4">
+                      <p className="text-sm leading-relaxed text-[#5c5246]">
+                        Enviamos un código a{' '}
+                        <span className="font-semibold text-[#1b1611]">{codeEmail}</span>. Escríbelo
+                        aquí para entrar.
+                      </p>
+
+                      {codeError && (
+                        <div
+                          role="alert"
+                          data-testid="notice-code-error"
+                          className="rounded-xl border border-[#c02b0a]/25 bg-[#c02b0a]/5 px-4 py-3 text-sm leading-relaxed text-[#1b1611]"
+                        >
+                          {codeError}
+                        </div>
+                      )}
+
+                      <div className="flex justify-center">
+                        <InputOTP
+                          maxLength={6}
+                          value={codeDigits}
+                          onChange={setCodeDigits}
+                          data-testid="input-login-code"
+                        >
+                          <InputOTPGroup>
+                            {[0, 1, 2, 3, 4, 5].map((index) => (
+                              <InputOTPSlot key={index} index={index} className="h-14 w-11 text-lg" />
+                            ))}
+                          </InputOTPGroup>
+                        </InputOTP>
+                      </div>
+
+                      <Button
+                        type="submit"
+                        disabled={codeDigits.length !== 6 || loginWithCodeMutation.isPending}
+                        className="h-12 w-full rounded-full bg-[#c02b0a] text-base font-semibold text-white shadow-[0_10px_24px_-10px_rgba(192,43,10,0.7)] hover:bg-[#9c2107]"
+                        data-testid="button-login-with-code"
+                      >
+                        {loginWithCodeMutation.isPending ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Entrando…
+                          </>
+                        ) : (
+                          <>
+                            <LogIn className="mr-2 h-4 w-4" />
+                            Entrar
+                          </>
+                        )}
+                      </Button>
+
+                      <div className="flex flex-col items-center gap-1 text-center">
+                        <Button
+                          type="button"
+                          variant="link"
+                          disabled={requestLoginCodeMutation.isPending}
+                          onClick={sendLoginCode}
+                          data-testid="link-resend-code"
+                          className="text-sm text-[#5c5246] hover:text-[#c02b0a]"
+                        >
+                          Reenviar código
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="link"
+                          onClick={() => {
+                            setCodeDigits('');
+                            setCodeError(null);
+                            setCodeSent(false);
+                          }}
+                          data-testid="link-change-code-email"
+                          className="text-sm text-[#5c5246] hover:text-[#c02b0a]"
+                        >
+                          Usar otro correo
+                        </Button>
+                      </div>
+                    </form>
+                  )}
+
+                  <div className="text-center">
+                    <Button
+                      type="button"
+                      variant="link"
+                      onClick={() => {
+                        setCodeError(null);
+                        setMode('login');
+                      }}
+                      data-testid="link-back-to-password"
+                      className="text-sm text-[#5c5246] hover:text-[#c02b0a]"
+                    >
+                      Entrar con contraseña
+                    </Button>
+                  </div>
+                </div>
+              )}
               {mode === 'forgot-password' && (
                 <div>
                   {forgotSent ? (

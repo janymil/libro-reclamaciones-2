@@ -246,7 +246,7 @@ export default function IntegrationsPage() {
             <CardTitle>Webhooks</CardTitle>
             <CardDescription>
               Le notificamos a su sistema cada nueva reclamación con una firma HMAC-SHA256 en la
-              cabecera X-LibroVirtual-Signature (plan Empresarial).
+              cabecera X-LibroDigital-Signature (plan Empresarial).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
