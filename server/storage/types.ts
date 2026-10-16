@@ -36,12 +36,24 @@ import type {
   InsertPayment,
   Subscription,
   InsertSubscription,
+  PlatformPaymentSettings,
+  PlatformSettings,
+  PlanPricing,
+  DiscountCode,
+  InsertDiscountCode,
+  PlatformConfigAudit,
+  InsertPlatformConfigAudit,
 } from "@shared/schema";
 import type {
   CompleteOnboardingInput,
   CompleteOnboardingResult,
 } from "./onboarding.storage";
 import type { AccessRequestWithBusiness } from "./accessRequest.storage";
+import type { PlatformPaymentSettingsInput } from "./paymentSettings.storage";
+import type { PlatformSettingsInput } from "./platformSettings.storage";
+import type { PlanPricingInput } from "./planPricing.storage";
+
+
 
 // Application version reported alongside the derived system-change entries.
 export const APP_VERSION = "1.2.0";
@@ -172,6 +184,12 @@ export interface IStorage {
   getPaymentByReference(reference: string): Promise<Payment | undefined>;
   getPaymentByProviderRef(provider: string, providerRef: string): Promise<Payment | undefined>;
   getPaymentsByBusiness(businessId: string): Promise<Payment[]>;
+  /** Operator work queue: pending transfers/Yape across every tenant. */
+  listPendingManualPayments(): Promise<Payment[]>;
+  /** Operator view: every payment of every tenant, newest first. */
+  listAllPayments(limit?: number): Promise<Payment[]>;
+  /** Operator view: every recurring agreement of every tenant. */
+  listAllSubscriptions(limit?: number): Promise<Subscription[]>;
   updatePayment(id: string, updates: Partial<InsertPayment>): Promise<Payment | undefined>;
 
   // Recurring agreements (Phase 2.7, step 2)
@@ -182,6 +200,46 @@ export interface IStorage {
   getSubscriptionsByBusiness(businessId: string): Promise<Subscription[]>;
   getSubscriptionByReference(reference: string): Promise<Subscription | undefined>;
   updateSubscription(id: string, updates: Partial<InsertSubscription>): Promise<Subscription | undefined>;
+
+  // Where the platform itself collects money (Phase 2.7, step 3)
+  /** The singleton row with our own Yape number / bank accounts, if configured. */
+  getPlatformPaymentSettings(): Promise<PlatformPaymentSettings | undefined>;
+  /** Upserts that row (id = 1) and records which operator wrote it. */
+  savePlatformPaymentSettings(
+    data: PlatformPaymentSettingsInput,
+    updatedByUserId?: string | null,
+  ): Promise<PlatformPaymentSettings>;
+
+  // Platform configuration (Phase 2.7, step 4): identity, alerts, flags
+  /** The singleton row with the console's operational settings, if ever saved. */
+  getPlatformSettings(): Promise<PlatformSettings | undefined>;
+  savePlatformSettings(
+    data: PlatformSettingsInput,
+    updatedByUserId?: string | null,
+  ): Promise<PlatformSettings>;
+
+  // Price list (Phase 2.7, step 4)
+  listPlanPricing(): Promise<PlanPricing[]>;
+  getPlanPricing(planId: string): Promise<PlanPricing | undefined>;
+  savePlanPricing(input: PlanPricingInput): Promise<PlanPricing>;
+  /** Drops the override so the plan goes back to the catalogue price. */
+  resetPlanPricing(planId: string): Promise<boolean>;
+
+  // Discount codes (Phase 2.7, step 4)
+  listDiscountCodes(limit?: number): Promise<DiscountCode[]>;
+  getDiscountCode(id: string): Promise<DiscountCode | undefined>;
+  getDiscountCodeByCode(code: string): Promise<DiscountCode | undefined>;
+  createDiscountCode(data: InsertDiscountCode): Promise<DiscountCode>;
+  updateDiscountCode(id: string, updates: Partial<InsertDiscountCode>): Promise<DiscountCode | undefined>;
+  /** Only deletes a code that was never redeemed. */
+  deleteDiscountCode(id: string): Promise<boolean>;
+  /** Atomic increment, false when the cap is already reached. */
+  redeemDiscountCode(id: string): Promise<boolean>;
+
+  // Console audit (Phase 2.7, step 4)
+  recordPlatformConfigChange(data: InsertPlatformConfigAudit): Promise<void>;
+  listPlatformConfigChanges(limit?: number): Promise<PlatformConfigAudit[]>;
+
   
   // ARCO request operations
   getArcoRequests(businessId: string): Promise<ArcoRequest[]>;
@@ -212,6 +270,9 @@ export interface IStorage {
   // User administration
   /** INTERNAL use only - spans every tenant. Never return over HTTP. */
   getAllUsers(): Promise<UserWithBusiness[]>;
+  /** Logins flagged as platform staff (`users.is_platform_admin`). */
+  listPlatformAdmins(): Promise<User[]>;
+  setPlatformAdmin(userId: string, isPlatformAdmin: boolean): Promise<User | undefined>;
   /** Tenant-scoped listing for HTTP handlers. */
   getUsersByBusinessIds(businessIds: string[]): Promise<UserWithBusiness[]>;
   getUserStats(userId: string): Promise<UserStats>;

@@ -22,7 +22,7 @@ const AI_DRAFTING_REQUIRED = {
  */
 export function registerAiRoutes(app: Express): void {
   // Whether an AI provider is configured (drives the "IA activa" UI badge)
-  app.get('/api/ai/status', requireAuth, (req, res) => {
+  app.get('/api/ai/status', requireAuth, (_req, res) => {
     res.json(getAIStatus());
   });
 

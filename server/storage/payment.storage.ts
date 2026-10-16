@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, asc } from "drizzle-orm";
 import {
   type Payment,
   type InsertPayment,
@@ -57,6 +57,48 @@ export const paymentStorage = {
       .from(payments)
       .where(eq(payments.businessId, businessId))
       .orderBy(desc(payments.createdAt));
+  },
+
+  /**
+   * Every manual (transferencia / Yape) payment still waiting for a human, for
+   * ANY tenant.
+   *
+   * This is the operator's work queue: the money lands in the operator's own bank
+   * or Yape account, and the customer's account cannot confirm its own payment
+   * (see `requirePlatformAdmin`), so without a cross-tenant view nobody would ever
+   * see the transfer that has to be reconciled.
+   */
+  async listPendingManualPayments(): Promise<Payment[]> {
+    return await db
+      .select()
+      .from(payments)
+      .where(and(eq(payments.provider, "manual"), eq(payments.status, "pending")))
+      .orderBy(asc(payments.createdAt));
+  },
+
+  /**
+   * Every payment of every tenant, newest first.
+   *
+   * Operator view only (see `server/routes/admin.routes.ts`): reconciliation and
+   * revenue questions are cross-tenant by nature, unlike a customer's history.
+   */
+  async listAllPayments(limit = 500): Promise<Payment[]> {
+    return await db.select().from(payments).orderBy(desc(payments.createdAt)).limit(limit);
+  },
+
+  /**
+   * Every recurring agreement of every tenant, newest first.
+   *
+   * The operator's console shows them because that is where the money is: a failed
+   * preapproval is a customer about to lose their plan, and only the team can act
+   * on it.
+   */
+  async listAllSubscriptions(limit = 500): Promise<Subscription[]> {
+    return await db
+      .select()
+      .from(subscriptions)
+      .orderBy(desc(subscriptions.createdAt))
+      .limit(limit);
   },
 
   async updatePayment(id: string, updates: Partial<InsertPayment>): Promise<Payment | undefined> {

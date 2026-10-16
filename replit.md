@@ -10,6 +10,35 @@ The application provides businesses with tools to digitally manage customer comp
 
 Preferred communication style: Simple, everyday language.
 
+## ⚠️ Before touching any payment URL: dev hostname vs production domain
+
+Development currently runs on a laptop, so `APP_URL` and the Mercado Pago webhook point
+at the **dev hostname**. All five rows below must be switched before go-live:
+
+| | Development (now) | Production (go-live) |
+|---|---|---|
+| `APP_URL` in `.env` | `https://dev.librodigital.pe` | `https://librodigital.pe` |
+| Mercado Pago webhook | `https://dev.librodigital.pe/api/payments/webhook/mercadopago` | `https://librodigital.pe/api/payments/webhook/mercadopago` |
+| MP panel tab | *Modo de prueba* | *Modo productivo* |
+| MP credential | `TEST-…` (*Credenciales de prueba*) | `APP_USR-…` (*Credenciales de producción*) |
+| `MERCADOPAGO_SANDBOX` | `true` | `false` |
+
+`dev.librodigital.pe` is **this laptop**, published through a Cloudflare Tunnel
+(`%LOCALAPPDATA%\cloudflared\start-librodigital-tunnel.cmd`). The apex domain
+`librodigital.pe` serves the live site from a different machine and must **never** be
+pointed at the tunnel.
+
+The dangerous one to forget is the **webhook URL**: Mercado Pago would keep notifying the
+laptop, and production plans would never activate — silently, because the endpoint answers
+`200 {handled:false}` to anything it cannot match.
+
+Two guards already exist, so trust them when they speak:
+- every boot logs the exact URL to paste into the MP panel
+  (`[payments] Mercado Pago webhook to register: …`), and warns when `APP_URL` is not
+  publicly reachable;
+- `TEST-` vs `APP_USR-` is the difference between sandbox and **charging real cards** —
+  the production credential was pasted here once by accident already.
+
 ## System Architecture
 
 ### Full-Stack Architecture

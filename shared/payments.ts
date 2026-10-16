@@ -107,7 +107,7 @@ export const PAYMENT_PROVIDERS: PaymentProviderDefinition[] = [
   {
     id: "mercadopago",
     name: "Mercado Pago",
-    tagline: "Suscripción automática con tarjeta, Yape o Plin. Se renueva sola.",
+    tagline: "Tarjeta, Yape o Plin. Con tarjeta, además, cobro automático: se renueva sola.",
     methods: ["tarjeta", "yape", "plin", "efectivo"],
     selfServe: true,
     available: true,
@@ -348,7 +348,7 @@ export function providerSupportsRecurring(providerId: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Human-facing reference ("LV-8F3A2B") used on bank transfers and receipts
+// Human-facing reference ("LD-8F3A2B") used on bank transfers and receipts
 // ---------------------------------------------------------------------------
 
 /** Ambiguous characters (O/0, I/1) removed so a reference can be read aloud. */
@@ -367,7 +367,7 @@ export function referenceSuffix(bytes: Uint8Array, length = 6): string {
 }
 
 export function buildPaymentReference(suffix: string): string {
-  return `LV-${suffix.toUpperCase()}`;
+  return `LD-${suffix.toUpperCase()}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -433,12 +433,12 @@ export function isPubliclyReachableBaseUrl(rawUrl: string): boolean {
  * configured with; changing a code in the panel means changing it here too.
  */
 export const PLAN_REFERENCE_CODES: Record<string, { planId: string; period: PlanPeriod }> = {
-  "LV-ESENCIAL-M": { planId: "esencial", period: "monthly" },
-  "LV-ESENCIAL-A": { planId: "esencial", period: "annual" },
-  "LV-PROFESIONAL-M": { planId: "profesional", period: "monthly" },
-  "LV-PROFESIONAL-A": { planId: "profesional", period: "annual" },
-  "LV-CORPORATIVO-M": { planId: "corporativo", period: "monthly" },
-  "LV-CORPORATIVO-A": { planId: "corporativo", period: "annual" },
+  "LD-ESENCIAL-M": { planId: "esencial", period: "monthly" },
+  "LD-ESENCIAL-A": { planId: "esencial", period: "annual" },
+  "LD-PROFESIONAL-M": { planId: "profesional", period: "monthly" },
+  "LD-PROFESIONAL-A": { planId: "profesional", period: "annual" },
+  "LD-CORPORATIVO-M": { planId: "corporativo", period: "monthly" },
+  "LD-CORPORATIVO-A": { planId: "corporativo", period: "annual" },
 };
 
 export interface ResolvedPlanPurchase {
@@ -446,12 +446,20 @@ export interface ResolvedPlanPurchase {
   period: PlanPeriod;
 }
 
-/** Reads a plan code such as `LV-PROFESIONAL-A` (trimmed, case-insensitive). */
+/**
+ * Reads a plan code such as `LD-PROFESIONAL-A` (trimmed, case-insensitive).
+ *
+ * Codes written before the LibroVirtual -> LibroDigital rebrand used an `LV-`
+ * prefix. Those are still accepted: a plan configured in the Mercado Pago panel
+ * months ago must keep activating, because the alternative is a paid
+ * subscription silently dropped for a prefix nobody remembers.
+ */
 export function resolvePlanFromCode(code: unknown): ResolvedPlanPurchase | undefined {
   if (typeof code !== "string") {
     return undefined;
   }
-  return PLAN_REFERENCE_CODES[code.trim().toUpperCase()];
+  const normalized = code.trim().toUpperCase();
+  return PLAN_REFERENCE_CODES[normalized] ?? PLAN_REFERENCE_CODES[normalized.replace(/^LV-/, "LD-")];
 }
 
 /**

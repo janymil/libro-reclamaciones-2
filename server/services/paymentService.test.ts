@@ -36,7 +36,7 @@ const NOW = new Date("2026-06-15T12:00:00.000Z");
 describe("applyPaidPeriod", () => {
   it("gives one month from today to an active business with no period yet", () => {
     const result = applyPaidPeriod(business(), "profesional", "monthly", NOW);
-    expect(result.plan).toBe("profesional");
+    expect(result.subscriptionPlan).toBe("profesional");
     expect(result.planPeriod).toBe("monthly");
     expect(result.subscriptionStatus).toBe("active");
     expect(result.currentPeriodEnd.toISOString()).toBe("2026-07-15T12:00:00.000Z");
@@ -51,6 +51,20 @@ describe("applyPaidPeriod", () => {
     const existing = business({ currentPeriodEnd: new Date("2026-08-01T00:00:00.000Z") });
     const result = applyPaidPeriod(existing, "profesional", "monthly", NOW);
     expect(result.currentPeriodEnd.toISOString()).toBe("2026-09-01T00:00:00.000Z");
+  });
+
+  it("starts the year after the month already paid when the same plan is switched to annual", () => {
+    // The reported case: Básico mensual, and two weeks later the customer wants
+    // the SAME plan for a year. The year must start when the remaining month
+    // ends, not today - otherwise they lose the fortnight they already paid for.
+    const twoWeeksIn = business({ currentPeriodEnd: new Date("2026-06-29T12:00:00.000Z") });
+
+    const result = applyPaidPeriod(twoWeeksIn, "esencial", "annual", NOW);
+
+    expect(result.subscriptionPlan).toBe("esencial");
+    expect(result.planPeriod).toBe("annual");
+    // 2026-06-29 (the paid month ends) + 12 months.
+    expect(result.currentPeriodEnd.toISOString()).toBe("2027-06-29T12:00:00.000Z");
   });
 
   it("starts from today when the previous period already lapsed", () => {
@@ -116,9 +130,9 @@ describe("applyPaidPeriod", () => {
 });
 
 describe("newPaymentReference", () => {
-  it("looks like LV-XXXXXX and avoids ambiguous characters", () => {
+  it("looks like LD-XXXXXX and avoids ambiguous characters", () => {
     const reference = newPaymentReference();
-    expect(reference).toMatch(/^LV-[A-HJ-NP-Z2-9]{6}$/);
+    expect(reference).toMatch(/^LD-[A-HJ-NP-Z2-9]{6}$/);
   });
 
   it("does not repeat across calls", () => {

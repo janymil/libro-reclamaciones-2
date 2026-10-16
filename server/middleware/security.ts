@@ -67,6 +67,18 @@ export function applySecurityMiddleware(app: Express): void {
       'host adds its own proxy hop, or a CIDR list of Cloudflare ranges (see .env.example).',
   );
   
+  // The team's panel is a private screen: keep it out of every search index. Its
+  // path is configurable on purpose (`client/src/lib/admin-path.ts`) and is
+  // deliberately NOT `/admin`, which stays a 404 - that is the first path every
+  // scanner tries, so it should look like nothing at all.
+  const adminPath = (process.env.VITE_ADMIN_PATH || '/ld-oficina-7f31').trim().replace(/\/+$/, '');
+  app.use((req, res, next) => {
+    if (req.path === adminPath || req.path.startsWith(`${adminPath}/`)) {
+      res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    }
+    next();
+  });
+
   // Security middleware with relaxed CSP for development.
   // In production the client is a plain Vite build (external module scripts
   // only), so scripts do NOT need 'unsafe-inline' or 'unsafe-eval' - allowing

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import type { PlanDefinition } from "@shared/plans";
+import { TRIAL_DAYS, type PlanDefinition } from "@shared/plans";
 
 /**
  * Plans & quotas (Phase 2.6), integrations (Phase 3.12) and the multi-RUC
@@ -40,6 +40,53 @@ export function usePlans() {
     },
     staleTime: Infinity,
   });
+}
+
+/** Who the platform is and how long the trial lasts (public, no auth needed). */
+export interface PlatformInfo {
+  identity: {
+    legalName: string;
+    commercialName: string;
+    ruc: string;
+    fiscalAddress: string;
+    contactEmail: string;
+    contactPhone: string;
+    website: string;
+  };
+  trialDays: number;
+}
+
+/**
+ * The public platform facts.
+ *
+ * Used by the marketing copy ("15 días de prueba"), the page footer and anywhere the
+ * platform names itself: all of it used to be hardcoded, so changing the identity meant
+ * a deploy. `staleTime` is long because these change a few times a year.
+ */
+export function usePlatformInfo() {
+  return useQuery({
+    queryKey: ['/api/platform-info'],
+    queryFn: async () => {
+      const response = await fetch('/api/platform-info');
+      if (!response.ok) {
+        throw new Error('Failed to fetch the platform info');
+      }
+      return response.json() as Promise<PlatformInfo>;
+    },
+    staleTime: 60 * 60 * 1000,
+  });
+}
+
+/**
+ * The trial length to print, with a safe fallback.
+ *
+ * Never renders "undefined días": while the request is in flight (or if it fails) the
+ * built-in default from `shared/plans.ts` is used, which is exactly what the server
+ * applies when nobody overrode it.
+ */
+export function useTrialDays(): number {
+  const info = usePlatformInfo();
+  return info.data?.trialDays ?? TRIAL_DAYS;
 }
 
 export function useSubscription() {

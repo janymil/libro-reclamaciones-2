@@ -1,3 +1,4 @@
+import "./load-env.mjs";
 import nodemailer from "nodemailer";
 
 /**
@@ -20,8 +21,9 @@ import nodemailer from "nodemailer";
  *   npm run email:diagnose                          # connect + authenticate
  *   npm run email:diagnose -- --send tu@correo.com  # ... then deliver a real message
  *
- * Credentials come from `.env` (SMTP_USER / SMTP_PASSWORD). Nothing is printed
- * except the sender and the server, never the password.
+ * Credentials come from the environment or from the env file named by
+ * `ENV_FILE` (SMTP_USER / SMTP_PASSWORD). Nothing is printed except the sender
+ * and the server, never the password.
  */
 
 const user = (process.env.SMTP_USER || "").trim();

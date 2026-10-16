@@ -1,3 +1,4 @@
+import "./load-env.mjs";
 import fs from "fs";
 import path from "path";
 import { Pool, neonConfig } from "@neondatabase/serverless";
@@ -8,6 +9,9 @@ import ws from "ws";
  * destructive migration.
  *
  * Usage: npm run db:backup -- backups/out.json table1 table2 ...
+ *
+ * Credentials come from the environment or from the env file named by
+ * `ENV_FILE` (see scripts/load-env.mjs).
  */
 neonConfig.webSocketConstructor = ws;
 

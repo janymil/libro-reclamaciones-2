@@ -16,6 +16,7 @@ import {
 import { authService } from "../services/authService";
 import { defaultEstablishmentFor } from "../services/establishmentProvisioning";
 import { newBusinessTrialDefaults } from "../services/subscriptionService";
+import { getTrialDays } from "../services/platformSettingsService";
 import { allowsUnverifiedBusinesses } from "../services/verificationService";
 import { storage } from "../storage";
 import { authLimiter, passwordResetLimiter, registerLimiter } from "../middleware/rateLimits";
@@ -80,7 +81,7 @@ export function registerAuthRoutes(app: Express): void {
       }
 
       const userData = userRegistrationSchema.parse(req.body);
-      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const ipAddress = req.ip || req.socket.remoteAddress || '';
       const userAgent = req.get('User-Agent') || '';
 
       const result = await authService.registerUser(userData, ipAddress, userAgent);
@@ -112,7 +113,7 @@ export function registerAuthRoutes(app: Express): void {
   app.post('/api/auth/login', authLimiter, async (req, res) => {
     try {
       const loginData = authLoginSchema.parse(req.body);
-      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const ipAddress = req.ip || req.socket.remoteAddress || '';
       const userAgent = req.get('User-Agent') || '';
 
       const result = await authService.loginUser(loginData, ipAddress, userAgent);
@@ -146,7 +147,7 @@ export function registerAuthRoutes(app: Express): void {
   app.post('/api/auth/request-code', authLimiter, async (req, res) => {
     try {
       const { email } = requestLoginCodeSchema.parse(req.body);
-      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const ipAddress = req.ip || req.socket.remoteAddress || '';
       const userAgent = req.get('User-Agent') || '';
 
       await authService.requestLoginCode(email, ipAddress, userAgent);
@@ -170,7 +171,7 @@ export function registerAuthRoutes(app: Express): void {
   app.post('/api/auth/login-with-code', authLimiter, async (req, res) => {
     try {
       const loginData = authLoginCodeSchema.parse(req.body);
-      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const ipAddress = req.ip || req.socket.remoteAddress || '';
       const userAgent = req.get('User-Agent') || '';
 
       const result = await authService.loginWithCode(loginData, ipAddress, userAgent);
@@ -195,7 +196,7 @@ export function registerAuthRoutes(app: Express): void {
   // Logout
   app.post('/api/auth/logout', async (req: any, res) => {
     if (req.session.userId) {
-      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const ipAddress = req.ip || req.socket.remoteAddress || '';
       const userAgent = req.get('User-Agent') || '';
 
       // req.user is not populated here (no requireAuth on this route), so
@@ -220,7 +221,7 @@ export function registerAuthRoutes(app: Express): void {
   app.post('/api/auth/forgot-password', passwordResetLimiter, async (req, res) => {
     try {
       const { email } = forgotPasswordSchema.parse(req.body);
-      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const ipAddress = req.ip || req.socket.remoteAddress || '';
       const userAgent = req.get('User-Agent') || '';
 
       await authService.requestPasswordReset(email, ipAddress, userAgent);
@@ -244,7 +245,7 @@ export function registerAuthRoutes(app: Express): void {
   app.post('/api/auth/reset-password', passwordResetLimiter, async (req, res) => {
     try {
       const { token, password } = resetPasswordSchema.parse(req.body);
-      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const ipAddress = req.ip || req.socket.remoteAddress || '';
       const userAgent = req.get('User-Agent') || '';
 
       const result = await authService.resetPassword(token, password, ipAddress, userAgent);
@@ -274,7 +275,7 @@ export function registerAuthRoutes(app: Express): void {
   app.post('/api/auth/verify-email', passwordResetLimiter, async (req, res) => {
     try {
       const { token } = emailVerificationSchema.parse(req.body);
-      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const ipAddress = req.ip || req.socket.remoteAddress || '';
       const userAgent = req.get('User-Agent') || '';
 
       const result = await authService.verifyEmail(token, ipAddress, userAgent);
@@ -297,7 +298,7 @@ export function registerAuthRoutes(app: Express): void {
   // Resend the verification link for the signed-in account.
   app.post('/api/auth/resend-verification', requireAuth, async (req: any, res) => {
     try {
-      const ipAddress = req.ip || req.connection.remoteAddress || '';
+      const ipAddress = req.ip || req.socket.remoteAddress || '';
       const userAgent = req.get('User-Agent') || '';
 
       const result = await authService.resendEmailVerification(req.user.id, ipAddress, userAgent);
@@ -479,8 +480,12 @@ export function registerAuthRoutes(app: Express): void {
         existingBusinessId: resumableBusinessId,
         refreshBusinessProfile: Boolean(resumableBusinessId),
         // Plan and lifecycle are server-assigned: a wizard payload can never
-        // mint a paid plan or skip the trial.
-        business: { ...validBusinessData, ...newBusinessTrialDefaults() },
+        // mint a paid plan or skip the trial. The trial length is the one from
+        // the console (Planes), not the compiled-in constant.
+        business: {
+          ...validBusinessData,
+          ...newBusinessTrialDefaults(new Date(), await getTrialDays()),
+        },
         libro: validLibroData,
         // Every business needs at least one establishment so the public portal
         // has a "lugar" to file against. Online stores get a virtual channel

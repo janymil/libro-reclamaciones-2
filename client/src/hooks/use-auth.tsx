@@ -16,6 +16,11 @@ interface User {
   isEmailVerified: boolean;
   /** Shared, publicly known account: no tenant administration. */
   isDemo?: boolean;
+  /**
+   * Member of the LibroDigital team (see `PLATFORM_ADMIN_EMAILS`), as opposed to
+   * a customer. Only such a login may confirm a bank transfer / Yape.
+   */
+  isPlatformAdmin?: boolean;
   createdAt: string;
 }
 

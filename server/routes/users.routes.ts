@@ -182,7 +182,7 @@ export function registerUsersRoutes(app: Express): void {
       await storage.createAuthAuditLog({
         action: 'user_deleted',
         email: target.email,
-        ipAddress: req.ip || req.connection.remoteAddress || '',
+        ipAddress: req.ip || req.socket.remoteAddress || '',
         userAgent: req.get('User-Agent') || '',
         success: true,
         userId: req.user.id,
@@ -239,7 +239,7 @@ export function registerUsersRoutes(app: Express): void {
       await storage.createAuthAuditLog({
         action: 'account_deleted',
         email: user.email,
-        ipAddress: req.ip || req.connection.remoteAddress || '',
+        ipAddress: req.ip || req.socket.remoteAddress || '',
         userAgent: req.get('User-Agent') || '',
         success: true,
         metadata: { closedBusiness: closeBusinessFlag },
@@ -315,7 +315,7 @@ export function registerUsersRoutes(app: Express): void {
         const sent = await authService
           .resendEmailVerification(
             user.id,
-            req.ip || req.connection.remoteAddress || '',
+            req.ip || req.socket.remoteAddress || '',
             req.get('User-Agent') || '',
           )
           .catch(() => ({ success: false, message: '' }));

@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { eq, and, desc, asc, count, gte, gt, lte, or, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { eq, and, desc, asc, count, gte, gt, lte, or, isNull, lt, sql } from "drizzle-orm";
 import {
   type Complaint,
   type InsertComplaint,
@@ -13,7 +13,6 @@ import type {
   ComplaintStats,
   ReincidenceReport,
 } from "./types";
-import { businessDayCalculator } from "../services/businessDayCalculator";
 import { summarizeSla, averageResponseBusinessDays } from "../services/complaintSlaService";
 
 /** Data access for the "complaint" aggregate. */

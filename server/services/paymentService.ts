@@ -2,15 +2,17 @@ import crypto from "crypto";
 
 import {
   PAYMENT_CURRENCY,
+  PAYMENT_CURRENCY_SYMBOL,
   SUBSCRIPTION_STATUS_LABELS,
   availablePaymentProviders,
   buildPaymentReference,
+  centsToSoles,
   computePeriodEnd,
+  getPaymentProvider,
   isPaymentSuccessful,
   isPubliclyReachableBaseUrl,
   isSubscriptionLive,
   isSubscriptionStatus,
-  planAmountCents,
   providerSupportsRecurring,
   referenceSuffix,
   resolvePlanFromAmount,
@@ -22,10 +24,16 @@ import {
   type SubscriptionStatus,
 } from "@shared/payments";
 import { getPlan, isPlanId, isTrialing } from "@shared/plans";
+import { formatCalendarDate } from "@shared/peru-time";
 import type { Business, Payment, Subscription } from "@shared/schema";
 
 import { storage } from "../storage";
 import { emailService } from "./emailService";
+import { redeemDiscountForPayment, evaluateDiscountForCheckout, DiscountRejectedError } from "./discountService";
+import { effectivePlanAmountCents } from "./pricingService";
+import { readTransferDetails } from "./paymentSettingsService";
+import { getAlertEmail, getIdentity } from "./platformSettingsService";
+
 import {
   getGateway,
   type CheckoutInput,
@@ -83,8 +91,18 @@ function warnIfBaseUrlUnreachable(baseUrl: string): void {
   );
 }
 
+/**
+ * What a successful payment writes onto the business row.
+ *
+ * The keys here are **column** names, not friendly ones: this object goes straight
+ * into `storage.updateBusiness`, and Drizzle silently drops a key that matches no
+ * column. An earlier version returned `plan` instead of `subscriptionPlan`, so a
+ * paying customer's period was credited while the plan itself stayed on `gratis` -
+ * a bug that no assertion on the return value could see. `paymentReceipt.test.ts`
+ * now asserts the keys that actually reach the database.
+ */
 export interface PaidPeriodResult {
-  plan: string;
+  subscriptionPlan: string;
   planPeriod: PlanPeriod;
   subscriptionStatus: string;
   currentPeriodEnd: Date;
@@ -119,7 +137,7 @@ export function applyPaidPeriod(
   }
 
   return {
-    plan: planId,
+    subscriptionPlan: planId,
     planPeriod: period,
     // A paying customer inside the trial stays "trialing" until it expires;
     // only then does the paid plan (already stored) take over.
@@ -163,6 +181,15 @@ export interface StartPaymentInput {
   period: PlanPeriod;
   /** Public origin used to build the return and webhook URLs. */
   baseUrl: string;
+  /**
+   * Discount already validated by the caller (`discountService`), if any.
+   *
+   * It arrives resolved instead of as a code for one reason: the code must be
+   * evaluated once, against the price we are about to charge, and the result stored
+   * with the payment. A second lookup inside here could disagree with the amount the
+   * customer was shown.
+   */
+  discount?: { id: string; code: string; amountOffCents: number };
 }
 
 export interface StartPaymentResult {
@@ -183,9 +210,15 @@ export async function startPayment(input: StartPaymentInput): Promise<StartPayme
 
   const plan = getPlan(input.planId);
   const periodLabel = input.period === "annual" ? "anual" : "mensual";
-  const amountCents = planAmountCents(plan.id, input.period);
+  // The price list is the console's (Planes), never the code's: an operator must be
+  // able to reprice without a deploy, and this is the only place that charges.
+  const listCents = await effectivePlanAmountCents(plan.id, input.period);
+  const discountCents = input.discount?.amountOffCents ?? 0;
+  const amountCents = Math.max(0, listCents - discountCents);
 
-  // Same rule as the recurring path: a free plan is not a checkout.
+  // Same rule as the recurring path: a free plan is not a checkout. A discount that
+  // swallows the whole price is refused too (`@shared/discounts` enforces the floor),
+  // so this is the last line of defence against a S/ 0.00 order.
   if (amountCents <= 0) {
     throw new Error("El plan seleccionado es gratuito: no requiere ningún pago.");
   }
@@ -207,10 +240,21 @@ export async function startPayment(input: StartPaymentInput): Promise<StartPayme
     amountCents,
     currency: PAYMENT_CURRENCY,
     status: "pending",
+    // The ledger explains the charge: what it was, what came off and which code did it.
+    discountCode: input.discount?.code ?? null,
+    discountCents,
+    discountCodeId: input.discount?.id ?? null,
   });
 
   const base = input.baseUrl.replace(/\/+$/, "");
   warnIfBaseUrlUnreachable(base);
+
+  // The offline provider tells the customer where to send the money, so it needs
+  // the details an operator saved in Configuración. Read here (not in the gateway)
+  // so the gateway stays free of storage; `undefined` makes it fall back to
+  // PAYMENTS_MANUAL_INSTRUCTIONS / the generic "ask us" text.
+  const transferDetails =
+    input.providerId === "manual" ? await readTransferDetails() : undefined;
 
   const checkoutInput: CheckoutInput = {
     reference,
@@ -224,6 +268,7 @@ export async function startPayment(input: StartPaymentInput): Promise<StartPayme
     failureUrl: `${base}/pagos?pago=error&ref=${encodeURIComponent(reference)}`,
     pendingUrl: `${base}/pagos?pago=pendiente&ref=${encodeURIComponent(reference)}`,
     notificationUrl: `${base}/api/payments/webhook/${input.providerId}`,
+    transferDetails,
   };
 
   try {
@@ -284,7 +329,7 @@ export async function startSubscription(input: StartSubscriptionInput): Promise<
   }
 
   const plan = getPlan(input.planId);
-  const amountCents = planAmountCents(plan.id, input.period);
+  const amountCents = await effectivePlanAmountCents(plan.id, input.period);
 
   // A free plan is not a payment: sending S/ 0 to the provider would be
   // rejected there and reported as a confusing gateway error. Say it plainly.
@@ -357,6 +402,8 @@ export interface StartCheckoutInput {
   baseUrl: string;
   /** `auto` (default) prefers a recurring subscription when available. */
   mode?: "auto" | "one_time";
+  /** Customer-typed promo code, if any. Never trusted: re-validated here. */
+  discountCode?: string;
 }
 
 export type StartCheckoutResult =
@@ -370,23 +417,106 @@ export type StartCheckoutResult =
  * is a subscription. `one_time` remains available for the exceptions (a
  * customer who insists on paying once, or a provider without the recurring
  * rail, or the offline bank transfer).
+ *
+ * Discount codes are resolved here, once, against the price we are about to charge:
+ * the result is stored on the payment, so what the customer was promised and what we
+ * asked the provider for are the same number.
  */
 export async function startCheckout(input: StartCheckoutInput): Promise<StartCheckoutResult> {
   const wantsRecurring =
     input.mode !== "one_time" && providerSupportsRecurring(input.providerId);
 
-  if (wantsRecurring) {
-    const result = await startSubscription(input);
-    return { mode: "subscription", redirectUrl: result.redirectUrl, subscription: result.subscription };
+  const code = (input.discountCode ?? "").trim();
+
+  // A discount on a recurring agreement would follow the customer forever: the
+  // provider would keep charging the discounted amount every period. Refusing it is
+  // the only honest answer, and the UI offers one-time payment for exactly this.
+  if (code && wantsRecurring) {
+    throw new DiscountRejectedError(
+      "Los descuentos aplican a un pago único. Elija «Pago único» para usar su código, o pague el precio del plan sin descuento.",
+    );
   }
 
-  const result = await startPayment(input);
-  return {
-    mode: "payment",
-    redirectUrl: result.redirectUrl,
-    instructions: result.instructions,
-    payment: result.payment,
-  };
+  let discount: StartPaymentInput["discount"];
+  if (code) {
+    const listCents = await effectivePlanAmountCents(input.planId, input.period);
+    const evaluation = await evaluateDiscountForCheckout(code, {
+      planId: input.planId,
+      amountCents: listCents,
+    });
+    if (!evaluation.ok || !evaluation.rule) {
+      throw new DiscountRejectedError(evaluation.reason ?? "El código de descuento no es válido.");
+    }
+    discount = {
+      id: evaluation.rule.id,
+      code: evaluation.rule.code,
+      amountOffCents: evaluation.amountOffCents,
+    };
+  }
+
+  // The agreement this purchase replaces, read BEFORE the new row exists:
+  // `getLatestSubscriptionByBusiness` returns the newest agreement, which after
+  // the insert below would be the new (still pending) one.
+  const replaced = await findReplacedAgreement(input.business.id, input.planId, input.period);
+
+  let result: StartCheckoutResult;
+  if (wantsRecurring) {
+    const created = await startSubscription(input);
+    result = {
+      mode: "subscription",
+      redirectUrl: created.redirectUrl,
+      subscription: created.subscription,
+    };
+  } else {
+    const created = await startPayment(discount ? { ...input, discount } : input);
+    result = {
+      mode: "payment",
+      redirectUrl: created.redirectUrl,
+      instructions: created.instructions,
+      payment: created.payment,
+    };
+  }
+
+  // Changing plan - or only the billing period of the same plan, e.g. Básico
+  // mensual to Básico anual - has to stop the provider charging the old
+  // agreement, or the customer pays for both at once. Done AFTER the new
+  // checkout exists so a failed checkout never leaves them with nothing.
+  if (replaced) {
+    await cancelAgreement(replaced).catch((error) => {
+      console.error(
+        `[payments] no se pudo cancelar la suscripción ${replaced.reference} reemplazada por ` +
+          `${input.planId}/${input.period}:`,
+        error,
+      );
+    });
+  }
+
+  return result;
+}
+
+/**
+ * A live agreement that a new purchase replaces, if any.
+ *
+ * Only a REAL change counts. Re-buying the exact plan and period that is already
+ * being charged is a deliberate early renewal - `applyPaidPeriod` stacks the new
+ * period on top - so that agreement is left alone.
+ */
+async function findReplacedAgreement(
+  businessId: string,
+  planId: string,
+  period: PlanPeriod,
+): Promise<Subscription | undefined> {
+  const current = await storage.getLatestSubscriptionByBusiness(businessId);
+  if (!current || !isSubscriptionLive(current.status)) {
+    return undefined;
+  }
+
+  const samePeriod = (current.period === "annual") === (period === "annual");
+  if (current.planId === planId && samePeriod) {
+    return undefined;
+  }
+
+  return current;
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +564,21 @@ export async function settlePayment(
 
   if (isPaymentSuccessful(settled.status)) {
     await activatePlan(settled);
+
+    // The code is consumed HERE, not at checkout: an abandoned checkout must not
+    // burn a redemption. Fire-and-forget by design - the money is already in.
+    await redeemDiscountForPayment(settled).catch((error) => {
+      console.error(
+        `[payments] no se pudo contar el uso del descuento en ${settled.reference}:`,
+        error,
+      );
+    });
+
+    // Fire and forget: a receipt that cannot be delivered must never undo a
+    // confirmed payment, nor fail the webhook response the provider is waiting for.
+    void sendPaymentReceipt(settled).catch((error) => {
+      console.error(`[payments] no se pudo enviar el comprobante de ${settled.reference}:`, error);
+    });
   }
 
   return settled;
@@ -449,6 +594,51 @@ async function activatePlan(payment: Payment): Promise<void> {
 
   const period: PlanPeriod = payment.period === "annual" ? "annual" : "monthly";
   await storage.updateBusiness(business.id, applyPaidPeriod(business, payment.planId, period));
+}
+
+/**
+ * Emails the customer a receipt for a payment that has just been credited.
+ *
+ * Sent from our own system instead of relying on the provider's receipt email:
+ * Mercado Pago cannot deliver anything to a test user's mailbox (so the sandbox
+ * could never prove that path), and a bank transfer has no provider email at all.
+ * This way a confirmed charge always produces one message, whatever the method.
+ */
+async function sendPaymentReceipt(payment: Payment): Promise<void> {
+  // A payment confirmed by an administrator may have no user attached; there is
+  // then no customer to write to.
+  if (!payment.userId) {
+    return;
+  }
+
+  const [user, business] = await Promise.all([
+    storage.getUser(payment.userId),
+    storage.getBusiness(payment.businessId),
+  ]);
+
+  if (!user?.email) {
+    return;
+  }
+
+  const periodEnd = business?.currentPeriodEnd ? new Date(business.currentPeriodEnd) : null;
+
+  // The identity the console configured: the receipt carries the legal footer a
+  // customer may need (razón social, RUC, dirección). Empty fields are simply not
+  // printed, so a deployment that never opened Configuración reads as before.
+  const identity = await getIdentity().catch(() => undefined);
+
+  await emailService.sendPaymentReceipt({
+    email: user.email,
+    firstName: user.firstName ?? "",
+    businessName: business?.businessName ?? "su empresa",
+    planName: getPlan(payment.planId)?.name ?? payment.planId,
+    periodLabel: payment.period === "annual" ? "anual" : "mensual",
+    amountLabel: `${PAYMENT_CURRENCY_SYMBOL} ${centsToSoles(payment.amountCents).toFixed(2)}`,
+    methodName: getPaymentProvider(payment.provider)?.name ?? payment.provider,
+    reference: payment.reference,
+    validUntilLabel: periodEnd ? formatCalendarDate(periodEnd) : null,
+    identity,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -507,6 +697,13 @@ async function setBusinessSubscriptionState(businessId: string, status: string):
 
   const business = await storage.getBusiness(businessId);
   if (!business || business.subscriptionStatus === next) {
+    return;
+  }
+
+  // A running trial is a window we granted, not a charge a provider can switch
+  // off: a pause or a cancellation must not end it early, or the customer loses
+  // free days we promised. The trial closes on its own date.
+  if (isTrialing(business)) {
     return;
   }
 
@@ -575,13 +772,13 @@ async function adoptSubscription(
   // For a panel-created plan, the price the customer agreed to is the one the
   // provider reports - not our catalogue. Book it as-is so the charge amount
   // check downstream compares like with like.
-  const amountCents = state.amountCents ?? planAmountCents(plan.id, purchase.period);
+  const amountCents = state.amountCents ?? (await effectivePlanAmountCents(plan.id, purchase.period));
 
-  const catalogueCents = planAmountCents(plan.id, purchase.period);
+  const catalogueCents = await effectivePlanAmountCents(plan.id, purchase.period);
   if (amountCents !== catalogueCents) {
     console.warn(
       `[payments] el precio del plan ${plan.name} (${purchase.period}) en Mercado Pago es ${amountCents} ` +
-        `y en el catálogo ${catalogueCents}. Revise el panel y shared/plans.ts.`,
+        `y el vigente ${catalogueCents}. Revise el panel y la sección Planes del panel de operaciones.`,
     );
   }
 
@@ -649,25 +846,30 @@ async function alertUnmatchedSubscription(
       `código ${state.externalReference ?? "—"}, pagador ${state.payerEmail ?? "—"}.`,
   );
 
-  const recipient = process.env.PAYMENTS_ALERT_EMAIL?.trim();
+  const recipient = await getAlertEmail();
   if (!recipient) {
     return;
   }
 
   // Fire and forget: an alert must never break the webhook response.
   void emailService
-    .sendPlatformAlert(recipient, "Suscripción pagada sin asignar", [
-      `Proveedor: ${providerId}`,
-      `Suscripción (id de Mercado Pago): ${providerRef}`,
-      `Estado: ${state.status}`,
-      `Importe: ${amount}`,
-      `Código del plan: ${state.externalReference ?? "—"}`,
-      `Correo del pagador: ${state.payerEmail ?? "—"}`,
-      "",
-      "Hay un pago que no se pudo asignar a ninguna empresa. Suele ocurrir cuando el cliente",
-      "paga con un correo de Mercado Pago que no es el de su cuenta: pídale registrarse con",
-      "ese mismo correo, o asígnele el plan manualmente.",
-    ])
+    .sendPlatformAlert(
+      recipient,
+      "Suscripción pagada sin asignar",
+      [
+        `Proveedor: ${providerId}`,
+        `Suscripción (id de Mercado Pago): ${providerRef}`,
+        `Estado: ${state.status}`,
+        `Importe: ${amount}`,
+        `Código del plan: ${state.externalReference ?? "—"}`,
+        `Correo del pagador: ${state.payerEmail ?? "—"}`,
+        "",
+        "Hay un pago que no se pudo asignar a ninguna empresa. Suele ocurrir cuando el cliente",
+        "paga con un correo de Mercado Pago que no es el de su cuenta: pídale registrarse con",
+        "ese mismo correo, o asígnele el plan manualmente.",
+      ],
+      await getIdentity().catch(() => undefined),
+    )
     .catch(() => {});
 }
 
@@ -779,6 +981,18 @@ export async function cancelSubscriptionForBusiness(businessId: string): Promise
   if (!subscription) {
     return undefined;
   }
+  return cancelAgreement(subscription);
+}
+
+/**
+ * Cancels ONE agreement: tells the provider to stop charging and closes the row.
+ *
+ * Separate from `cancelSubscriptionForBusiness` because the checkout knows
+ * exactly which agreement it replaces - the one read before the new row existed.
+ * Going back to "the latest agreement of this business" at that point would
+ * return the agreement that was just created.
+ */
+async function cancelAgreement(subscription: Subscription): Promise<Subscription> {
   if (subscription.status === "cancelled") {
     return subscription;
   }
@@ -940,6 +1154,16 @@ export async function listPayments(businessId: string): Promise<Payment[]> {
   return storage.getPaymentsByBusiness(businessId);
 }
 
+/**
+ * The operator's queue: pending transfers/Yape of every customer.
+ *
+ * Deliberately not tenant-scoped. Only platform staff reach it, and their job is
+ * to look at their own bank/Yape app and reconcile the reference they see there.
+ */
+export async function listPendingManualPayments(): Promise<Payment[]> {
+  return storage.listPendingManualPayments();
+}
+
 /** Re-checks a still-pending payment against the provider (return from checkout). */
 export async function refreshPayment(paymentId: string): Promise<Payment | undefined> {
   const payment = await storage.getPayment(paymentId);
@@ -955,7 +1179,25 @@ export async function refreshPayment(paymentId: string): Promise<Payment | undef
     return payment;
   }
 
-  const authoritative = await gateway.fetchStatus(payment.providerRef);
+  // How to ask, depends on which handle we hold:
+  //   * a subscription charge has a payment id (there is nothing to look up while
+  //     the agreement itself is still pending);
+  //   * a Checkout Pro reference is a *preference*, so the payments endpoint can
+  //     only answer 404 for it - that used to reach the customer as "no se pudo
+  //     verificar el pago con el proveedor" while the money simply had not been
+  //     sent yet. Our own reference is the handle that works there.
+  const holdsPreference = payment.provider !== "manual" && !payment.subscriptionId;
+
+  const authoritative =
+    holdsPreference && gateway.findPaymentByReference
+      ? await gateway.findPaymentByReference(payment.reference)
+      : await gateway.fetchStatus(payment.providerRef);
+
+  if (!authoritative) {
+    // Nothing was charged for that preference yet: still pending, not an error.
+    return payment;
+  }
+
   return settlePayment(payment, authoritative.status, authoritative.amountCents, authoritative.raw);
 }
 

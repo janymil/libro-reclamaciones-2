@@ -28,8 +28,9 @@ import {
  * Two jobs:
  *   * show every attempt with its reference, so the customer and our support
  *     can reconcile a bank transfer without guessing;
- *   * let an administrator confirm a transfer / Yape that arrived, and re-check
- *     a pending online payment (the webhook can be a few seconds late).
+ *   * let the LibroDigital team (not the customer - see `PLATFORM_ADMIN_EMAILS`)
+ *     confirm a transfer / Yape that arrived, and re-check a pending online
+ *     payment (the webhook can be a few seconds late).
  */
 
 const STATUS_STYLES: Record<string, string> = {
@@ -204,7 +205,7 @@ function PaymentRow({
 
         {payment.status === 'pending' && isManual && !canConfirm && (
           <span className="text-xs text-gray-500">
-            Esperando confirmación de un administrador
+            Esperando confirmación del equipo de LibroDigital
           </span>
         )}
       </div>
@@ -218,7 +219,7 @@ export default function PaymentsPage() {
   const isAdmin = user?.role === 'admin';
 
   // Query params are read once: this page is also where the PSP redirects the
-  // customer back (?pago=ok|error|pendiente&ref=LV-XXXXXX).
+  // customer back (?pago=ok|error|pendiente&ref=LD-XXXXXX).
   const [params] = useState(() => new URLSearchParams(window.location.search));
   const returnState = params.get('pago');
   const returnRef = params.get('ref');
@@ -427,7 +428,7 @@ export default function PaymentsPage() {
               <PaymentRow
                 key={payment.id}
                 payment={payment}
-                canConfirm={isAdmin}
+                canConfirm={Boolean(user?.isPlatformAdmin)}
                 busy={
                   (refresh.isPending && refresh.variables === payment.id) ||
                   (confirm.isPending && confirm.variables === payment.id)

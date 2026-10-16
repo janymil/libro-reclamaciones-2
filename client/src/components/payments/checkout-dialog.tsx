@@ -12,11 +12,13 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
+  useDiscountPreview,
   usePaymentProviders,
   useStartCheckout,
-  type CheckoutResponse,
   type PaymentProviderOption,
 } from "@/hooks/use-payments";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   PAYMENT_CURRENCY_SYMBOL,
   PAYMENT_METHODS,
@@ -46,11 +48,21 @@ function ProviderCard({
   provider,
   selected,
   onSelect,
+  recurring,
 }: {
   provider: PaymentProviderOption;
   selected: boolean;
   onSelect: () => void;
+  /** True when this card is being sold as a subscription rather than a single period. */
+  recurring: boolean;
 }) {
+  // A recurring charge needs a card on file: Yape, Plin and cash cannot be
+  // charged again by themselves, so they are not offered in that mode. This is
+  // Mercado Pago's own checkout behaviour, confirmed against the live API.
+  const methods = recurring
+    ? provider.methods.filter((method) => method === "tarjeta")
+    : provider.methods;
+
   return (
     <button
       type="button"
@@ -70,7 +82,7 @@ function ProviderCard({
       <p className="mt-1 text-sm text-gray-600">{provider.tagline}</p>
 
       <div className="mt-2 flex flex-wrap gap-1">
-        {provider.methods.map((method) => (
+        {methods.map((method) => (
           <span
             key={method}
             className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700"
@@ -81,7 +93,7 @@ function ProviderCard({
         ))}
       </div>
 
-      {provider.supportsRecurring && (
+      {recurring && (
         <p className="mt-2 inline-flex items-center gap-1 rounded bg-green-50 px-2 py-1 text-xs font-medium text-green-800">
           <span className="material-icons text-[14px] leading-none">autorenew</span>
           Se renueva solo cada mes o año
@@ -109,8 +121,22 @@ export default function CheckoutDialog({
   const { toast } = useToast();
   const providers = usePaymentProviders();
   const checkout = useStartCheckout();
+  const discountPreview = useDiscountPreview();
 
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  // A provider with a recurring rail can also sell just one period, which is the
+  // only way to pay with Yape, Plin or cash. `false` = charge automatically.
+  const [oneTime, setOneTime] = useState(false);
+  // A promo code only makes sense on a single period: a recurring charge at a
+  // discounted amount would follow the customer forever.
+  const [code, setCode] = useState('');
+  const [applied, setApplied] = useState<{
+    code: string;
+    label: string;
+    finalAmountCents: number;
+    amountOffCents: number;
+  } | null>(null);
+  const [codeError, setCodeError] = useState<string | null>(null);
   // Only the offline path needs a panel here: everything else leaves the page
   // for the provider's checkout.
   const [offline, setOffline] = useState<{ reference: string; instructions?: string } | null>(null);
@@ -134,6 +160,10 @@ export default function CheckoutDialog({
   useEffect(() => {
     if (open) {
       setOffline(null);
+      setOneTime(false);
+      setCode('');
+      setApplied(null);
+      setCodeError(null);
     }
   }, [open]);
 
@@ -142,8 +172,41 @@ export default function CheckoutDialog({
 
   const selected = options.find((option) => option.id === selectedProvider);
   // A recurring provider charges again every period by itself; the others are
-  // paid one period at a time.
-  const recurring = selected?.supportsRecurring === true;
+  // paid one period at a time. The customer can turn a recurring provider into a
+  // single payment, because Yape, Plin and cash cannot be charged again.
+  const recurring = selected?.supportsRecurring === true && !oneTime;
+
+  /** What the customer pays: the catalogue price, or the discounted one. */
+  const payable = applied && !recurring ? applied.finalAmountCents / 100 : price;
+
+  /** Asks the server what the typed code is worth (never trust the browser). */
+  const handleApplyCode = async () => {
+    if (!plan || !code.trim()) {
+      return;
+    }
+    setCodeError(null);
+    try {
+      const result = await discountPreview.mutateAsync({
+        plan: plan.id,
+        period,
+        code: code.trim(),
+      });
+      if (!result.ok) {
+        setApplied(null);
+        setCodeError(result.reason ?? 'Ese código no es válido.');
+        return;
+      }
+      setApplied({
+        code: code.trim().toUpperCase(),
+        label: result.label,
+        finalAmountCents: result.finalAmountCents,
+        amountOffCents: result.amountOffCents,
+      });
+    } catch (error) {
+      setApplied(null);
+      setCodeError(error instanceof Error ? error.message.replace(/^\d{3}:\s*/, '') : 'Error');
+    }
+  };
 
   const handleClose = (next: boolean) => {
     if (checkout.isPending) {
@@ -162,6 +225,9 @@ export default function CheckoutDialog({
         plan: plan.id,
         period,
         provider: selectedProvider,
+        mode: recurring ? 'auto' : 'one_time',
+        // Only a single period can carry a discount; the server re-validates it.
+        discountCode: applied && !recurring ? applied.code : undefined,
       });
       onStarted?.();
 
@@ -238,12 +304,54 @@ export default function CheckoutDialog({
               <p className="text-sm text-gray-500">Cargando métodos de pago...</p>
             )}
 
+            {selected?.supportsRecurring && (
+              <div className="rounded-lg border p-3" data-testid="checkout-mode">
+                <p className="text-sm font-medium">¿Cómo quiere pagar?</p>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setOneTime(false)}
+                    data-testid="checkout-mode-recurring"
+                    className={[
+                      "rounded-lg border p-3 text-left text-sm transition-colors",
+                      !oneTime
+                        ? "border-primary ring-2 ring-primary/30 bg-primary/5"
+                        : "hover:bg-gray-50",
+                    ].join(" ")}
+                  >
+                    <span className="font-medium">Cobro automático</span>
+                    <span className="mt-0.5 block text-xs text-gray-600">
+                      Con tarjeta. Se renueva solo y puede cancelar cuando quiera.
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setOneTime(true)}
+                    data-testid="checkout-mode-one-time"
+                    className={[
+                      "rounded-lg border p-3 text-left text-sm transition-colors",
+                      oneTime
+                        ? "border-primary ring-2 ring-primary/30 bg-primary/5"
+                        : "hover:bg-gray-50",
+                    ].join(" ")}
+                  >
+                    <span className="font-medium">Pago único</span>
+                    <span className="mt-0.5 block text-xs text-gray-600">
+                      Tarjeta, Yape, Plin o efectivo. Usted lo renueva cada periodo.
+                    </span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {options.map((provider) => (
               <ProviderCard
                 key={provider.id}
                 provider={provider}
                 selected={selectedProvider === provider.id}
                 onSelect={() => setSelectedProvider(provider.id)}
+                recurring={provider.supportsRecurring && !(oneTime && selectedProvider === provider.id)}
               />
             ))}
 
@@ -253,10 +361,59 @@ export default function CheckoutDialog({
               </p>
             )}
 
+            {/* A promo code is only offered for a single period: a recurring charge at a
+                discounted amount would follow the customer forever. */}
+            {!recurring && selectedProvider && (
+              <div className="rounded-lg border p-3" data-testid="checkout-discount">
+                <Label className="text-sm font-medium" htmlFor="checkout-discount-code">
+                  ¿Tiene un código de descuento?
+                </Label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Input
+                    id="checkout-discount-code"
+                    className="max-w-[12rem]"
+                    placeholder="PRO10"
+                    value={code}
+                    onChange={(event) => {
+                      setCode(event.target.value);
+                      setCodeError(null);
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!code.trim() || discountPreview.isPending}
+                    data-testid="button-apply-discount"
+                    onClick={() => void handleApplyCode()}
+                  >
+                    {discountPreview.isPending ? 'Comprobando...' : 'Aplicar'}
+                  </Button>
+                </div>
+
+                {codeError && (
+                  <p className="mt-2 text-xs text-red-600" data-testid="checkout-discount-error">
+                    {codeError}
+                  </p>
+                )}
+
+                {applied && (
+                  <p className="mt-2 text-xs text-green-700" data-testid="checkout-discount-applied">
+                    {applied.code} aplicado ({applied.label}): paga{' '}
+                    <strong>
+                      {PAYMENT_CURRENCY_SYMBOL} {(applied.finalAmountCents / 100).toFixed(2)}
+                    </strong>{' '}
+                    en vez de {PAYMENT_CURRENCY_SYMBOL} {price.toFixed(2)}.
+                  </p>
+                )}
+              </div>
+            )}
+
             <p className="text-xs text-gray-500">
               {recurring
                 ? "Autorizará un cobro automático cada periodo y podrá cancelarlo desde «Pagos» cuando quiera. El plan se activa cuando el primer cobro queda confirmado; si está en la prueba gratuita, conserva los días restantes."
-                : "El plan se activa solo cuando el pago queda confirmado. Si paga durante la prueba gratuita, conserva los días restantes."}
+                : "El plan se activa solo cuando el pago queda confirmado. Si paga durante la prueba gratuita, conserva los días restantes."}{' '}
+              Si ya tenía un cobro automático de otro plan o del mismo plan en otro periodo, se
+              cancela al iniciar este pago: nunca se le cobra dos veces.
             </p>
           </div>
         )}
@@ -276,7 +433,7 @@ export default function CheckoutDialog({
                 ? 'Iniciando...'
                 : recurring
                   ? `Suscribirme · ${PAYMENT_CURRENCY_SYMBOL} ${price} /${period === 'annual' ? 'año' : 'mes'}`
-                  : `Pagar ${PAYMENT_CURRENCY_SYMBOL} ${price}`}
+                  : `Pagar ${PAYMENT_CURRENCY_SYMBOL} ${payable.toFixed(2)}`}
             </Button>
           )}
         </DialogFooter>

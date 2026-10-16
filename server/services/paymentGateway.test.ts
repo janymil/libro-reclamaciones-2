@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 
+import { normalizePaymentDetails } from "@shared/payment-details";
+
 import {
   DEFAULT_MANUAL_DETAILS,
   getGateway,
@@ -27,7 +29,7 @@ import {
  */
 
 const input: CheckoutInput = {
-  reference: "LV-8F3A2B",
+  reference: "LD-8F3A2B",
   amountCents: 2900,
   description: "Plan Pro (mensual)",
   planId: "profesional",
@@ -50,8 +52,8 @@ describe("mercadopagoPreferenceBody", () => {
 
   it("carries our reference so the webhook can be reconciled", () => {
     const body = mercadopagoPreferenceBody(input) as any;
-    expect(body.external_reference).toBe("LV-8F3A2B");
-    expect(body.items[0].description).toContain("LV-8F3A2B");
+    expect(body.external_reference).toBe("LD-8F3A2B");
+    expect(body.items[0].description).toContain("LD-8F3A2B");
   });
 
   it("registers the notification URL and the three back URLs", () => {
@@ -131,7 +133,7 @@ describe("parseMercadoPagoPayment", () => {
     id: 99887766,
     status: "approved",
     status_detail: "accredited",
-    external_reference: "LV-8F3A2B",
+    external_reference: "LD-8F3A2B",
     transaction_amount: 29,
     currency_id: "PEN",
     payment_method_id: "yape",
@@ -156,7 +158,7 @@ describe("parseMercadoPagoPayment", () => {
     expect(JSON.stringify(parsed.raw)).not.toContain("12345678");
     expect(JSON.stringify(parsed.raw)).not.toContain("411111");
     // The fields we do need are kept
-    expect(parsed.raw.external_reference).toBe("LV-8F3A2B");
+    expect(parsed.raw.external_reference).toBe("LD-8F3A2B");
     expect(parsed.raw.payment_method_id).toBe("yape");
   });
 
@@ -214,18 +216,18 @@ describe("parseMercadoPagoNotification", () => {
 describe("manual provider", () => {
   it("always includes the reference and the amount in the instructions", () => {
     const instructions = manualPaymentInstructions({
-      reference: "LV-8F3A2B",
+      reference: "LD-8F3A2B",
       amountCents: 2900,
       description: "Plan Pro (mensual)",
     });
-    expect(instructions).toContain("LV-8F3A2B");
+    expect(instructions).toContain("LD-8F3A2B");
     expect(instructions).toContain("S/ 29.00");
     expect(instructions).toContain("Plan Pro (mensual)");
   });
 
   it("formats sub-sol decimals with two places", () => {
     const instructions = manualPaymentInstructions({
-      reference: "LV-TEST01",
+      reference: "LD-TEST01",
       amountCents: 49050,
       description: "Plan",
     });
@@ -238,14 +240,53 @@ describe("manual provider", () => {
 
     const result = await gateway.createCheckout(input);
     expect(result.redirectUrl).toBeNull();
-    expect(result.providerRef).toBe("LV-8F3A2B");
+    expect(result.providerRef).toBe("LD-8F3A2B");
     expect(result.instructions).toBeTruthy();
     expect(DEFAULT_MANUAL_DETAILS.length).toBeGreaterThan(0);
   });
 
   it("reports 'pending' because only a human can confirm a transfer", async () => {
-    const status = await getGateway("manual").fetchStatus("LV-8F3A2B");
+    const status = await getGateway("manual").fetchStatus("LD-8F3A2B");
     expect(status.status).toBe("pending");
+  });
+
+  /**
+   * Configuración → Datos de pago. These are the details a paying customer acts on,
+   * and the checkout is what hands them over, so the gateway is where the
+   * precedence between the console and the environment variable is pinned down.
+   */
+  it("prefers the details saved in the console over the environment text", () => {
+    process.env.PAYMENTS_MANUAL_INSTRUCTIONS = "BCP soles 193-0000000-0-00";
+
+    try {
+      const instructions = manualPaymentInstructions(
+        input,
+        normalizePaymentDetails({
+          holderName: "LibroDigital S.A.C.",
+          yapeNumber: "999 888 777",
+          bankAccounts: [
+            { bank: "BCP", accountNumber: "193-1234567-0-12", cci: "002-193-001234567012-15" },
+          ],
+        }),
+      );
+
+      expect(instructions).toContain("Yape al 999 888 777 (a nombre de LibroDigital S.A.C.).");
+      expect(instructions).toContain("CCI 002-193-001234567012-15");
+      // The env var is the fallback, not a second opinion: it must not leak in.
+      expect(instructions).not.toContain("193-0000000-0-00");
+      // And never duplicated: the console block already carries reference + amount.
+      expect(instructions.match(/LD-8F3A2B/g)?.length).toBe(2);
+    } finally {
+      delete process.env.PAYMENTS_MANUAL_INSTRUCTIONS;
+    }
+  });
+
+  it("passes the console's details through when the gateway builds the checkout", async () => {
+    const details = normalizePaymentDetails({ yapeNumber: "999 888 777" });
+    const result = await getGateway("manual").createCheckout({ ...input, transferDetails: details });
+
+    expect(result.instructions).toContain("Yape al 999 888 777");
+    expect(result.redirectUrl).toBeNull();
   });
 });
 
@@ -277,7 +318,7 @@ describe("gateway registry", () => {
   it("lets PAYMENTS_MANUAL_INSTRUCTIONS override the default bank details", () => {
     process.env.PAYMENTS_MANUAL_INSTRUCTIONS = "BCP soles 123-4567890-0-11";
     const instructions = manualPaymentInstructions({
-      reference: "LV-8F3A2B",
+      reference: "LD-8F3A2B",
       amountCents: 2900,
       description: "Plan",
     });
@@ -291,14 +332,14 @@ describe("gateway registry", () => {
 // ---------------------------------------------------------------------------
 
 const subscriptionInput: SubscriptionCheckoutInput = {
-  reference: "LV-8F3A2B",
+  reference: "LD-8F3A2B",
   amountCents: 2900,
   description: "Plan Pro (mensual)",
   planId: "profesional",
   period: "monthly",
   payerEmail: "admin@empresa.pe",
   businessName: "Empresa SAC",
-  backUrl: "https://librodigital.pe/pagos?pago=ok&ref=LV-8F3A2B",
+  backUrl: "https://librodigital.pe/pagos?pago=ok&ref=LD-8F3A2B",
   notificationUrl: "https://librodigital.pe/api/payments/webhook/mercadopago",
 };
 
@@ -327,7 +368,7 @@ describe("mercadopagoPreapprovalBody", () => {
 
   it("carries our reference so every future charge can be traced back", () => {
     const body = mercadopagoPreapprovalBody(subscriptionInput) as any;
-    expect(body.external_reference).toBe("LV-8F3A2B");
+    expect(body.external_reference).toBe("LD-8F3A2B");
     expect(body.reason).toContain("Empresa SAC");
   });
 });
@@ -351,7 +392,7 @@ describe("parseMercadoPagoPreapproval", () => {
   const preapproval = {
     id: "2c938084726fca480172750000000000",
     status: "authorized",
-    external_reference: "LV-8F3A2B",
+    external_reference: "LD-8F3A2B",
     init_point: "https://www.mercadopago.com.pe/subscriptions/checkout?preapproval_id=1",
     next_payment_date: "2026-07-01T00:00:00.000Z",
     auto_recurring: {
@@ -388,7 +429,7 @@ describe("parseMercadoPagoPreapproval", () => {
     expect(parsed.raw).not.toHaveProperty("payer_email");
     expect(parsed.raw).not.toHaveProperty("payer_id");
     expect(JSON.stringify(parsed.raw)).not.toContain("123456789");
-    expect(parsed.raw.external_reference).toBe("LV-8F3A2B");
+    expect(parsed.raw.external_reference).toBe("LD-8F3A2B");
   });
 
   it("throws when there is no subscription id at all", () => {
@@ -403,7 +444,7 @@ describe("parseMercadoPagoPreapproval", () => {
     });
 
     // These two are what let an unknown subscription be recognised.
-    expect(parsed.externalReference).toBe("LV-8F3A2B");
+    expect(parsed.externalReference).toBe("LD-8F3A2B");
     expect(parsed.payerEmail).toBe("dueno@empresa.pe");
     expect(parsed.planRef).toBe("plan-abc");
   });

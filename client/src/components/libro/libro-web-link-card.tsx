@@ -55,12 +55,6 @@ export default function LibroWebLinkCard() {
   };
 
   const currentCode = activeTab === "boton" ? buttonCode : activeTab === "footer" ? footerCode : linkCode;
-  const currentHint =
-    activeTab === "boton"
-      ? "Boton rojo visible sin necesidad de CSS. Peguelo en el home o en el checkout."
-      : activeTab === "footer"
-        ? "Texto legal exigido por el DS 011-2011-PCM. Va en el pie de pagina de toda su web."
-        : "Un enlace de texto. Ideal para el menu principal o la pagina de contacto.";
 
   return (
     <Card data-testid="libro-web-link-card">

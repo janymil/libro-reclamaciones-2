@@ -90,6 +90,33 @@ export function usePayments() {
   });
 }
 
+/**
+ * Operator queue (LibroDigital team only - the API answers 403 to anyone else):
+ * every customer's transfer/Yape that still waits for a human to confirm it.
+ *
+ * The money arrives in the operator's own Yape/bank account, so this list is the
+ * only place where the team can see what has to be reconciled.
+ */
+export interface PendingManualPayment {
+  payment: PaymentRecord;
+  businessId: string | null;
+  businessName: string | null;
+}
+
+export function usePendingManualPayments(enabled: boolean) {
+  return useQuery({
+    queryKey: ['/api/payments/pending-manual'],
+    enabled,
+    queryFn: async () => {
+      const response = await fetch('/api/payments/pending-manual', { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error('Failed to fetch pending manual payments');
+      }
+      return response.json() as Promise<PendingManualPayment[]>;
+    },
+  });
+}
+
 /** Starts a checkout. The caller decides whether to redirect or show instructions. */
 export function useStartCheckout() {
   const queryClient = useQueryClient();
@@ -99,12 +126,49 @@ export function useStartCheckout() {
       plan: string;
       period: 'monthly' | 'annual';
       provider: string;
+      /**
+       * `one_time` buys a single period on a provider that could also renew
+       * automatically - the only way to pay with Yape, Plin or cash, because a
+       * recurring charge needs a card on file. `auto` (the default) renews.
+       */
+      mode?: 'auto' | 'one_time';
+      /**
+       * Promo code, only ever sent for a single period: a recurring charge at a
+       * discounted amount would follow the customer forever. The server re-validates
+       * it against the price it is about to charge.
+       */
+      discountCode?: string;
     }) => {
       const response = await apiRequest('POST', '/api/payments/checkout', input);
       return response.json() as Promise<CheckoutResponse>;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/payments'] });
+    },
+  });
+}
+
+export interface DiscountPreview {
+  ok: boolean;
+  reason: string | null;
+  label: string;
+  listAmountCents: number;
+  amountOffCents: number;
+  finalAmountCents: number;
+}
+
+/**
+ * Asks the server what a promo code would do to this plan.
+ *
+ * A courtesy, not a contract: the checkout re-validates the code against the price it
+ * is about to charge. It exists so the customer sees "con PRO10 pagas S/ 26.10" before
+ * being sent to a payment page, instead of discovering the discount there.
+ */
+export function useDiscountPreview() {
+  return useMutation({
+    mutationFn: async (input: { plan: string; period: string; code: string }) => {
+      const response = await apiRequest('POST', '/api/payments/discount', input);
+      return response.json() as Promise<DiscountPreview>;
     },
   });
 }
@@ -138,6 +202,8 @@ export function useConfirmPayment() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/payments'] });
       queryClient.invalidateQueries({ queryKey: ['/api/subscription'] });
+      // A confirmed transfer leaves the operator's queue.
+      queryClient.invalidateQueries({ queryKey: ['/api/payments/pending-manual'] });
     },
   });
 }

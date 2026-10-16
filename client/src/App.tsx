@@ -23,6 +23,17 @@ import Compliance from "@/pages/compliance";
 import AssistantPage from "@/pages/assistant";
 import SubscriptionPage from "@/pages/subscription";
 import PaymentsPage from "@/pages/payments";
+import AdminOverviewPage from "@/pages/admin/overview";
+import AdminCustomersPage from "@/pages/admin/customers";
+import AdminCustomerDetailPage from "@/pages/admin/customer-detail";
+import AdminPaymentsPage from "@/pages/admin/payments";
+import AdminSubscriptionsPage from "@/pages/admin/subscriptions";
+import AdminSettingsPage from "@/pages/admin/settings";
+import AdminPlansPage from "@/pages/admin/planes";
+import AdminDiscountsPage from "@/pages/admin/descuentos";
+import AdminPlatformPage from "@/pages/admin/platform";
+import AdminTeamPage from "@/pages/admin/team";
+import { ADMIN_LOGIN_PATH, ADMIN_PATH } from "@/lib/admin-path";
 import SubscribePage from "@/pages/subscribe";
 import CustomizationPage from "@/pages/customization";
 import IntegrationsPage from "@/pages/integrations";
@@ -65,6 +76,24 @@ function Router() {
       <Route path="/asistente" component={AssistantPage} />
       <Route path="/plan" component={SubscriptionPage} />
       <Route path="/pagos" component={PaymentsPage} />
+        {/* Consola del equipo: un área propia, fuera del panel del cliente, bajo
+            una ruta configurable que nunca es `/admin`
+            (ver client/src/lib/admin-path.ts). */}
+        {/* Un solo inicio de sesión para todos: `/acceso`. Cualquier enlace
+            antiguo a la puerta propia de la consola vuelve allí. */}
+        <Route path={ADMIN_LOGIN_PATH}>
+          <Redirect to="/acceso" />
+        </Route>
+        <Route path={ADMIN_PATH} component={AdminOverviewPage} />
+        <Route path={`${ADMIN_PATH}/clientes`} component={AdminCustomersPage} />
+        <Route path={`${ADMIN_PATH}/clientes/:businessId`} component={AdminCustomerDetailPage} />
+        <Route path={`${ADMIN_PATH}/pagos`} component={AdminPaymentsPage} />
+        <Route path={`${ADMIN_PATH}/suscripciones`} component={AdminSubscriptionsPage} />
+        <Route path={`${ADMIN_PATH}/configuracion`} component={AdminSettingsPage} />
+        <Route path={`${ADMIN_PATH}/planes`} component={AdminPlansPage} />
+        <Route path={`${ADMIN_PATH}/descuentos`} component={AdminDiscountsPage} />
+        <Route path={`${ADMIN_PATH}/plataforma`} component={AdminPlatformPage} />
+        <Route path={`${ADMIN_PATH}/equipo`} component={AdminTeamPage} />
       <Route path="/subscribe"><Redirect to="/suscribir" /></Route>
       <Route path="/personalizacion" component={CustomizationPage} />
       <Route path="/integraciones" component={IntegrationsPage} />

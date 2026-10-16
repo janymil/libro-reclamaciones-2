@@ -5,8 +5,12 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+# Environment files. Only the template is committed; everything else may hold
+# credentials. `.env.*` also covers the temporary files used by the restore drill
+# (`.env.scratch`) and by encrypted-env tools (dotenvx writes `.env.keys`).
 .env
-.env.local
+.env.*
+!.env.example
 .local-db
 backups/
 # Evidence attachments uploaded by consumers (Phase 1.1)

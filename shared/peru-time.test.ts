@@ -15,9 +15,6 @@ import {
 /** An instant at 09:00 in Peru on the given date (14:00 UTC). */
 const peruMorning = (iso: string): Date => new Date(`${iso}T14:00:00.000Z`);
 
-/** An instant at 20:00 in Peru on the given date (01:00 UTC the next day). */
-const peruEvening = (iso: string): Date => new Date(`${iso}T20:00:00-05:00`);
-
 describe("PERU_TIME_ZONE", () => {
   it("is America/Lima", () => {
     expect(PERU_TIME_ZONE).toBe("America/Lima");

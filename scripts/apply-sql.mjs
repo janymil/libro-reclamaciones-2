@@ -1,3 +1,4 @@
+import "./load-env.mjs";
 import fs from "fs";
 import path from "path";
 import { Pool, neonConfig } from "@neondatabase/serverless";
@@ -10,6 +11,9 @@ import ws from "ws";
  * because the Neon serverless driver executes one statement per round trip.
  *
  * Usage: npm run db:apply migrations/legacy-neondb-compat.sql
+ *
+ * Credentials come from the environment or from the env file named by
+ * `ENV_FILE` (see scripts/load-env.mjs).
  */
 neonConfig.webSocketConstructor = ws;
 

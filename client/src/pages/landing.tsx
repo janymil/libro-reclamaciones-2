@@ -11,7 +11,6 @@ import {
 import {
   PLANS,
   PLAN_LIST,
-  TRIAL_DAYS,
   RETENTION_MONTHS,
   LAUNCH_OFFER_ANNUAL_BASICO,
   REGULAR_ANNUAL_BASICO,
@@ -20,6 +19,9 @@ import {
   type PlanDefinition,
 } from '@shared/plans';
 import { BrandMark, StampMark, QrGlyph, HojaDocument } from '@/components/landing/brand';
+import { useAuth } from '@/hooks/use-auth';
+import { usePlans, useTrialDays } from '@/hooks/use-subscription';
+import { ADMIN_PATH } from '@/lib/admin-path';
 import {
   ArrowRight,
   Sparkles,
@@ -120,7 +122,14 @@ const TESTIMONIALS = [
 
 const SECTORS = ['Restaurantes', 'Colegios', 'Hoteles', 'Tiendas online', 'Clínicas', 'Gimnasios'];
 
-const FAQ_ITEMS = [
+/**
+ * The FAQ copy, built from the trial length in force.
+ *
+ * A function, not a constant: an operator can change the trial from the console
+ * (Planes), and a landing page that still says "15 días" would be promising something
+ * the app no longer gives.
+ */
+const faqItems = (trialDays: number) => [
   {
     q: '¿INDECOPI certifica o registra mi Libro de Reclamaciones?',
     a: 'No. INDECOPI no registra ni certifica libros de reclamaciones, y tampoco se exige legalización notarial. El proveedor es responsable de implementar el formato oficial, mantenerlo disponible y atender las solicitudes. LibroDigital.pe facilita ese cumplimiento; no constituye un aval del Estado.',
@@ -139,7 +148,7 @@ const FAQ_ITEMS = [
   },
   {
     q: '¿La prueba gratis tiene compromiso?',
-    a: `No. Todos los planes incluyen ${TRIAL_DAYS} días de prueba con las funciones del plan Pro, sin tarjeta de crédito. Si no continúa, sus datos se eliminan según la política de retención.`,
+    a: `No. Todos los planes incluyen ${trialDays} días de prueba con las funciones del plan Pro, sin tarjeta de crédito. Si no continúa, sus datos se eliminan según la política de retención.`,
   },
   {
     q: '¿Qué pasa con los datos personales de mis clientes?',
@@ -315,6 +324,7 @@ function Nav() {
 }
 
 function Hero() {
+  const trialDays = useTrialDays();
   return (
     <section id="top" className="landing-paper relative overflow-hidden pt-28 md:pt-32">
       <div aria-hidden="true" className="landing-grid-bg absolute inset-0" />
@@ -347,7 +357,7 @@ function Hero() {
             <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
               <Link href={REGISTER_URL}>
                 <Button className="h-12 rounded-full bg-[#1b1611] px-7 text-base font-semibold text-[#f7f2e8] shadow-[0_14px_30px_-12px_rgba(27,22,17,0.6)] transition-transform hover:translate-y-[-1px] hover:bg-[#000000]">
-                  Empezar gratis · {TRIAL_DAYS} días
+                  Empezar gratis · {trialDays} días
                   <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
                 </Button>
               </Link>
@@ -437,18 +447,21 @@ function RiskTicker() {
   );
 }
 
-const STATS = [
+const STATS = (trialDays: number) => [
   { value: `${RETENTION_MONTHS}`, unit: 'meses', label: 'de resguardo de expedientes y constancias' },
-  { value: `${TRIAL_DAYS}`, unit: 'días', label: 'de prueba gratis, sin tarjeta' },
+  { value: `${trialDays}`, unit: 'días', label: 'de prueba gratis, sin tarjeta' },
   { value: '15', unit: 'días hábiles', label: 'calculados con los feriados del Perú' },
   { value: '0', unit: 'hojas', label: 'de papel: QR, enlace y widget para su tienda' },
 ];
 
 function StatsBand() {
+  const trialDays = useTrialDays();
+  const stats = STATS(trialDays);
+
   return (
     <section className="border-b border-[#e3d9c6] bg-[#fdfaf3]" aria-label="Cifras clave">
       <ul className="mx-auto grid max-w-6xl grid-cols-2 gap-px px-5 sm:px-8 lg:grid-cols-4">
-        {STATS.map((stat, i) => (
+        {stats.map((stat, i) => (
           <Reveal as="li" key={stat.label} delay={i * 90} className="py-10 text-center lg:py-12">
             <span className="font-mono text-4xl font-bold tabular-nums text-[#1b1611] md:text-5xl">
               {stat.value}
@@ -832,11 +845,17 @@ function SocialProof() {
 
 function Pricing() {
   const [period, setPeriod] = useState<'monthly' | 'annual'>('annual');
+  // Prices come from the console's price list (Planes) when an operator changed them;
+  // while that loads - or if the request fails - the catalogue from shared/plans.ts is
+  // used, which is exactly what the server charges when nobody overrode anything.
+  const { data: livePlans } = usePlans();
+  const trialDays = useTrialDays();
+  const plans = livePlans && livePlans.length > 0 ? livePlans : PLAN_LIST;
 
-  // Savings are computed from the catalogue, never hardcoded, so the copy can
+  // Savings are computed from the price list, never hardcoded, so the copy can
   // never disagree with the price again.
   const maxAnnualSavingPct = Math.max(
-    ...PLAN_LIST.filter((plan) => plan.priceMonthly > 0).map((plan) =>
+    ...plans.filter((plan) => plan.priceMonthly > 0).map((plan) =>
       Math.round(((plan.priceMonthly * 12 - plan.priceAnnual) / (plan.priceMonthly * 12)) * 100),
     ),
   );
@@ -864,7 +883,7 @@ function Pricing() {
             Menos que el 0.04% de una multa leve
           </h2>
           <p className="mt-4 text-pretty text-lg text-[#5c5246]">
-            Todos los planes incluyen {TRIAL_DAYS} días de prueba gratis, QR y cartel oficial,
+            Todos los planes incluyen {trialDays} días de prueba gratis, QR y cartel oficial,
             constancias automáticas y resguardo de {RETENTION_MONTHS} meses.
             Reclamos <strong>ilimitados desde Básico</strong>; el plan Gratis incluye 5 reclamos en total.
           </p>
@@ -908,7 +927,7 @@ function Pricing() {
         </Reveal>
 
         <div className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {PLAN_LIST.map((plan, i) => {
+          {plans.map((plan, i) => {
             const popular = plan.id === 'profesional';
             const isFree = plan.id === 'gratis';
             return (
@@ -967,7 +986,7 @@ function Pricing() {
                           : 'bg-[#1b1611] text-[#f7f2e8] hover:bg-black'
                       }`}
                     >
-                      {isFree ? 'Empezar gratis' : `Probar ${TRIAL_DAYS} días gratis`}
+                      {isFree ? 'Empezar gratis' : `Probar ${trialDays} días gratis`}
                     </Button>
                   </Link>
                 </article>
@@ -1042,6 +1061,9 @@ function Pricing() {
 }
 
 function Faq() {
+  const trialDays = useTrialDays();
+  const items = faqItems(trialDays);
+
   return (
     <section id="faq" className="mx-auto max-w-3xl px-5 py-20 sm:px-8 md:py-28">
       <Reveal className="text-center">
@@ -1053,7 +1075,7 @@ function Faq() {
 
       <Reveal delay={140}>
         <Accordion type="single" collapsible className="mt-12">
-          {FAQ_ITEMS.map((item, i) => (
+          {items.map((item, i) => (
             <AccordionItem
               key={item.q}
               value={`faq-${i}`}
@@ -1074,6 +1096,7 @@ function Faq() {
 }
 
 function FinalCta() {
+  const trialDays = useTrialDays();
   return (
     <section className="landing-paper px-5 pb-24 sm:px-8">
       <Reveal>
@@ -1091,7 +1114,7 @@ function FinalCta() {
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link href={REGISTER_URL}>
               <Button className="h-12 rounded-full bg-[#c02b0a] px-8 text-base font-semibold text-white shadow-[0_14px_30px_-12px_rgba(192,43,10,0.7)] hover:bg-[#9c2107]">
-                Empezar gratis · {TRIAL_DAYS} días
+                Empezar gratis · {trialDays} días
                 <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
               </Button>
             </Link>
@@ -1119,6 +1142,10 @@ const FOOTER_NORMATIVA = [
 ];
 
 function Footer() {
+  // The only visible way into /admin: deliberately not in the dashboard sidebar,
+  // and only for the LibroDigital team (customers get a 403 from the API anyway).
+  const { user } = useAuth();
+
   return (
     <footer className="bg-[#1b1611] py-16 text-[#f7f2e8]">
       <div className="mx-auto max-w-6xl px-5 sm:px-8">
@@ -1142,6 +1169,13 @@ function Footer() {
               <li><a href="#precios" className="transition-colors hover:text-amber-300">Precios</a></li>
               <li><a href="#faq" className="transition-colors hover:text-amber-300">Preguntas frecuentes</a></li>
               <li><Link href="/estado" className="transition-colors hover:text-amber-300">Estado del servicio</Link></li>
+              {user?.isPlatformAdmin && (
+                <li>
+                  <Link href={ADMIN_PATH} className="transition-colors hover:text-amber-300">
+                    Admin · equipo LibroDigital
+                  </Link>
+                </li>
+              )}
             </ul>
           </nav>
 

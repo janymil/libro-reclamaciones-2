@@ -26,6 +26,63 @@ export interface EmailCustomization {
   footerText?: string | null;
 }
 
+/**
+ * The platform's own identity, for the footer of the messages it sends itself
+ * (receipts, operational alerts).
+ *
+ * Every field is optional and an empty one is simply not printed: a receipt must
+ * never invent an RUC or an address. Configured in the console (Configuración →
+ * Identidad) and passed in by the caller, so this module keeps knowing nothing about
+ * the database.
+ */
+export interface PlatformIdentityFooter {
+  legalName?: string;
+  commercialName?: string;
+  ruc?: string;
+  fiscalAddress?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  website?: string;
+}
+
+/**
+ * The last lines of a message, built from whatever the identity actually has.
+ *
+ * Falls back to the commercial name alone, which is exactly what the messages said
+ * before the identity became editable - so an empty configuration changes nothing.
+ *
+ * Exported for its unit test: this is the part a customer reads on a receipt.
+ */
+export function identityFooterLines(identity?: PlatformIdentityFooter): string[] {
+  const commercial = identity?.commercialName?.trim() || 'LibroDigital.pe';
+  const legalName = identity?.legalName?.trim();
+  const ruc = identity?.ruc?.trim();
+  const address = identity?.fiscalAddress?.trim();
+  const contactEmail = identity?.contactEmail?.trim();
+  const contactPhone = identity?.contactPhone?.trim();
+  const website = identity?.website?.trim().replace(/\/+$/, '');
+
+  const lines = [commercial];
+
+  // Legal name and RUC on one line: that is how it is read on an invoice.
+  if (legalName && legalName !== commercial) {
+    lines.push(ruc ? `${legalName} · RUC ${ruc}` : legalName);
+  } else if (ruc) {
+    lines.push(`RUC ${ruc}`);
+  }
+
+  if (address) {
+    lines.push(address);
+  }
+
+  const contact = [contactEmail, contactPhone, website].filter(Boolean).join(' · ');
+  if (contact) {
+    lines.push(contact);
+  }
+
+  return lines;
+}
+
 /** Applies the subject prefix, if configured. */
 /**
  * Escapes a value that is interpolated into an HTML email body.
@@ -945,6 +1002,70 @@ LibroDigital.pe
   }
 
   /**
+   * Receipt for a confirmed payment (Phase 2.7).
+   *
+   * Sent from our own system the moment money turns into a plan, instead of
+   * relying on the provider's own receipt email. Two reasons: Mercado Pago cannot
+   * deliver anything to a test user's mailbox - so the sandbox could never prove
+   * that path - and a bank transfer has no provider email at all. This way every
+   * confirmed charge produces one message, whatever the payment method.
+   *
+   * The caller sends it fire-and-forget: a receipt that cannot be delivered must
+   * never undo a payment that has already been confirmed.
+   */
+  async sendPaymentReceipt(params: {
+    email: string;
+    firstName: string;
+    businessName: string;
+    planName: string;
+    periodLabel: string;
+    amountLabel: string;
+    methodName: string;
+    reference: string;
+    /** Absent while the paid period is still running out (a renewal, or a trial). */
+    validUntilLabel: string | null;
+    /**
+     * The platform's own identity, as configured in the console (Configuración).
+     *
+     * Optional so the receipt still works when nobody has filled it in; what it adds is
+     * the fiscal footer a customer may need for their own accounting.
+     */
+    identity?: PlatformIdentityFooter;
+  }): Promise<void> {
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to: params.email,
+      subject: `Comprobante de pago ${params.reference} - ${params.planName}`,
+      text: [
+        `Comprobante de pago - ${params.businessName}`,
+        '',
+        `Hola ${params.firstName},`,
+        '',
+        'Confirmamos la recepción de su pago y la activación de su plan:',
+        '',
+        `  Plan:          ${params.planName} (${params.periodLabel})`,
+        `  Monto:         ${params.amountLabel}`,
+        `  Medio de pago: ${params.methodName}`,
+        `  Referencia:    ${params.reference}`,
+        ...(params.validUntilLabel ? [`  Válido hasta:  ${params.validUntilLabel}`] : []),
+        '',
+        'Puede consultar el detalle en cualquier momento en la sección Pagos: /pagos',
+        '',
+        'Conserve este mensaje como constancia de su pago.',
+        '',
+        ...identityFooterLines(params.identity),
+      ].join('\n'),
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending payment receipt:', error);
+      throw new Error('Failed to send payment receipt');
+    }
+  }
+
+  /**
    * Sends a plain "it works" message so an administrator can confirm SMTP
    * delivery end-to-end, not just that the socket and credentials are valid.
    */
@@ -996,7 +1117,12 @@ Si lo recibiste, el servicio de correo está configurado correctamente.
    * to any account. A payment nobody notices is worse than a noisy inbox, so the
    * caller treats this as fire-and-forget.
    */
-  async sendPlatformAlert(email: string, subject: string, details: string[]): Promise<void> {
+  async sendPlatformAlert(
+    email: string,
+    subject: string,
+    details: string[],
+    identity?: PlatformIdentityFooter,
+  ): Promise<void> {
     const body = details.join('\n');
 
     const mailOptions = {
@@ -1010,7 +1136,7 @@ ${body}
 
 Revise la sección "Pagos": /pagos
 
-LibroDigital.pe
+${identityFooterLines(identity).join('\n')}
       `,
     };
 

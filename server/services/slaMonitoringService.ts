@@ -65,7 +65,7 @@ export async function runSlaMonitoringSweep(): Promise<SlaSweepResult> {
         await escalate(business.id, business.businessName, complaint, assessment.businessDaysRemaining);
         result.escalationsSent += 1;
       } else if (needsReminder) {
-        await remind(business.id, business.businessName, complaint, assessment.businessDaysRemaining);
+        await remind(business.id, complaint, assessment.businessDaysRemaining);
         result.remindersSent += 1;
       }
     }
@@ -102,7 +102,7 @@ async function notifyAssignee(
   return assignee;
 }
 
-async function remind(businessId: string, businessName: string, complaint: Complaint, remainingDays: number): Promise<void> {
+async function remind(businessId: string, complaint: Complaint, remainingDays: number): Promise<void> {
   const message =
     `${complaint.correlativeNumber} vence en ${remainingDays} día(s) hábil(es). ` +
     `Priorice la respuesta para cumplir el plazo legal de 15 días hábiles (DS 101-2022-PCM).`;

@@ -9,6 +9,11 @@ import { attachmentStorage } from "./storage/attachment.storage";
 import { accessStorage } from "./storage/access.storage";
 import { integrationStorage } from "./storage/integration.storage";
 import { paymentStorage } from "./storage/payment.storage";
+import { paymentSettingsStorage } from "./storage/paymentSettings.storage";
+import { platformSettingsStorage } from "./storage/platformSettings.storage";
+import { planPricingStorage } from "./storage/planPricing.storage";
+import { discountStorage } from "./storage/discount.storage";
+import { platformAuditStorage } from "./storage/platformAudit.storage";
 import { arcoStorage } from "./storage/arco.storage";
 import { complianceStorage } from "./storage/compliance.storage";
 import { notificationStorage } from "./storage/notification.storage";
@@ -39,6 +44,12 @@ export const storage: IStorage = {
   ...accessStorage,
   ...integrationStorage,
   ...paymentStorage,
+  ...paymentSettingsStorage,
+  ...platformSettingsStorage,
+  ...planPricingStorage,
+  ...discountStorage,
+  ...platformAuditStorage,
+
   ...arcoStorage,
   ...complianceStorage,
   ...notificationStorage,

@@ -153,11 +153,11 @@ describe("reference generation", () => {
     expect(suffix).toMatch(/^[A-HJ-NP-Z2-9]+$/);
   });
 
-  it("is deterministic for a fixed byte sequence and prefixed with LV-", () => {
+  it("is deterministic for a fixed byte sequence and prefixed with LD-", () => {
     const bytes = new Uint8Array([10, 20, 30, 40, 50, 60]);
     expect(referenceSuffix(bytes)).toBe(referenceSuffix(bytes));
-    expect(buildPaymentReference(referenceSuffix(bytes))).toBe(`LV-${referenceSuffix(bytes)}`);
-    expect(buildPaymentReference("ab12cd")).toBe("LV-AB12CD");
+    expect(buildPaymentReference(referenceSuffix(bytes))).toBe(`LD-${referenceSuffix(bytes)}`);
+    expect(buildPaymentReference("ab12cd")).toBe("LD-AB12CD");
   });
 });
 
@@ -263,23 +263,35 @@ describe("subscription lifecycle", () => {
 
 describe("resolvePlanFromCode - Mercado Pago panel plan codes", () => {
   it("maps the panel code of every paid plan to a plan and a period", () => {
-    expect(resolvePlanFromCode("LV-ESENCIAL-M")).toEqual({ planId: "esencial", period: "monthly" });
-    expect(resolvePlanFromCode("LV-ESENCIAL-A")).toEqual({ planId: "esencial", period: "annual" });
-    expect(resolvePlanFromCode("LV-PROFESIONAL-M")).toEqual({ planId: "profesional", period: "monthly" });
-    expect(resolvePlanFromCode("LV-PROFESIONAL-A")).toEqual({ planId: "profesional", period: "annual" });
-    expect(resolvePlanFromCode("LV-CORPORATIVO-M")).toEqual({ planId: "corporativo", period: "monthly" });
-    expect(resolvePlanFromCode("LV-CORPORATIVO-A")).toEqual({ planId: "corporativo", period: "annual" });
+    expect(resolvePlanFromCode("LD-ESENCIAL-M")).toEqual({ planId: "esencial", period: "monthly" });
+    expect(resolvePlanFromCode("LD-ESENCIAL-A")).toEqual({ planId: "esencial", period: "annual" });
+    expect(resolvePlanFromCode("LD-PROFESIONAL-M")).toEqual({ planId: "profesional", period: "monthly" });
+    expect(resolvePlanFromCode("LD-PROFESIONAL-A")).toEqual({ planId: "profesional", period: "annual" });
+    expect(resolvePlanFromCode("LD-CORPORATIVO-M")).toEqual({ planId: "corporativo", period: "monthly" });
+    expect(resolvePlanFromCode("LD-CORPORATIVO-A")).toEqual({ planId: "corporativo", period: "annual" });
   });
 
   it("tolerates stray spaces and lower case, because the panel is typed by hand", () => {
-    expect(resolvePlanFromCode("  lv-profesional-a ")).toEqual({
+    expect(resolvePlanFromCode("  LD-profesional-a ")).toEqual({
       planId: "profesional",
       period: "annual",
     });
   });
 
+  it("still recognises codes written before the LibroVirtual -> LibroDigital rebrand", () => {
+    // A plan configured in the Mercado Pago panel months ago carries the old
+    // prefix; it must keep activating rather than being dropped on the floor.
+    expect(resolvePlanFromCode("LV-PROFESIONAL-A")).toEqual({
+      planId: "profesional",
+      period: "annual",
+    });
+    expect(resolvePlanFromCode("lv-esencial-m")).toEqual({ planId: "esencial", period: "monthly" });
+  });
+
   it("returns undefined for a reference the app does not know", () => {
-    // An in-app subscription reference must NOT be mistaken for a plan code.
+    // An in-app subscription reference must NOT be mistaken for a plan code,
+    // under either the current or the pre-rebrand prefix.
+    expect(resolvePlanFromCode("LD-8F3A2B")).toBeUndefined();
     expect(resolvePlanFromCode("LV-8F3A2B")).toBeUndefined();
     expect(resolvePlanFromCode(undefined)).toBeUndefined();
     expect(resolvePlanFromCode(42)).toBeUndefined();

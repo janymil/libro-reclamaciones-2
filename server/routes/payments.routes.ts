@@ -8,7 +8,6 @@ import {
   isPaymentProviderId,
   isPaymentStatus,
   isPlanPeriod,
-  planAmountCents,
   type PaymentProviderId,
   type PlanPeriod,
 } from "@shared/payments";
@@ -16,7 +15,7 @@ import { getPlan, isPlanId } from "@shared/plans";
 import type { Payment, Subscription } from "@shared/schema";
 
 import { storage } from "../storage";
-import { requireAdmin, requireAuth, requireNonDemo } from "../middleware/requireAuth";
+import { requireAdmin, requireAuth, requireNonDemo, requirePlatformAdmin } from "../middleware/requireAuth";
 import { paymentWebhookLimiter } from "../middleware/rateLimits";
 import {
   cancelSubscriptionForBusiness,
@@ -24,11 +23,15 @@ import {
   getActiveSubscription,
   handleProviderWebhook,
   listPayments,
+  listPendingManualPayments,
   paymentProviderOptions,
   refreshPayment,
   refreshSubscription,
   startCheckout,
 } from "../services/paymentService";
+import { evaluateDiscountForCheckout, DiscountRejectedError } from "../services/discountService";
+import { effectivePlanAmountCents } from "../services/pricingService";
+
 
 /**
  * Subscription payments (Phase 2.7).
@@ -47,7 +50,7 @@ import {
  */
 
 /** Public projection: the provider's raw payload never reaches the browser. */
-function toPublicPayment(payment: Payment) {
+export function toPublicPayment(payment: Payment) {
   return {
     id: payment.id,
     reference: payment.reference,
@@ -57,6 +60,11 @@ function toPublicPayment(payment: Payment) {
     period: payment.period,
     amountCents: payment.amountCents,
     currency: payment.currency,
+    // Why the amount is what it is: the list price minus a promo code, if any. Kept in
+    // the projection so the customer's history and the operator's ledger both explain
+    // themselves instead of showing a number nobody can reconcile.
+    discountCode: payment.discountCode,
+    discountCents: payment.discountCents,
     status: payment.status,
     statusLabel: isPaymentStatus(payment.status) ? PAYMENT_STATUS_LABELS[payment.status] : payment.status,
     redirectUrl: payment.redirectUrl,
@@ -160,6 +168,36 @@ export function registerPaymentsRoutes(app: Express): void {
     }
   });
 
+  /**
+   * Operator queue (platform staff only): the pending transfers/Yape of EVERY
+   * customer.
+   *
+   * The customer's own history is tenant-scoped, so without this the team would
+   * never see the transfer it has to reconcile - which is exactly what makes
+   * "pagar por transferencia" look like it did nothing.
+   */
+  app.get('/api/payments/pending-manual', requireAuth, requirePlatformAdmin, async (_req: any, res) => {
+    try {
+      const pending = await listPendingManualPayments();
+      const rows = await Promise.all(
+        pending.map(async (payment) => {
+          const business = payment.businessId
+            ? await storage.getBusiness(payment.businessId)
+            : undefined;
+          return {
+            payment: toPublicPayment(payment),
+            businessId: payment.businessId,
+            businessName: business?.businessName ?? null,
+          };
+        }),
+      );
+      res.json(rows);
+    } catch (error) {
+      console.error('Error listing pending manual payments:', error);
+      res.status(500).json({ message: "No se pudieron cargar los pagos pendientes" });
+    }
+  });
+
   // ---- Start a checkout -----------------------------------------------------
 
   app.post('/api/payments/checkout', requireAuth, requireNonDemo, async (req: any, res) => {
@@ -172,12 +210,14 @@ export function registerPaymentsRoutes(app: Express): void {
         return res.status(404).json({ message: "La cuenta aún no tiene una empresa configurada" });
       }
 
-      const { plan, period, provider, mode } = z.object({
+      const { plan, period, provider, mode, discountCode } = z.object({
         plan: z.string(),
         period: z.string().default('monthly'),
         provider: z.string(),
         // `auto` (default) picks the recurring rail when the provider has one.
         mode: z.enum(['auto', 'one_time']).default('auto'),
+        /** Promo code, validated below against the live price - never trusted. */
+        discountCode: z.string().trim().max(40).optional(),
       }).parse(req.body);
 
       if (!isPlanId(plan)) {
@@ -190,7 +230,7 @@ export function registerPaymentsRoutes(app: Express): void {
       // The free plan is chosen, not bought. Saying so beats asking the provider
       // to charge S/ 0 and reporting its rejection as a gateway failure.
       const selectedPlan = getPlan(plan);
-      if (planAmountCents(selectedPlan.id, period) <= 0) {
+      if ((await effectivePlanAmountCents(selectedPlan.id, period)) <= 0) {
         return res.status(400).json({
           message: `El plan ${selectedPlan.name} es gratuito: no necesita ningún pago.`,
           code: "plan_is_free",
@@ -223,6 +263,7 @@ export function registerPaymentsRoutes(app: Express): void {
         period: period as PlanPeriod,
         baseUrl: resolveBaseUrl(req),
         mode,
+        discountCode,
       });
 
       if (result.mode === 'subscription') {
@@ -243,6 +284,11 @@ export function registerPaymentsRoutes(app: Express): void {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
       }
+      // A refused code is the customer's own input, not a gateway failure: it gets a
+      // 400 with the reason and a code the dialog can show inline.
+      if (error instanceof DiscountRejectedError) {
+        return res.status(400).json({ message: error.message, code: "discount_rejected" });
+      }
       console.error('Error starting checkout:', error);
       res.status(502).json({
         message: error instanceof Error ? error.message : "No se pudo iniciar el pago",
@@ -250,7 +296,50 @@ export function registerPaymentsRoutes(app: Express): void {
     }
   });
 
-  // ---- Recurring agreement -------------------------------------------------
+  // ---- Discount codes -------------------------------------------------------
+
+  /**
+   * Preview of what a promo code would do to this plan.
+   *
+   * Read-only and cheap: the dialog calls it to show "con PRO10 pagas S/ 26.10"
+   * before sending anyone to a payment page. The checkout re-validates the code
+   * against the price it is about to charge, because this answer is a courtesy and
+   * never the basis for charging.
+   *
+   * Answers 200 with `ok: false` for a code that does not apply: an invalid code is
+   * not an error, it is an answer.
+   */
+  app.post('/api/payments/discount', requireAuth, requireNonDemo, async (req: any, res) => {
+    try {
+      const { plan, period, code } = z.object({
+        plan: z.string(),
+        period: z.string().default('monthly'),
+        code: z.string().trim().max(40),
+      }).parse(req.body);
+
+      if (!isPlanId(plan) || !isPlanPeriod(period)) {
+        return res.status(400).json({ message: "Plan o periodo inválido" });
+      }
+
+      const listCents = await effectivePlanAmountCents(plan, period);
+      const evaluation = await evaluateDiscountForCheckout(code, { planId: plan, amountCents: listCents });
+
+      res.json({
+        ok: evaluation.ok,
+        reason: evaluation.reason ?? null,
+        label: evaluation.label,
+        listAmountCents: listCents,
+        amountOffCents: evaluation.amountOffCents,
+        finalAmountCents: evaluation.finalAmountCents,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Datos inválidos", errors: error.errors });
+      }
+      console.error('Error previewing a discount code:', error);
+      res.status(500).json({ message: "No se pudo comprobar el código" });
+    }
+  });
 
   /**
    * Registered BEFORE `/api/payments/:id/...` on purpose: otherwise
@@ -347,10 +436,15 @@ export function registerPaymentsRoutes(app: Express): void {
 
   // ---- Manual confirmation (bank transfer received) ------------------------
 
-  app.post('/api/payments/:id/confirm', requireAuth, requireNonDemo, requireAdmin, async (req: any, res) => {
+  // Platform staff only: `requireAdmin` here would let any customer confirm
+  // their own transfer and grant themselves a paid plan for free.
+  app.post('/api/payments/:id/confirm', requireAuth, requireNonDemo, requirePlatformAdmin, async (req: any, res) => {
     try {
       const payment = await storage.getPayment(req.params.id);
-      if (!payment || payment.businessId !== req.user.businessId) {
+      // No tenant check on purpose: platform staff reconcile transfers for ANY
+      // customer, and a customer can no longer reach this endpoint at all (403
+      // above), so an ownership filter here would only break the team's access.
+      if (!payment) {
         return res.status(404).json({ message: "Pago no encontrado" });
       }
 

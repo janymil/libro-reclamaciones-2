@@ -3,7 +3,6 @@ import { eq, and, asc, count, inArray, sql } from "drizzle-orm";
 import {
   type User,
   type InsertUser,
-  type InsertBusiness,
   users,
   businesses,
   complaints,
@@ -21,6 +20,27 @@ import bcrypt from "bcrypt";
 export const userStorage = {
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  },
+
+  /** The LibroDigital team's logins (see `users.is_platform_admin`). */
+  async listPlatformAdmins(): Promise<User[]> {
+    return await db.select().from(users).where(eq(users.isPlatformAdmin, true));
+  },
+
+  /**
+   * Grants or revokes the operator flag.
+   *
+   * This is the durable door into the platform panel; `PLATFORM_ADMIN_EMAILS`
+   * only exists to bootstrap the first operator (nothing can grant the flag
+   * before somebody holds it) and as a way back in if it is lost by mistake.
+   */
+  async setPlatformAdmin(userId: string, isPlatformAdmin: boolean): Promise<User | undefined> {
+    const [user] = await db
+      .update(users)
+      .set({ isPlatformAdmin, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
     return user;
   },
 

@@ -72,7 +72,7 @@ Donde anunciar con poca plata: Google y redes por libro de reclamaciones virtual
 
 Lanzamiento S/ 69 solo 500 cupos, muestra cuantos quedan. Anual siempre gana. Multi-ano paga 2 y el 3ro al 50. Avisa 30, 7 y 1 dia antes de renovar. Si falla el pago da 7 dias de gracia.
 
-Cobro en Peru: tarjeta, Yape, Plin con Mercado Pago, mas transferencia con codigo LV que un admin confirma en Pagos. Nada se activa hasta que la plata esta confirmada. Si pagan en prueba, les guardas sus dias gratis.
+Cobro en Peru: tarjeta, Yape, Plin con Mercado Pago, mas transferencia con codigo LD que un admin confirma en Pagos. Nada se activa hasta que la plata esta confirmada. Si pagan en prueba, les guardas sus dias gratis.
 
 ## 6. Numeros para saber si vas bien
 

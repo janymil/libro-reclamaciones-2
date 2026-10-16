@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { relations } from 'drizzle-orm';
+import type { BankAccountDetails } from "./payment-details";
 import {
   pgTable,
   varchar,
@@ -11,7 +12,6 @@ import {
   jsonb,
   uuid,
   index,
-  serial,
   unique,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
@@ -25,6 +25,16 @@ export const users = pgTable("users", {
   firstName: varchar("first_name", { length: 100 }).notNull(),
   lastName: varchar("last_name", { length: 100 }).notNull(),
   role: varchar("role", { length: 50 }).notNull().default("admin"), // admin (business owner), user, viewer
+  /**
+   * Platform staff: the LibroDigital team, NOT a tenant role.
+   *
+   * `role = admin` means "owns a business account" - i.e. the paying customer.
+   * An operator is a different kind of person: they manage customers, so this is
+   * a separate flag and their `businessId` is normally NULL. Never derive one
+   * from the other (that mistake is what once let a customer confirm their own
+   * unpaid transfer).
+   */
+  isPlatformAdmin: boolean("is_platform_admin").notNull().default(false),
   businessId: uuid("business_id"), // nullable until business is created
   isActive: boolean("is_active").notNull().default(true),
   isEmailVerified: boolean("is_email_verified").notNull().default(false),
@@ -478,7 +488,7 @@ export const payments = pgTable("payments", {
   provider: varchar("provider", { length: 30 }).notNull(), // mercadopago | culqi | manual | niubiz | izipay
   method: varchar("method", { length: 30 }), // tarjeta | yape | plin | efectivo | transferencia
   providerRef: varchar("provider_ref", { length: 120 }), // PSP-side id (preference / order / charge)
-  reference: varchar("reference", { length: 40 }).notNull(), // LV-XXXXXX, shown to the customer
+  reference: varchar("reference", { length: 40 }).notNull(), // LD-XXXXXX, shown to the customer
   planId: varchar("plan_id", { length: 30 }).notNull(),
   period: varchar("period", { length: 20 }).notNull(), // monthly | annual
   amountCents: integer("amount_cents").notNull(),
@@ -491,6 +501,17 @@ export const payments = pgTable("payments", {
   confirmedByUserId: uuid("confirmed_by_user_id"), // set when an admin confirms a manual payment
   // Set when this charge came from a recurring agreement (renewal ledger).
   subscriptionId: uuid("subscription_id"),
+  /**
+   * Discount the customer used, if any (Phase 2.7, step 4).
+   *
+   * `amountCents` above is what we actually charged, i.e. the discounted amount, so
+   * the ledger and every receipt stay consistent. These three columns are the
+   * explanation: which code, how much came off, and which row to count the
+   * redemption against when the payment is confirmed.
+   */
+  discountCode: varchar("discount_code", { length: 40 }),
+  discountCents: integer("discount_cents").notNull().default(0),
+  discountCodeId: uuid("discount_code_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
@@ -520,7 +541,7 @@ export const subscriptions = pgTable("subscriptions", {
   provider: varchar("provider", { length: 30 }).notNull(), // mercadopago
   // Null until the provider answers with its own id (preapproval id).
   providerRef: varchar("provider_ref", { length: 120 }),
-  reference: varchar("reference", { length: 40 }).notNull(), // LV-XXXXXX, shown to the customer
+  reference: varchar("reference", { length: 40 }).notNull(), // LD-XXXXXX, shown to the customer
   planId: varchar("plan_id", { length: 30 }).notNull(),
   period: varchar("period", { length: 20 }).notNull(), // monthly | annual
   amountCents: integer("amount_cents").notNull(),
@@ -541,6 +562,151 @@ export const subscriptions = pgTable("subscriptions", {
   index("idx_subscriptions_business_id").on(table.businessId),
   index("idx_subscriptions_provider_ref").on(table.provider, table.providerRef),
 ]);
+
+// Where the platform itself collects money (Phase 2.7, step 3).
+//
+// A single row (`id = 1`) holding the company's own collection details: the Yape
+// number, the bank accounts with their CCI, and where a voucher should be sent.
+// These used to live only in `PAYMENTS_MANUAL_INSTRUCTIONS` (an env var), which
+// meant a phone number change required a deploy - and they are precisely the text
+// a paying customer acts on.
+//
+// Platform-level on purpose: this is LibroDigital's own bank account, NOT a
+// tenant's, so it is not scoped by `businessId` and only the console reads it.
+export const platformPaymentSettings = pgTable("platform_payment_settings", {
+  /** Always 1: the row is a singleton, so there is never a "which one?" question. */
+  id: integer("id").primaryKey().default(1),
+  /** Account holder, e.g. "LibroDigital S.A.C." */
+  holderName: varchar("holder_name", { length: 160 }),
+  holderRuc: varchar("holder_ruc", { length: 20 }),
+  yapeNumber: varchar("yape_number", { length: 40 }),
+  plinNumber: varchar("plin_number", { length: 40 }),
+  /** Where the customer sends the voucher (mailbox and/or WhatsApp). */
+  voucherEmail: varchar("voucher_email", { length: 255 }),
+  voucherWhatsapp: varchar("voucher_whatsapp", { length: 40 }),
+  /** `BankAccountDetails[]` - see `@shared/payment-details`. */
+  bankAccounts: jsonb("bank_accounts")
+    .$type<BankAccountDetails[]>()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+  /** Extra lines appended to the instructions (opening hours, reminders...). */
+  notes: text("notes"),
+  /** Which operator last changed it - support question "who put that number?". */
+  updatedByUserId: uuid("updated_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Operational settings of the platform itself (Phase 2.7, step 4).
+//
+// One row (`id = 1`), companion to `platformPaymentSettings` but answering a
+// different question: that one says *where customers pay*, this one says *how the
+// platform behaves and who it is*. Four things live here, all of which used to be
+// env-only or hardcoded:
+//
+//   * `alertEmail`          - where the team is told that a paid subscription could
+//                             not be matched to an account (`PAYMENTS_ALERT_EMAIL`).
+//   * identity fields       - razón social, RUC, dirección fiscal and the support
+//                             contact that appear on receipts, alerts and the site.
+//   * `trialDays`           - the length of the free trial (`TRIAL_DAYS`, was 15).
+//   * `allowFreePlanChange` - the dangerous flag that activates a plan WITHOUT
+//                             collecting money (`PAYMENTS_ALLOW_FREE_PLAN_CHANGE`).
+//                             Turning it on is recorded in `platform_config_audit`,
+//                             which is the whole reason it may exist at all.
+export const platformSettings = pgTable("platform_settings", {
+  /** Always 1: a singleton, like `platform_payment_settings`. */
+  id: integer("id").primaryKey().default(1),
+  /** Where payment alerts are sent. Falls back to `PAYMENTS_ALERT_EMAIL`. */
+  alertEmail: varchar("alert_email", { length: 255 }),
+  /** Legal identity, used on receipts and in the footer of outgoing mail. */
+  legalName: varchar("legal_name", { length: 200 }),
+  commercialName: varchar("commercial_name", { length: 200 }),
+  ruc: varchar("ruc", { length: 20 }),
+  fiscalAddress: text("fiscal_address"),
+  contactEmail: varchar("contact_email", { length: 255 }),
+  contactPhone: varchar("contact_phone", { length: 40 }),
+  website: varchar("website", { length: 255 }),
+  /** Free trial length in days; `null` = keep the built-in `TRIAL_DAYS`. */
+  trialDays: integer("trial_days"),
+  /**
+   * The escape hatch for manual invoicing. Defaults to FALSE and is *never*
+   * implied by anything else: a plan that activates without money must be a
+   * deliberate, audited decision.
+   */
+  allowFreePlanChange: boolean("allow_free_plan_change").notNull().default(false),
+  updatedByUserId: uuid("updated_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Price overrides for the paid plans (Phase 2.7, step 4).
+//
+// `shared/plans.ts` stays the source of truth for what a plan INCLUDES; this table
+// answers only "what do we charge today". A plan with no row keeps the catalogue
+// price, so an empty table means "exactly as shipped".
+//
+// Money is integer céntimos, as everywhere in billing, and the server charges from
+// here - the public catalogue (`GET /api/plans`) is generated from the same values,
+// so the page a customer reads and the amount we charge cannot disagree.
+export const planPricing = pgTable("plan_pricing", {
+  planId: varchar("plan_id", { length: 30 }).primaryKey(),
+  monthlyCents: integer("monthly_cents").notNull(),
+  annualCents: integer("annual_cents").notNull(),
+  updatedByUserId: uuid("updated_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Discount codes (Phase 2.7, step 4).
+//
+// Operator-created, customer-typed: "PRO10", "VERANO2026". The arithmetic lives in
+// `@shared/discounts`; this row is the rule it is applied to.
+//
+// Redemptions are counted when a payment is CONFIRMED (never at checkout), so an
+// abandoned checkout does not burn a code, and `maxRedemptions` is enforced by a
+// conditional UPDATE - the only way to count a scarce thing correctly.
+export const discountCodes = pgTable("discount_codes", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  /** Stored normalized (uppercase, A-Z0-9) so `pro-10` finds `PRO10`. */
+  code: varchar("code", { length: 40 }).notNull().unique(),
+  description: text("description"),
+  /** percent | fixed */
+  kind: varchar("kind", { length: 20 }).notNull(),
+  /** percent: 1-100. fixed: céntimos off. */
+  value: integer("value").notNull(),
+  /** Plan ids the code applies to; `[]` = every paid plan. */
+  planIds: jsonb("plan_ids").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  /** `null` = unlimited redemptions. */
+  maxRedemptions: integer("max_redemptions"),
+  redemptionCount: integer("redemption_count").notNull().default(0),
+  startsAt: timestamp("starts_at"),
+  expiresAt: timestamp("expires_at"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdByUserId: uuid("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [index("idx_discount_codes_code").on(table.code)]);
+
+// Console audit trail (Phase 2.7, step 4).
+//
+// Every change made from the operator console: which operator, which area, and a
+// one-line summary a human can read months later. This exists because some of those
+// changes are dangerous (the free-plan-change flag, a price), and because "who typed
+// that Yape number?" is a real support question.
+//
+// Deliberately append-only: nothing in the app updates or deletes a row here.
+export const platformConfigAudit = pgTable("platform_config_audit", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  /** Who did it. Kept with the email because users can be deleted. */
+  userId: uuid("user_id"),
+  email: varchar("email", { length: 255 }),
+  /** pago | identidad | planes | descuentos | operacion | equipo */
+  area: varchar("area", { length: 30 }).notNull(),
+  summary: text("summary").notNull(),
+  /** Structured before/after, for whoever needs the detail. */
+  details: jsonb("details"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [index("idx_platform_config_audit_created").on(table.createdAt)]);
 
 // Relations
 export const usersRelations = relations(users, ({ one, many }) => ({
@@ -1016,6 +1182,30 @@ export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 
 export type Subscription = typeof subscriptions.$inferSelect;
 export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
+
+/**
+ * The singleton row with the platform's own collection details. The console edits
+ * it; whoever builds the offline-payment instructions reads it.
+ */
+export type PlatformPaymentSettings = typeof platformPaymentSettings.$inferSelect;
+export type InsertPlatformPaymentSettings = typeof platformPaymentSettings.$inferInsert;
+
+/** Operational settings of the platform (singleton row): identity, alerts, flags. */
+export type PlatformSettings = typeof platformSettings.$inferSelect;
+export type InsertPlatformSettings = typeof platformSettings.$inferInsert;
+
+/** Price override for one paid plan (absent = the catalogue price applies). */
+export type PlanPricing = typeof planPricing.$inferSelect;
+export type InsertPlanPricing = typeof planPricing.$inferInsert;
+
+/** A discount code an operator created. */
+export type DiscountCode = typeof discountCodes.$inferSelect;
+export type InsertDiscountCode = typeof discountCodes.$inferInsert;
+
+/** One entry of the console's change history. */
+export type PlatformConfigAudit = typeof platformConfigAudit.$inferSelect;
+export type InsertPlatformConfigAudit = typeof platformConfigAudit.$inferInsert;
+
 
 /** Public (safe) projection of an API key - never exposes the hash. */
 export type ApiKeyPublic = Omit<ApiKey, "keyHash">;

@@ -9,7 +9,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, apiErrorMessage } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
-import { Loader2, Building2, Book, Upload, ExternalLink, Search } from "lucide-react";
+import { Loader2, Building2, Book, Search } from "lucide-react";
 import { departments, getProvinces, getDistricts } from '@/data/peru-locations';
 import { safeInternalPath } from "@/lib/subscribe-link";
 
@@ -271,7 +271,7 @@ export default function OnboardingPage() {
       const response = await apiRequest('POST', '/api/auth/complete-onboarding', data);
       return response.json();
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       toast({
         title: "¡Configuración completada!",
         description: "Tu libro de reclamaciones está listo para usar",

@@ -71,7 +71,7 @@ export default function EstablishmentForm({
       });
       onSuccess?.();
     },
-    onError: (error) => {
+    onError: () => {
       toast({
         title: "Error al actualizar establecimiento",
         description: "Hubo un problema al guardar los cambios",

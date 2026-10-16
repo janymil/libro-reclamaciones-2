@@ -18,6 +18,10 @@ documents every variable.
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` | **yes** | Zoho Mail (`smtp.zoho.com`, port 465). `SMTP_PASSWORD` must be an **app-specific password**, not the mailbox password. Without them no email is ever delivered. |
 | `SMTP_FROM_NAME`, `SMTP_FROM_EMAIL` | recommended | Sender identity on all transactional mail (`LibroDigital.pe` / `hola@librodigital.pe`). |
 | `PAYMENTS_ALERT_EMAIL` | recommended | `hola@librodigital.pe`. Without it a paid-but-unmatched subscription is only logged. |
+| `PLATFORM_ADMIN_EMAILS` | ⚠️ bootstrap only | Comma-separated e-mails that get operator rights **in the app** (the team's panel, confirming a transfer, managing customers). The durable grant is now `users.is_platform_admin`, set from the panel's **Equipo** tab or by `npm run db:admin -- --email <correo>`; this list survives only as the bootstrap door of the first operator and as an emergency way back in. Never a tenant role: every customer is `admin` of their own business. Empty + no flagged operator ⇒ nobody can confirm a transfer and paid transfers stay `pending` forever. |
+| `VITE_ADMIN_PATH` | recommended | Where the team's console lives (default `/acceso/operaciones-7f31`). **Never `/admin`**: that is the first path scanners try, so it stays a 404. The client bakes it at build time and the server reads it for `X-Robots-Tag: noindex`, so both must agree in a deployment. There is **one** sign-in page for everybody (`/acceso`): the server names the kind of account (`isPlatformAdmin` in the login response and in `/api/auth/user`) and the app routes it - operator ⇒ console, customer ⇒ `/panel`. Logging out returns to `/acceso`, where logging in again lands on the right screen by itself. |
+| `PAYMENTS_MANUAL_INSTRUCTIONS` | optional fallback | The customer-facing text for the "transferencia / Yape directo" checkout: your Yape number, the account/CCI, the account holder and where to send the receipt. **Prefer the console:** the panel's **Configuración** tab stores these details in `platform_payment_settings` and takes precedence (no deploy to change a number); this variable is only the fallback while that row is empty. With neither configured, the customer is told to ask you for the details. |
+
 | `TRUST_PROXY` | recommended | Hop count (or CIDR list) for the Cloudflare proxy. Defaults to 1. See §9.1. |
 | `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL` | optional | Absent ⇒ AI falls back to local heuristics. |
 | `RUC_API_PROVIDER`, `APISNET_API_TOKEN`, `DECOLECTA_API_TOKEN` | optional | Auto-fills the razón social on the registration form. Defaults to the anonymous apis.net.pe endpoint; a token raises the quota. Absent/down ⇒ the user types the razón social manually (the endpoint answers `provider_unreachable` / `provider_rate_limited`, never "RUC not found"). |
@@ -29,6 +33,172 @@ documents every variable.
 curl.exe -fsS https://<domain>/health   # 200 {"status":"ok",...}
 curl.exe -fsS https://<domain>/ready    # 200, checks.database.status == "up"
 ```
+
+---
+
+## 0.1 Where the secrets physically live (dev vs VPS)
+
+**An application cannot hide a secret from the machine it runs on.** Whatever the
+process can read — its environment, `/proc/<pid>/environ`, a file next to the
+code — anyone with the same OS permissions can read too. So the app-side job is
+only to *stop assuming the file is inside the project*; the protection itself is
+an OS/platform concern. That is what `ENV_FILE` and this section are for.
+
+`server/env.ts` reads, in this order:
+
+| # | Source | Notes |
+|---|---|---|
+| 1 | **The process environment** | systemd `EnvironmentFile=`, Docker `environment:`/`secrets:`, Kubernetes, `doppler run`, `infisical run`. **Always wins**: Node's `process.loadEnvFile()` never overwrites a variable that is already set, so a stale file on the server cannot shadow the real secret store. |
+| 2 | **`ENV_FILE`** | Path to an env file *outside* the repository (`/etc/librodigital/app.env`). Relative values resolve against the working directory. If it is set and the file is missing, the server **refuses to boot** instead of starting with development defaults. |
+| 3 | **`<repo>/.env`** | The historical location, used only when `ENV_FILE` is unset. Convenient for development; never correct on a server. |
+
+`npm run db:apply`, `db:backup`, `db:restore`, `db:demo`, `email:diagnose` and
+`db:push` resolve the same way (`scripts/load-env.mjs`, `drizzle.config.ts`).
+
+### Development machine (Windows)
+
+One-time move, after which the workspace holds no passwords at all:
+
+```powershell
+New-Item -ItemType Directory -Force "$HOME\.librodigital" | Out-Null
+Move-Item .env "$HOME\.librodigital\dev.env"        # once, from the repo root
+setx ENV_FILE "$HOME\.librodigital\dev.env"         # persists for new shells
+```
+
+Every later shell (and therefore `npm run dev`, `npm run db:backup`, `npm run
+email:diagnose`, …) finds the file automatically. To scope it to a single session
+instead, set `$env:ENV_FILE` in that terminal only. A `.env` inside the repo can
+stay as a decoy with non-secret local values — or be deleted: with no
+`DATABASE_URL` at all the app boots on the embedded PGlite database in
+`.local-db`.
+
+*Variant: keep the file in the repo but encrypted.* `npx @dotenvx/dotenvx encrypt`
+turns `.env` into ciphertext and writes the private key to `.env.keys` (already
+git-ignored), so an agent or a code host only ever sees ciphertext; start the app
+with `npx dotenvx run -- npm run dev` and keep `.env.keys` in your password
+manager. `sops`/`age` work the same way.
+
+### VPS — option A: systemd `EnvironmentFile` (no extra software)
+
+The baseline that satisfies "secure storage on the VPS": the file lives outside
+the deploy directory, is unreadable by every account except `root` and the
+service user, and survives a `git pull`/rsync of the app.
+
+```bash
+# Once. 0750 on the directory, 0640 on the file: only root and the
+# `librodigital` group can look inside.
+sudo install -d -m 0750 -o root -g librodigital /etc/librodigital
+sudo install -m 0640 -o root -g librodigital app.env /etc/librodigital/app.env
+```
+
+```ini
+# /etc/systemd/system/librodigital.service
+[Service]
+User=librodigital
+WorkingDirectory=/srv/librodigital
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/librodigital/app.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=3
+# Hardening: the process cannot write to the app directory (except the uploads it
+# legitimately needs), cannot see other users' home directories, cannot gain
+# privileges, and gets a private /tmp.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/librodigital/uploads
+```
+
+Why that is enough:
+
+* systemd hands the variables to the process from a file only `root:librodigital`
+  can read — no placeholder in the repo, no password in `git`, `ps`, the journal
+  or a CI log.
+* `/proc/<pid>/environ` is mode `0400` owned by the service user, so no other
+  unprivileged account on the box can read the running process's secrets.
+* Never pass a secret as a command-line argument (world-readable in `ps`) and
+  never put one in a Dockerfile `ENV`, a JS bundle, or `client/`: anything with a
+  `VITE_` prefix ships to the browser.
+
+### VPS — option B: encrypted at rest with `systemd-creds`
+
+When the requirement also includes "the file on disk must be useless to anyone who
+copies it", encrypt it with the host key (TPM, or `/var/lib/systemd/credential.secret`):
+
+```bash
+sudo systemd-creds encrypt --name=librodigital-env \
+  /etc/librodigital/app.env /etc/librodigital/app.env.cred
+sudo shred -u /etc/librodigital/app.env        # the plaintext is no longer needed
+```
+
+```ini
+[Service]
+LoadCredentialEncrypted=librodigital-env:/etc/librodigital/app.env.cred
+# systemd decrypts into a root-only tmpfs and the app reads it from there;
+# `set -a` exports every KEY=VALUE in the file.
+ExecStart=/bin/sh -c 'set -a; . "$CREDENTIALS_DIRECTORY/librodigital-env"; exec /usr/bin/node dist/index.js'
+```
+
+The `.cred` file cannot be decrypted on another machine, so a stolen backup, a
+snapshot or a copied disk yields nothing. Rotating = re-run `systemd-creds encrypt`
+and `systemctl restart librodigital`.
+
+### VPS — option C: Docker
+
+```yaml
+# compose.yaml — the env file stays OUTSIDE the build context (/etc/librodigital),
+# so it is in no image and no layer.
+services:
+  app:
+    build: .
+    user: "1001:1001"                     # never root
+    env_file: /etc/librodigital/app.env   # or mount it as a secret instead
+    secrets:
+      - app_env
+    read_only: true
+    tmpfs: [/tmp]
+    volumes: [/srv/librodigital/uploads:/app/uploads]
+
+secrets:
+  app_env:
+    file: /etc/librodigital/app.env
+```
+
+`docker secrets` are mounted as files on a tmpfs (`/run/secrets/app_env`), never
+as environment variables, and never show up in `docker inspect`. The app reads
+them by pointing `ENV_FILE` at the mount (`ENV_FILE=/run/secrets/app_env`).
+
+### VPS — option D: a real secret manager (audit log + rotation)
+
+Once more than one person or service needs access, files stop being enough and a
+manager is the honest answer. Each wraps the process:
+
+| Tool | Start command | Where its own credential lives |
+|---|---|---|
+| Doppler | `doppler run -- node dist/index.js` | 0600 file or a systemd credential |
+| Infisical | `infisical run -- node dist/index.js` | same |
+| HashiCorp Vault | `vault agent` renders an env file on a tmpfs | AppRole token |
+
+They add what a file cannot: per-secret access control, an audit log of who read
+what, and rotation without touching the host. Because they export into the
+process environment, they take precedence automatically (source 1 above).
+
+### Verify the setup after deploying
+
+```bash
+sudo -u librodigital cat /etc/librodigital/app.env > /dev/null && echo "service can read it"
+sudo -u nobody       cat /etc/librodigital/app.env    # MUST fail: Permission denied
+sudo tr '\0' '\n' < /proc/$(pgrep -f 'dist/index.js')/environ | cut -d= -f1 | sort
+# ^ prints variable NAMES only - spot-check that nothing stray is exposed
+git ls-files | grep -E '^\.env$'   # MUST print nothing
+```
+
+Anything that has ever sat in the workspace has to be rotated before you rely on
+this: the Neon role password, the Zoho app-specific password, `SESSION_SECRET`,
+the AI key and the payment/WhatsApp tokens have all been readable files on a
+development machine — §1 is the procedure.
 
 ---
 
@@ -246,12 +416,47 @@ Run them deliberately, in order, against every environment:
 
 ```powershell
 npm run db:apply -- migrations/0006_login_codes.sql                       # login_code_* columns for the code login
+npm run db:apply -- migrations/0008_platform_payment_settings.sql         # console "Configuración": our Yape number / bank accounts
+npm run db:apply -- migrations/0009_platform_settings_pricing_discounts.sql  # console: alerts, identity, flags, price list, discounts, audit
 npm run db:apply -- migrations/manual/0006_business_access_requests.sql   # access-request table
 npm run db:apply -- migrations/manual/0007_users_role_default.sql         # users.role DEFAULT/NOT NULL
 npm run db:apply -- migrations/manual/0008_trial_lifecycle_backfill.sql   # trial_ends_at for pre-0003 tenants
 npm run db:apply -- migrations/manual/0009_normalize_plan_ids.sql         # legacy 'basic' -> 'gratis'
 npm run db:apply -- migrations/manual/0010_rebrand_domain_emails.sql      # @librovirtual.pe -> @librodigital.pe
 ```
+
+`0008_platform_payment_settings.sql` is the console's **Configuración** tab (not to be
+confused with `migrations/manual/0008_trial_lifecycle_backfill.sql`): the singleton
+`platform_payment_settings` row holding the holder name/RUC, the Yape and Plin numbers, up to
+8 bank accounts (bank, tipo, número, CCI, moneda) and where the voucher is sent, i.e. the text
+a paying customer reads on the "transferencia / Yape directo" checkout. It is listed in
+`migrations/meta/_journal.json`, so an embedded PGlite development database applies it
+automatically while Neon needs the `db:apply` line above (`IF NOT EXISTS` throughout). While
+the row is empty the message falls back to `PAYMENTS_MANUAL_INSTRUCTIONS`; if the table itself
+is missing, a checkout still works (the read is logged and the fallback is used) but the
+**Configuración** and **Plataforma** screens of the console answer 500 - i.e. the operator sees
+it, the customer is not blocked.
+
+`0009_platform_settings_pricing_discounts.sql` is the rest of the operator console, and it is
+all "things that used to need a deploy":
+
+| Console screen | Table it writes | What it replaces |
+|---|---|---|
+| **Configuración → Alertas / Identidad / Operación** | `platform_settings` (singleton) | `PAYMENTS_ALERT_EMAIL`, the hardcoded platform identity, `TRIAL_DAYS`, `PAYMENTS_ALLOW_FREE_PLAN_CHANGE` |
+| **Planes** | `plan_pricing` (one row per paid plan) | the prices compiled into `shared/plans.ts` |
+| **Descuentos** | `discount_codes` | nothing: promo codes are new |
+| every one of them | `platform_config_audit` | nothing: an append-only record of who changed what |
+
+`platform_settings.allow_free_plan_change` is the flag that lets a plan be applied **without
+collecting money**; the env var still works as the deploy-level override, and either one is
+enough. Both paths are audited, and the console warns loudly on the way in. The price list is
+what the checkout charges *and* what `GET /api/plans` serves, so a price shown on the landing
+page cannot disagree with the amount the payment asks for. `discount_codes` are only honoured
+on a **single period** (a recurring charge at a discounted amount would follow the customer
+forever) and a redemption is counted when a payment is **confirmed**, never at checkout. Until
+this migration is applied the server logs the failure and falls back to the code's defaults
+(catalogue prices, env alert address, flag off) - a checkout keeps working, the console screens
+answer 500 and the operator sees it.
 
 `0010` moves the platform's own identity addresses off the retired domain after the
 librovirtual.pe → librodigital.pe rebrand (old-domain rows: the demo account's login email
@@ -384,6 +589,11 @@ SMTP_PASSWORD=<see the table below>
 SMTP_FROM_NAME=LibroDigital.pe
 SMTP_FROM_EMAIL=hola@librodigital.pe
 PAYMENTS_ALERT_EMAIL=hola@librodigital.pe
+PLATFORM_ADMIN_EMAILS=hola@librodigital.pe     # who may confirm a transfer/Yape by hand
+# Where the customer sends a transfer / Yape. The panel's "Configuración" tab
+# (platform_payment_settings) wins over this line; keep it only as the fallback for
+# an environment where nobody has opened that screen yet.
+PAYMENTS_MANUAL_INSTRUCTIONS=Yape al 999 888 777 (LibroDigital S.A.C.)\nCCI 002-193-001234567012-15\nEnvíe el comprobante a hola@librodigital.pe
 ```
 
 `SMTP_PASSWORD` is not necessarily the mailbox password - it depends on the account:

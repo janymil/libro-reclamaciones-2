@@ -17,10 +17,9 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { UsageMeter } from "@/components/subscription/usage-meter";
 import { useToast } from "@/hooks/use-toast";
-import { useSubscription } from "@/hooks/use-subscription";
+import { useSubscription, useTrialDays } from "@/hooks/use-subscription";
 import { apiRequest, apiErrorMessage } from "@/lib/queryClient";
 import { businessUpdateSchema, type Business, type LibroConfiguration } from "@shared/schema";
-import { TRIAL_DAYS } from "@shared/plans";
 import type { CurrentUser, UserStats } from "@/lib/api-types";
 import {
   Mail,
@@ -126,6 +125,8 @@ export default function Profile() {
   });
 
   const { data: subscription } = useSubscription();
+  // The trial length in force (Planes may have changed it from the built-in default).
+  const trialDays = useTrialDays();
 
   // Who else administers the company? The server refuses to delete the LAST
   // administrator without also closing the tenant, so the dialog has to know
@@ -705,7 +706,7 @@ export default function Profile() {
                             <p className="text-sm text-gray-600">
                               Plan <strong>{subscription.plan.name}</strong> ·{' '}
                               {subscription.planPeriod === 'annual' ? 'anual' : 'mensual'}
-                              {subscription.isTrial && ` · prueba de ${TRIAL_DAYS} días desde el registro`}
+                              {subscription.isTrial && ` · prueba de ${trialDays} días desde el registro`}
                             </p>
                             <div className="space-y-4">
                               {subscription.plan.limits.complaintsTotal !== null ? (

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { DEMO_USER, loginAsDemo } from './helpers/auth';
+import { loginAsDemo } from './helpers/auth';
 
 test.describe('Authentication Flow', () => {
   test('shows error with invalid credentials', async ({ page }) => {

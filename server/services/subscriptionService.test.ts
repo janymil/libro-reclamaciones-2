@@ -145,6 +145,21 @@ describe("subscriptionService helpers", () => {
     expect(defaults.trialEndsAt.toISOString()).toBe("2026-01-16T00:00:00.000Z");
   });
 
+  it("honours the trial length the console configured (Planes)", () => {
+    // The operator changed it to 30 days; new signups must get 30, not the constant.
+    const defaults = newBusinessTrialDefaults(new Date("2026-01-01T00:00:00Z"), 30);
+    expect(defaults.trialEndsAt.toISOString()).toBe("2026-01-31T00:00:00.000Z");
+  });
+
+  it("falls back to the default for a nonsense trial length", () => {
+    // NaN/0/negative can only arrive from a bad row or a stale caller: a trial that
+    // ends today would silently skip the free period entirely.
+    for (const days of [Number.NaN, 0, -5, Number.POSITIVE_INFINITY]) {
+      const defaults = newBusinessTrialDefaults(new Date("2026-01-01T00:00:00Z"), days);
+      expect(defaults.trialEndsAt.toISOString()).toBe("2026-01-16T00:00:00.000Z");
+    }
+  });
+
   it("plan changes advance the period end", () => {
     const result = resolvePlanChange(business(), "profesional", "annual", new Date("2026-01-01T00:00:00Z"));
     expect("error" in result).toBe(false);

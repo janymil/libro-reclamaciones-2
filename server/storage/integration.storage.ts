@@ -16,7 +16,7 @@ import {
  * shown once, at creation time.
  */
 
-const API_KEY_PREFIX = "lv_";
+const API_KEY_PREFIX = "ld_";
 
 /** Strips the hash from an API key row before returning it to a client. */
 function toPublicKey(key: ApiKey): ApiKeyPublic {

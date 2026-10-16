@@ -6,6 +6,11 @@ import {
   type PlanPeriod,
   type SubscriptionStatus,
 } from "@shared/payments";
+import {
+  buildTransferInstructions,
+  type PaymentCollectionDetails,
+} from "@shared/payment-details";
+
 
 /**
  * Provider adapters (Phase 2.7).
@@ -34,7 +39,7 @@ import {
 const REQUEST_TIMEOUT_MS = 10_000;
 
 export interface CheckoutInput {
-  /** Our own code, e.g. LV-8F3A2B. Printed on receipts and bank transfers. */
+  /** Our own code, e.g. LD-8F3A2B. Printed on receipts and bank transfers. */
   reference: string;
   amountCents: number;
   description: string;
@@ -46,7 +51,17 @@ export interface CheckoutInput {
   failureUrl: string;
   pendingUrl: string;
   notificationUrl: string;
+  /**
+   * Where the company collects a transfer / Yape, for the offline provider.
+   *
+   * Supplied by the caller (`paymentService`) because the gateway itself must stay
+   * free of storage: it was pure + `fetch` before this feature and stays that way.
+   * `undefined` means "not configured in the console", which makes the manual
+   * provider fall back to `PAYMENTS_MANUAL_INSTRUCTIONS`.
+   */
+  transferDetails?: PaymentCollectionDetails;
 }
+
 
 export interface CheckoutResult {
   providerRef: string;
@@ -79,6 +94,18 @@ export interface PaymentGateway {
   // --- One-time payments -----------------------------------------------------
   createCheckout(input: CheckoutInput): Promise<CheckoutResult>;
   fetchStatus(providerRef: string): Promise<ProviderStatus>;
+  /**
+   * Finds the charge our own reference produced, when there is one.
+   *
+   * Needed because a Checkout Pro `providerRef` is the id of the *preference* we
+   * created, not of a payment: asking the payments endpoint about it can only ever
+   * answer 404. The reference we put in `external_reference` travels back on every
+   * payment the provider creates, so it is the reliable handle - and it is what
+   * makes "check this payment again" work when a webhook was lost.
+   *
+   * Returns `undefined` when nobody has paid yet, which is not an error.
+   */
+  findPaymentByReference?(reference: string): Promise<ProviderStatus | undefined>;
 
   // --- Recurring agreements ---------------------------------------------------
   /** Creates the agreement; the payer must still authorise it at `initPoint`. */
@@ -145,7 +172,7 @@ export interface SubscriptionState {
   period?: PlanPeriod;
   /**
    * Our own code (Mercado Pago `external_reference`). For a subscription this app
-   * created it is the `LV-XXXXXX` reference; for one bought through a plan link it
+   * created it is the `LD-XXXXXX` reference; for one bought through a plan link it
    * is the plan's panel code - which is how an unknown subscription is recognised.
    */
   externalReference?: string;
@@ -580,16 +607,48 @@ function putJson(
 // Manual provider (bank transfer / Yape to a phone number)
 // ---------------------------------------------------------------------------
 
+/**
+ * Fallback shown when neither the console nor `PAYMENTS_MANUAL_INSTRUCTIONS` has
+ * anything to say.
+ *
+ * It must never be the *only* thing the customer sees, because it cannot contain
+ * the real account details (only the operator knows their Yape number / CCI).
+ * It therefore asks for them explicitly instead of telling the customer to wait
+ * for a commercial advisor who may never call.
+ */
 export const DEFAULT_MANUAL_DETAILS = [
-  "Realice la transferencia o el Yape a la cuenta que le indique su asesor comercial.",
+  "Escríbanos o llámenos para recibir los datos de pago (Yape o transferencia con CCI) y se los enviamos al instante.",
   "Escriba la referencia en el motivo o la glosa del pago.",
-  "Envíe el comprobante por correo. Un administrador confirmará el pago y su plan quedará activo.",
+  "Envíe el comprobante, o el número de operación de Yape, a nuestro correo.",
+  "El equipo de LibroDigital verificará el pago y su plan quedará activo.",
 ].join("\n");
 
-/** Instruction block shown to the customer, including the amount and reference. */
+/**
+ * Instruction block shown to the customer: the amount, the reference and where to
+ * send the money.
+ *
+ * Three sources, in this order - the most specific one that is actually filled in
+ * wins, so a deployment can move to the console at its own pace:
+ *   1. the details an operator saved in **Configuración** (`transferDetails`),
+ *   2. the free text in `PAYMENTS_MANUAL_INSTRUCTIONS`,
+ *   3. `DEFAULT_MANUAL_DETAILS` ("ask us").
+ *
+ * The reference and the amount are always ours: they identify the payment, and a
+ * customer editing them from the panel would break reconciliation.
+ */
 export function manualPaymentInstructions(
   input: Pick<CheckoutInput, "reference" | "amountCents" | "description">,
+  transferDetails?: PaymentCollectionDetails,
 ): string {
+  // Configured in the console: the shared builder already produces the whole
+  // message (reference, amount and the collection details), so it wins outright.
+  const fromConsole = buildTransferInstructions(input, transferDetails);
+  if (fromConsole) {
+    return fromConsole;
+  }
+
+  // Otherwise the same shape as before this feature: our header plus the
+  // operator's free text, or the "ask us" text when there is none.
   const configured = readEnv("PAYMENTS_MANUAL_INSTRUCTIONS") ?? DEFAULT_MANUAL_DETAILS;
   return [
     `Referencia: ${input.reference}`,
@@ -619,7 +678,7 @@ class ManualGateway implements PaymentGateway {
     return {
       providerRef: input.reference,
       redirectUrl: null,
-      instructions: manualPaymentInstructions(input),
+      instructions: manualPaymentInstructions(input, input.transferDetails),
       raw: { mode: "manual" },
     };
   }
@@ -693,6 +752,22 @@ class MercadoPagoGateway implements PaymentGateway {
       { Authorization: `Bearer ${token}` },
     );
     return parseMercadoPagoPayment(json);
+  }
+
+  /** The charge behind our own reference, or nothing when it was never paid. */
+  async findPaymentByReference(reference: string): Promise<ProviderStatus | undefined> {
+    const token = requireEnv("MERCADOPAGO_ACCESS_TOKEN");
+    const json = (await getJson(
+      `${MERCADOPAGO_API}/v1/payments/search?external_reference=${encodeURIComponent(reference)}` +
+        "&sort=date_created&criteria=desc",
+      { Authorization: `Bearer ${token}` },
+    )) as { results?: unknown[] };
+
+    const first = Array.isArray(json.results) ? json.results[0] : undefined;
+    if (!first) {
+      return undefined;
+    }
+    return parseMercadoPagoPayment(first);
   }
 
   supportsRecurring(): boolean {

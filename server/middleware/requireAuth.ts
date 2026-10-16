@@ -26,7 +26,9 @@ export const requireAuth = async (req: any, res: any, next: any) => {
       });
     }
 
-    req.user = user;
+    // The platform-staff flag is computed here (never trusted from the client)
+    // and is only used by the UI to hide actions the API refuses anyway.
+    req.user = { ...user, isPlatformAdmin: isPlatformAdmin(user) };
     next();
   } catch (error) {
     console.error('Auth middleware error:', error);
@@ -78,3 +80,64 @@ export const requireAdmin = requireRole('admin');
 
 /** Staff operations: everyone except the read-only viewer role. */
 export const requireStaff = requireRole('admin', 'user');
+
+// ---------------------------------------------------------------------------
+// Platform staff (the LibroDigital team), as opposed to a customer
+// ---------------------------------------------------------------------------
+
+/**
+ * Allow-list of the LibroDigital team, from `PLATFORM_ADMIN_EMAILS`
+ * (comma-separated, case-insensitive). Empty list = nobody.
+ *
+ * Kept as a bootstrap and emergency door: the durable grant lives in
+ * `users.is_platform_admin` and is managed from the admin panel. It is what lets
+ * the first operator sign in on a fresh database (nothing can grant the flag
+ * before somebody holds it) and what lets us get back in if the flag is ever
+ * cleared by mistake.
+ */
+function platformAdminEmails(): string[] {
+  return (process.env.PLATFORM_ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * Is this login a member of the LibroDigital team (and not a customer)?
+ *
+ * This can never be derived from `role`: every tenant owner is `admin`, which
+ * means "owns a business account" - i.e. the paying customer. Either the durable
+ * flag or the bootstrap allow-list has to say so.
+ */
+export function isPlatformAdmin(user: any): boolean {
+  if (user?.isPlatformAdmin === true) {
+    return true;
+  }
+
+  const allowed = platformAdminEmails();
+  if (allowed.length === 0) {
+    return false;
+  }
+  const email = typeof user?.email === 'string' ? user.email.trim().toLowerCase() : '';
+  return email.length > 0 && allowed.includes(email);
+}
+
+/**
+ * Platform-staff only (deny by default). Must run after `requireAuth`.
+ *
+ * Used for actions that a customer must never be able to perform on their own
+ * account. The motivating case is confirming a bank transfer: `requireAdmin`
+ * would let any customer mark their own transfer as received and give themselves
+ * a paid plan for free, so the check is the team allow-list instead.
+ */
+export const requirePlatformAdmin = (req: any, res: any, next: any) => {
+  if (!req.user) {
+    return res.status(401).json({ message: "No autenticado" });
+  }
+  if (!isPlatformAdmin(req.user)) {
+    return res.status(403).json({
+      message: "Esta acción es exclusiva del equipo de LibroDigital.",
+    });
+  }
+  next();
+};

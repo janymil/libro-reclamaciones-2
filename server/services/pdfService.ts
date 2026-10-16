@@ -547,7 +547,7 @@ class PDFService {
   async generateComplaintReport(
     complaints: Complaint[], 
     business: Business, 
-    filters: any
+    _filters: any
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       try {

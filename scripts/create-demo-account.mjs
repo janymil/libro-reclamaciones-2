@@ -1,3 +1,4 @@
+import "./load-env.mjs";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import bcrypt from "bcrypt";
 import ws from "ws";
@@ -11,6 +12,9 @@ import ws from "ws";
  * (enforced in server/routes.ts requireAuth).
  *
  * Usage: npm run db:demo
+ *
+ * Credentials come from the environment or from the env file named by
+ * `ENV_FILE` (see scripts/load-env.mjs).
  */
 neonConfig.webSocketConstructor = ws;
 

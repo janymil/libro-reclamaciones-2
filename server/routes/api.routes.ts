@@ -15,7 +15,7 @@ import { enforceQuota, enforceComplaintType } from "../services/subscriptionServ
  *   POST /api/v1/complaints   - register a complaint
  *   GET  /api/v1/complaints   - list recent complaints (safe fields)
  *
- * Auth: `Authorization: Bearer lv_...`
+ * Auth: `Authorization: Bearer ld_...`
  */
 interface AuthenticatedApiKey {
   id: string;

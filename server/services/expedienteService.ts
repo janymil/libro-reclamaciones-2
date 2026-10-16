@@ -146,7 +146,7 @@ export function buildManifest(request: ExpedienteRequest, verificationCode: stri
 
 /** Builds the complete expediente ZIP as a buffer. */
 export async function buildExpedienteZip(request: ExpedienteRequest): Promise<{ buffer: Buffer; verificationCode: string; manifest: string }> {
-  const { business, complaints, filters, generatedAt = new Date() } = request;
+  const { business, complaints, generatedAt = new Date() } = request;
   const verificationCode = computeVerificationCode(business.id, complaints, generatedAt);
 
   let attachmentCount = 0;

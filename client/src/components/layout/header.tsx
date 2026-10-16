@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useUserBusinesses, type UserBusiness } from "@/hooks/use-subscription";
 import { apiRequest, queryClient } from "@/lib/queryClient";

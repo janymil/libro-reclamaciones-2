@@ -184,16 +184,27 @@ export async function hasFeature(businessId: string, feature: keyof PlanDefiniti
   return getEffectivePlan(business).features[feature];
 }
 
-/** Trial fields applied to every newly created business. New tenants store
- * "gratis" so when the trial ends they fall back to Free automatically. */
-export function newBusinessTrialDefaults(now: Date = new Date()): {
+/**
+ * Trial fields applied to every newly created business. New tenants store
+ * "gratis" so when the trial ends they fall back to Free automatically.
+ *
+ * `trialDays` is a parameter rather than the compiled-in constant because an operator
+ * can change the trial length from the console (Planes → Prueba gratuita): the caller
+ * reads it there and passes it. The default keeps every existing caller honest if one
+ * forgets - a 15-day trial instead of a NaN date.
+ */
+export function newBusinessTrialDefaults(
+  now: Date = new Date(),
+  trialDays: number = TRIAL_DAYS,
+): {
   subscriptionPlan: string;
   subscriptionStatus: string;
   trialEndsAt: Date;
   planPeriod: string;
 } {
+  const days = Number.isFinite(trialDays) && trialDays > 0 ? Math.trunc(trialDays) : TRIAL_DAYS;
   const trialEndsAt = new Date(now);
-  trialEndsAt.setUTCDate(trialEndsAt.getUTCDate() + TRIAL_DAYS);
+  trialEndsAt.setUTCDate(trialEndsAt.getUTCDate() + days);
   return {
     subscriptionPlan: "gratis",
     subscriptionStatus: "trialing",

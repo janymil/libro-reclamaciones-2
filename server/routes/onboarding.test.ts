@@ -53,7 +53,7 @@ vi.mock("../storage", () => ({
     },
     getUserBusinessAccess: async (userId: string) => {
       h.track("getUserBusinessAccess", [userId]);
-      return h.state.accessGrants.map((businessId) => ({ businessId }));
+      return h.state.accessGrants.map((businessId: string) => ({ businessId }));
     },
     completeOnboarding: async (input: any) => {
       h.track("completeOnboarding", [input]);

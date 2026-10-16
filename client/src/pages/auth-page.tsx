@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
+import { ADMIN_PATH } from "@/lib/admin-path";
 import { Link, useLocation } from "wouter";
 import { Loader2, Mail, UserPlus, LogIn, ShieldCheck, Timer, LockKeyhole, ArrowLeft } from "lucide-react";
 import { BrandMark, StampMark, HojaDocument } from "@/components/landing/brand";
@@ -124,7 +125,10 @@ export default function AuthPage() {
         setLocation(nextPath ? `/registro?next=${encodeURIComponent(nextPath)}` : '/registro');
         return;
       }
-      setLocation(nextPath ?? '/panel');
+      // One login page for everybody; the account decides the destination. The
+      // server names the kind of account (`isPlatformAdmin`), the app routes it:
+      // an operator belongs in the console, a customer in the application.
+      setLocation(nextPath ?? (user.isPlatformAdmin ? ADMIN_PATH : '/panel'));
     }
   }, [isAuthenticated, user, setLocation, nextPath]);
 

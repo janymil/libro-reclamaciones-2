@@ -1,3 +1,4 @@
+import "./load-env.mjs";
 import fs from "fs";
 import path from "path";
 import { Pool, neonConfig } from "@neondatabase/serverless";
@@ -11,7 +12,11 @@ import ws from "ws";
  * SCRATCH database the first time, never straight into production.
  *
  * Usage:
- *   node --env-file=.env scripts/restore-tables.mjs backups/out.json --yes
+ *   npm run db:restore -- backups/out.json --yes
+ *
+ * Credentials come from the environment or from the env file named by
+ * `ENV_FILE` (point it at the scratch file for the drill, e.g.
+ * `ENV_FILE=.env.scratch` — see scripts/load-env.mjs).
  */
 neonConfig.webSocketConstructor = ws;
 

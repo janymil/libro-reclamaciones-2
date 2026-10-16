@@ -5,7 +5,7 @@ import { Lock } from 'lucide-react';
 import { PLAN_LIST, type PlanDefinition, type PlanFeatures } from '@shared/plans';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { useSubscription } from '@/hooks/use-subscription';
+import { usePlans, useSubscription } from '@/hooks/use-subscription';
 
 /**
  * Renders a feature only when the customer's effective plan includes it.
@@ -17,9 +17,17 @@ import { useSubscription } from '@/hooks/use-subscription';
 
 export type GatedFeature = keyof PlanFeatures;
 
-/** The cheapest plan that includes a feature (drives the upgrade message). */
-export function planUnlocking(feature: GatedFeature): PlanDefinition | undefined {
-  return PLAN_LIST.find((plan) => plan.features[feature]);
+/**
+ * The cheapest plan that includes a feature (drives the upgrade message).
+ *
+ * Takes the list so the caller can pass the LIVE price list (Planes) instead of the
+ * compiled-in catalogue: a message that quotes the old price is worse than no message.
+ */
+export function planUnlocking(
+  feature: GatedFeature,
+  plans: PlanDefinition[] = PLAN_LIST,
+): PlanDefinition | undefined {
+  return plans.find((plan) => plan.features[feature]);
 }
 
 export default function PlanGate({
@@ -34,6 +42,7 @@ export default function PlanGate({
   children: ReactNode;
 }) {
   const { data: subscription, isLoading } = useSubscription();
+  const { data: livePlans } = usePlans();
 
   // While the plan is loading, render the children: every one of these
   // features is also enforced server-side, and flashing a lock on each load
@@ -46,7 +55,7 @@ export default function PlanGate({
     return <>{children}</>;
   }
 
-  const plan = planUnlocking(feature);
+  const plan = planUnlocking(feature, livePlans && livePlans.length > 0 ? livePlans : undefined);
 
   return (
     <Card className="border-dashed bg-gray-50" data-testid={`plan-gate-${feature}`}>

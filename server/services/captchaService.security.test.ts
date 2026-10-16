@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import crypto from "crypto";
 
-import { satisfiesPow, powInput } from "@shared/pow";
+import { POW_ALGORITHM, satisfiesPow, powInput } from "@shared/pow";
 import { solvePowChallenge } from "@/lib/pow";
 
 import {
@@ -126,7 +126,12 @@ describe("browser solver interop", () => {
   it("produces a digest the shared difficulty rule accepts", async () => {
     const salt = crypto.randomBytes(12).toString("hex");
     const difficulty = 3;
-    const solution = await solvePowChallenge({ salt, difficulty, maxNumber: 200_000 });
+    const solution = await solvePowChallenge({
+      algorithm: POW_ALGORITHM,
+      salt,
+      difficulty,
+      maxNumber: 200_000,
+    });
 
     const digest = crypto
       .createHash("sha256")

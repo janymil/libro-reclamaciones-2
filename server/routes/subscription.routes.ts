@@ -1,10 +1,11 @@
 import type { Express } from "express";
 import { z } from "zod";
 
-import { PLAN_LIST } from "@shared/plans";
 import { storage } from "../storage";
 import { requireAuth, requireNonDemo } from "../middleware/requireAuth";
 import { getSubscriptionInfo, resolvePlanChange } from "../services/subscriptionService";
+import { effectivePlans } from "../services/pricingService";
+import { getIdentity, getTrialDays, isFreePlanChangeAllowed } from "../services/platformSettingsService";
 
 /**
  * Plans & quotas (Phase 2.6): the catalog is public (landing page), while the
@@ -12,12 +13,45 @@ import { getSubscriptionInfo, resolvePlanChange } from "../services/subscription
  * admin.
  */
 export function registerSubscriptionRoutes(app: Express): void {
-  // Public plan catalog
-  app.get('/api/plans', (_req, res) => {
-    res.json(PLAN_LIST);
+  /**
+   * Public plan catalog.
+   *
+   * Prices come from the console's price list (Planes) when an operator overrode
+   * them, so the page a visitor reads and the amount the checkout charges are the
+   * same numbers. The plan *contents* still come from `shared/plans.ts`.
+   */
+  app.get('/api/plans', async (_req, res) => {
+    try {
+      res.json(await effectivePlans());
+    } catch (error) {
+      console.error('Error building the plan catalog:', error);
+      // Never leave the pricing page empty: the catalogue prices are a valid answer.
+      const { PLAN_LIST } = await import('@shared/plans');
+      res.json(PLAN_LIST);
+    }
   });
 
-  // Current subscription + usage for the upgrade UI
+
+  /**
+   * Public platform information: who we are and how long the trial lasts.
+   *
+   * The privacy policy, the receipts and the landing page all need the same two
+   * facts, and both used to be hardcoded in the client. No secrets: this is exactly
+   * what a customer may see, and the database is only read for values that are
+   * already public by nature.
+   */
+  app.get('/api/platform-info', async (_req, res) => {
+    try {
+      res.json({
+        identity: await getIdentity(),
+        trialDays: await getTrialDays(),
+      });
+    } catch (error) {
+      console.error('Error reading the platform identity:', error);
+      res.status(500).json({ message: "No se pudo cargar la información de la plataforma" });
+    }
+  });
+
   app.get('/api/subscription', requireAuth, async (req: any, res) => {
     try {
       if (!req.user.businessId) {
@@ -41,19 +75,27 @@ export function registerSubscriptionRoutes(app: Express): void {
   //
   // This is the NO-CHARGE path: it applies the plan immediately without
   // collecting money. That is only legitimate when billing happens outside the
-  // app (manual invoicing), so it is off unless
+  // app (manual invoicing), so it is off unless an operator turns it on in the
+  // console (Configuración → Operación, audited) or the deployment sets
   // PAYMENTS_ALLOW_FREE_PLAN_CHANGE=true. The normal path is
   // POST /api/payments/checkout, where only a confirmed payment applies a plan -
   // otherwise this endpoint would be a free upgrade for anyone with a session.
   app.post('/api/subscription', requireAuth, requireNonDemo, async (req: any, res) => {
     try {
-      if (process.env.PAYMENTS_ALLOW_FREE_PLAN_CHANGE !== 'true') {
+      if (!(await isFreePlanChangeAllowed())) {
         return res.status(402).json({
           message:
             "La activación de un plan requiere un pago confirmado. Contrátelo en la sección \"Plan y Cuotas\".",
           code: "payment_required",
         });
       }
+
+      // Loud on purpose: a plan that changes without money is exactly the event that
+      // must be findable in the logs when someone asks "how did this account get Pro?".
+      console.warn(
+        `[subscription] cambio de plan SIN pago: usuario ${req.user.email} (${req.user.id}), ` +
+          `empresa ${req.user.businessId ?? '—'}`,
+      );
 
       if (req.user.role !== 'admin') {
         return res.status(403).json({ message: "Solo un administrador puede cambiar el plan" });

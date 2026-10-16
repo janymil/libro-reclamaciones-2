@@ -14,11 +14,12 @@
     "verify": "npm run check && npm test",
     "audit:security": "npm audit --omit=dev --audit-level=high",
     "db:push": "drizzle-kit push",
-    "db:apply": "node --env-file=.env scripts/apply-sql.mjs",
-    "db:backup": "node --env-file=.env scripts/backup-tables.mjs",
-    "db:restore": "node --env-file=.env scripts/restore-tables.mjs",
-    "db:demo": "node --env-file=.env scripts/create-demo-account.mjs",
-    "email:diagnose": "node --env-file=.env scripts/smtp-diagnose.mjs"
+    "db:apply": "node scripts/apply-sql.mjs",
+    "db:backup": "node scripts/backup-tables.mjs",
+    "db:restore": "node scripts/restore-tables.mjs",
+    "db:demo": "node scripts/create-demo-account.mjs",
+    "db:admin": "node scripts/setup-platform-admin.mjs",
+    "email:diagnose": "node scripts/smtp-diagnose.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

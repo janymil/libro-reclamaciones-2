@@ -7,9 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import CheckoutDialog from "@/components/payments/checkout-dialog";
 import { UsageMeter } from "@/components/subscription/usage-meter";
 import { useToast } from "@/hooks/use-toast";
-import { usePlans, useSubscription } from "@/hooks/use-subscription";
+import { usePlans, useSubscription, useTrialDays } from "@/hooks/use-subscription";
+import { resolvePlanCardState, type PlanCardState } from "@/lib/plan-card-state";
 import { buildSubscribeUrl } from "@/lib/subscribe-link";
-import { TRIAL_DAYS, type PlanDefinition } from "@shared/plans";
+import type { PlanDefinition } from "@shared/plans";
 
 /**
  * Plan y Cuotas: the sellable SaaS surface. Shows the trial state,
@@ -17,21 +18,26 @@ import { TRIAL_DAYS, type PlanDefinition } from "@shared/plans";
  * monthly/annual pricing. Positioning: "reclamos ilimitados en todos los
  * planes + IA en Pro" — competitors limit claims or charge per case.
  * Annual is pre-selected because it saves ~50% vs monthly.
+ *
+ * What each card can do is decided by `resolvePlanCardState`: the badge follows
+ * the plan TIER, the button follows the tier AND the billing period, so the
+ * customer on Básico mensual can still buy Básico anual (and back).
  */
 
 function PlanCard({
   plan,
   period,
-  isCurrent,
+  state,
   onSelect,
 }: {
   plan: PlanDefinition;
   period: 'monthly' | 'annual';
-  isCurrent: boolean;
+  state: PlanCardState;
   onSelect: (planId: string) => void;
 }) {
   const price = period === 'annual' ? plan.priceAnnual : plan.priceMonthly;
   const isFree = plan.id === 'gratis';
+  const isCurrent = state.isCurrentPlan;
   const { toast } = useToast();
 
   /**
@@ -93,13 +99,19 @@ function PlanCard({
 
         <Button
           className="w-full"
-          variant={isCurrent ? "outline" : "default"}
-          disabled={isCurrent || isFree}
+          variant={state.disabled ? "outline" : "default"}
+          disabled={state.disabled}
           onClick={() => onSelect(plan.id)}
           data-testid={`button-select-plan-${plan.id}`}
         >
-          {isFree ? 'Gratis, no se paga' : isCurrent ? "Plan activo" : `Pagar y activar ${plan.name}`}
+          {state.label}
         </Button>
+
+        {isCurrent && !state.isActive && (
+          <p className="text-center text-xs text-gray-500">
+            Es el mismo plan: lo único que cambia es cada cuánto lo paga.
+          </p>
+        )}
 
         {!isFree && (
           <Button
@@ -126,6 +138,8 @@ export default function SubscriptionPage() {
 
   const { data: plans } = usePlans();
   const { data: subscription, isLoading } = useSubscription();
+  // The trial length in force, not the compiled-in default (Planes can change it).
+  const trialDays = useTrialDays();
 
   // A finished trial is its own state: without it the header would read like a
   // plan the customer never bought (the stored plan is "gratis"), and a trial
@@ -154,7 +168,7 @@ export default function SubscriptionPage() {
                       {subscription.isTrial
                         ? `Prueba gratuita activa — quedan ${subscription.trialDaysRemaining} día(s). Todas las funciones de Pro desbloqueadas.`
                         : trialEnded
-                          ? `Su prueba gratuita de ${TRIAL_DAYS} días terminó. Está en el plan ${subscription.plan.name}: sus reclamos y datos siguen ahí, pero las funciones de Pro requieren un plan pagado.`
+                          ? `Su prueba gratuita de ${trialDays} días terminó. Está en el plan ${subscription.plan.name}: sus reclamos y datos siguen ahí, pero las funciones de Pro requieren un plan pagado.`
                           : `Plan ${subscription.plan.name} · ${subscription.planPeriod === 'annual' ? 'anual' : 'mensual'}`}
                     </CardDescription>
                   </div>
@@ -220,7 +234,16 @@ export default function SubscriptionPage() {
                   key={plan.id}
                   plan={plan}
                   period={period}
-                  isCurrent={!subscription.isTrial && subscription.storedPlanId === plan.id}
+                  state={resolvePlanCardState({
+                    plan,
+                    storedPlanId: subscription.storedPlanId,
+                    // The period the customer actually bought, straight from the
+                    // API: this is what used to be ignored, hiding the switch
+                    // from Básico mensual to Básico anual.
+                    storedPeriod: subscription.planPeriod,
+                    selectedPeriod: period,
+                    isTrialing: subscription.isTrial,
+                  })}
                   onSelect={handleSelect}
                 />
               ))}

@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { complaintFormSchema, type ComplaintFormData } from "@/lib/validation";
-import { DOCUMENT_TYPES, COMPLAINT_TYPES, LEGAL_NOTICES } from "@/lib/constants";
+import { DOCUMENT_TYPES, LEGAL_NOTICES } from "@/lib/constants";
 import { useCreateComplaint, useAIPublicAssist } from "@/hooks/use-complaints";
 import { useCaptchaChallenge } from "@/hooks/use-captcha";
 import { requestSolvedCaptcha } from "@/lib/pow";

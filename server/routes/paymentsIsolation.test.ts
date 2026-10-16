@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { startTestApp, call } from "../test/routeTestHarness";
+import { clearPlatformSettingsCache } from "../services/platformSettingsService";
 
 /**
  * PAYMENT ROUTES SECURITY SUITE (Phase 2.7).
@@ -32,6 +33,12 @@ const h = vi.hoisted(() => {
     subscriptionsByReference: {},
     businessById: {},
     nextId: 1,
+    /** Configuración → where the company collects a transfer / Yape. */
+    paymentSettings: undefined as any,
+    /** Simulates an unreadable settings table (e.g. the migration not applied). */
+    paymentSettingsError: undefined as any,
+    /** Discount codes an operator created (Configuración → Descuentos). */
+    discounts: [] as any[],
   };
 
   const storageMock: any = {
@@ -54,6 +61,39 @@ const h = vi.hoisted(() => {
       track("getPaymentsByBusiness", [businessId]);
       return Object.values(state.payments).filter((payment: any) => payment.businessId === businessId);
     },
+    /** Operator queue: the pending transfers of EVERY tenant. */
+    listPendingManualPayments: async () => {
+      track("listPendingManualPayments", []);
+      return Object.values(state.payments).filter(
+        (payment: any) => payment.provider === "manual" && payment.status === "pending",
+      );
+    },
+    /**
+     * Configuración → Datos de pago. Lives in the mocked storage because the whole
+     * point of the feature is that the checkout reads it from there; a test can set
+     * `h.state.paymentSettings` to prove what the customer is told, or
+     * `h.state.paymentSettingsError` to simulate an unreadable table.
+     */
+    getPlatformPaymentSettings: async () => {
+      if (state.paymentSettingsError) {
+        throw state.paymentSettingsError;
+      }
+      return state.paymentSettings;
+    },
+    // ---- Price list and discounts (Phase 2.7, step 4) --------------------------
+    /** No overrides in these tests: the catalogue prices apply. */
+    listPlanPricing: async () => [],
+    getDiscountCodeByCode: async (code: string) =>
+      state.discounts.find((row: any) => row.code === code),
+    redeemDiscountCode: async (id: string) => {
+      track("redeemDiscountCode", [id]);
+      const row = state.discounts.find((discount: any) => discount.id === id);
+      if (!row) return false;
+      if (row.maxRedemptions !== null && row.redemptionCount >= row.maxRedemptions) return false;
+      row.redemptionCount += 1;
+      return true;
+    },
+    getPlatformSettings: async () => undefined,
     createPayment: async (data: any) => {
       track("createPayment", [data]);
       const id = `pay-${state.nextId++}`;
@@ -224,6 +264,12 @@ const users = {
   staffA: { id: "aaaaaaaa-2222-4222-8222-222222222222", email: "staff.a@example.com", firstName: "Staff", lastName: "A", role: "user", businessId: A, isActive: true, isDemo: false },
   adminB: { id: "bbbbbbbb-1111-4111-8111-111111111111", email: "admin.b@example.com", firstName: "Admin", lastName: "B", role: "admin", businessId: B, isActive: true, isDemo: false },
   demoAdmin: { id: "dddddddd-1111-4111-8111-111111111111", email: "demo@librodigital.pe", firstName: "Usuario", lastName: "Demo", role: "admin", businessId: A, isActive: true, isDemo: true },
+  /**
+   * Platform staff (LibroDigital team). Deliberately attached to tenant B, while
+   * the seeded payments belong to tenant A, to prove reconciliation works across
+   * tenants and that the allow-list - not `role` - is what grants the right.
+   */
+  platformOps: { id: "ffffffff-1111-4111-8111-111111111111", email: "ops@librodigital.pe", firstName: "Ops", lastName: "Libro", role: "admin", businessId: B, isActive: true, isDemo: false },
 };
 
 let app: { url: string; close: () => Promise<void> };
@@ -238,10 +284,16 @@ beforeEach(async () => {
   h.state.subscriptions = {};
   h.state.subscriptionsByReference = {};
   h.state.nextId = 1;
+  h.state.paymentSettings = undefined;
+  h.state.paymentSettingsError = undefined;
+  h.state.discounts = [];
+  clearPlatformSettingsCache();
 
   delete process.env.MERCADOPAGO_ACCESS_TOKEN;
   delete process.env.APP_URL;
   delete process.env.PAYMENTS_ALERT_EMAIL;
+  // Confirming a transfer is platform-staff only; only `platformOps` is on it.
+  process.env.PLATFORM_ADMIN_EMAILS = "ops@librodigital.pe";
   emailMock.alerts.length = 0;
   clearPaymentAlertCache();
 
@@ -255,6 +307,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   delete process.env.MERCADOPAGO_ACCESS_TOKEN;
   delete process.env.PAYMENTS_ALERT_EMAIL;
+  delete process.env.PLATFORM_ADMIN_EMAILS;
 });
 
 /** Seeds a payment row directly, as the checkout would have left it. */
@@ -266,8 +319,8 @@ function seedPayment(overrides: Record<string, any> = {}) {
     userId: users.adminA.id,
     provider: "manual",
     method: "transferencia",
-    providerRef: `LV-SEED${id}`,
-    reference: `LV-SEED${id}`,
+    providerRef: `LD-SEED${id}`,
+    reference: `LD-SEED${id}`,
     planId: "profesional",
     period: "monthly",
     amountCents: 2900,
@@ -422,11 +475,73 @@ describe("POST /api/payments/checkout - the manual (bank transfer) path", () => 
     // Nothing to redirect to: the customer pays offline.
     expect(res.body.redirectUrl).toBeNull();
     // The reference is what reconciles the bank statement with our ledger.
-    expect(res.body.payment.reference).toMatch(/^LV-[A-HJ-NP-Z2-9]{6}$/);
+    expect(res.body.payment.reference).toMatch(/^LD-[A-HJ-NP-Z2-9]{6}$/);
     expect(res.body.instructions).toContain(res.body.payment.reference);
     expect(res.body.instructions).toContain("S/ 29.00");
     // The plan is NOT applied: only the confirmed payment applies it.
     expect(h.calls.updateBusiness).toBeUndefined();
+  });
+
+  it("uses the details an operator saved in Configuración", async () => {
+    h.state.paymentSettings = {
+      id: 1,
+      holderName: "LibroDigital S.A.C.",
+      holderRuc: "20601234567",
+      yapeNumber: "999 888 777",
+      plinNumber: null,
+      voucherEmail: "pagos@librodigital.pe",
+      voucherWhatsapp: null,
+      bankAccounts: [
+        {
+          bank: "BCP",
+          accountType: "corriente",
+          accountNumber: "193-1234567-0-12",
+          cci: "002-193-001234567012-15",
+          currency: "PEN",
+          holder: null,
+        },
+      ],
+      notes: null,
+      updatedByUserId: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const res = await call(app.url, "/api/payments/checkout", {
+      method: "POST",
+      userId: users.adminA.id,
+      body: { plan: "profesional", period: "monthly", provider: "manual" },
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.instructions).toContain("Yape al 999 888 777");
+    expect(res.body.instructions).toContain("193-1234567-0-12");
+    expect(res.body.instructions).toContain("CCI 002-193-001234567012-15");
+    expect(res.body.instructions).toContain("pagos@librodigital.pe");
+    // Still ours, still the reference of the payment that was just created.
+    expect(res.body.instructions).toContain(res.body.payment.reference);
+  });
+
+  it("still lets the customer pay when the settings cannot be read", async () => {
+    // The settings table is missing (migration not applied) or the read failed: the
+    // operator must hear about it, but a customer who decided to pay must not be
+    // blocked - they get the fallback text instead.
+    h.state.paymentSettingsError = new Error("relation \"platform_payment_settings\" does not exist");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const res = await call(app.url, "/api/payments/checkout", {
+        method: "POST",
+        userId: users.adminA.id,
+        body: { plan: "esencial", period: "monthly", provider: "manual" },
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.body.instructions).toContain(res.body.payment.reference);
+      expect(logged).toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it("never returns the provider payload to the browser", async () => {
@@ -447,8 +562,183 @@ describe("POST /api/payments/checkout - the manual (bank transfer) path", () => 
 
 describe("GET /api/payments - tenant isolation", () => {
   it("returns only the caller's business payments", async () => {
-    const mine = seedPayment({ businessId: A, reference: "LV-MINE01" });
-    const theirs = seedPayment({ businessId: B, reference: "LV-THEIRS" });
+
+/**
+ * Discount codes at checkout (Phase 2.7, step 4).
+ *
+ * The customer types a code; the server decides what it is worth. These tests pin the
+ * two rules that make it safe: the discount is applied by the server to the server's
+ * own price (never to a number the browser sent), and it is counted only when the
+ * money is actually confirmed.
+ */
+describe("POST /api/payments/checkout - discount codes", () => {
+  const percentCode = () => {
+    const row = {
+      id: "code-1",
+      code: "PRO10",
+      description: null,
+      kind: "percent",
+      value: 10,
+      planIds: [],
+      maxRedemptions: null,
+      redemptionCount: 0,
+      startsAt: null,
+      expiresAt: null,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    h.state.discounts.push(row);
+    return row;
+  };
+
+  it("charges the discounted amount and books the code with the payment", async () => {
+    percentCode();
+
+    const res = await call(app.url, "/api/payments/checkout", {
+      method: "POST",
+      userId: users.adminA.id,
+      body: {
+        plan: "profesional",
+        period: "monthly",
+        provider: "manual",
+        discountCode: "pro 10",
+      },
+    });
+
+    expect(res.status).toBe(201);
+    const created = h.calls.createPayment[0][0];
+    // S/ 29.00 - 10% = S/ 26.10, and the ledger explains why.
+    expect(created.amountCents).toBe(2610);
+    expect(created.discountCode).toBe("PRO10");
+    expect(created.discountCents).toBe(290);
+    expect(created.discountCodeId).toBe("code-1");
+    expect(res.body.payment.amountCents).toBe(2610);
+  });
+
+  it("refuses an unknown code with a reason, not a gateway error", async () => {
+    const res = await call(app.url, "/api/payments/checkout", {
+      method: "POST",
+      userId: users.adminA.id,
+      body: { plan: "profesional", period: "monthly", provider: "manual", discountCode: "NOEXISTE" },
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("discount_rejected");
+    expect(res.body.message).toMatch(/no existe/i);
+    expect(h.calls.createPayment).toBeUndefined();
+  });
+
+  it("refuses a code scoped to another plan", async () => {
+    h.state.discounts.push({
+      ...percentCode(),
+      planIds: ["corporativo"],
+    });
+
+    const res = await call(app.url, "/api/payments/checkout", {
+      method: "POST",
+      userId: users.adminA.id,
+      body: { plan: "esencial", period: "monthly", provider: "manual", discountCode: "PRO10" },
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("discount_rejected");
+    expect(res.body.message).toMatch(/no aplica al plan/i);
+  });
+
+  it("never lets a code discount a recurring agreement", async () => {
+    percentCode();
+
+    // A recurring charge at a discounted amount would follow the customer forever.
+    const res = await call(app.url, "/api/payments/checkout", {
+      method: "POST",
+      userId: users.adminA.id,
+      body: {
+        plan: "profesional",
+        period: "monthly",
+        provider: "mercadopago",
+        mode: "auto",
+        discountCode: "PRO10",
+      },
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("discount_rejected");
+    expect(res.body.message).toMatch(/pago único/i);
+    expect(h.calls.createSubscription).toBeUndefined();
+  });
+
+  it("counts the redemption only when the payment is confirmed", async () => {
+    const code = percentCode();
+
+    const checkout = await call(app.url, "/api/payments/checkout", {
+      method: "POST",
+      userId: users.adminA.id,
+      body: { plan: "profesional", period: "monthly", provider: "manual", discountCode: "PRO10" },
+    });
+    const paymentId = checkout.body.payment.id;
+
+    // Pending: an abandoned checkout must not burn the code.
+    expect(code.redemptionCount).toBe(0);
+
+    const confirmed = await call(app.url, `/api/payments/${paymentId}/confirm`, {
+      method: "POST",
+      userId: users.platformOps.id,
+    });
+
+    expect(confirmed.status).toBe(200);
+    expect(h.calls.redeemDiscountCode[0][0]).toBe("code-1");
+    expect(code.redemptionCount).toBe(1);
+  });
+});
+
+describe("POST /api/payments/discount - the preview the dialog shows", () => {
+  it("explains what a valid code does before anybody pays", async () => {
+    h.state.discounts.push({
+      id: "code-1",
+      code: "VERANO",
+      description: null,
+      kind: "fixed",
+      value: 500,
+      planIds: [],
+      maxRedemptions: null,
+      redemptionCount: 0,
+      startsAt: null,
+      expiresAt: null,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const res = await call(app.url, "/api/payments/discount", {
+      method: "POST",
+      userId: users.adminA.id,
+      body: { plan: "profesional", period: "monthly", code: "verano" },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.listAmountCents).toBe(2900);
+    expect(res.body.amountOffCents).toBe(500);
+    expect(res.body.finalAmountCents).toBe(2400);
+  });
+
+  it("answers 'no' with the reason instead of failing", async () => {
+    const res = await call(app.url, "/api/payments/discount", {
+      method: "POST",
+      userId: users.adminA.id,
+      body: { plan: "profesional", period: "monthly", code: "NADA" },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.reason).toMatch(/no existe/i);
+    expect(res.body.finalAmountCents).toBe(2900);
+  });
+});
+
+    const mine = seedPayment({ businessId: A, reference: "LD-MINE01" });
+    const theirs = seedPayment({ businessId: B, reference: "LD-THEIRS" });
 
     const res = await call(app.url, "/api/payments", { userId: users.adminA.id });
 
@@ -465,12 +755,14 @@ describe("GET /api/payments - tenant isolation", () => {
 });
 
 describe("POST /api/payments/:id/confirm - the bank transfer arrives", () => {
-  it("activates the plan for the owning admin", async () => {
+  it("activates the plan when platform staff confirm their transfer", async () => {
     const payment = seedPayment();
 
+    // `platformOps` belongs to tenant B and the payment to tenant A: the team
+    // reconciles any customer's transfer, which is why there is no tenant filter.
     const res = await call(app.url, `/api/payments/${payment.id}/confirm`, {
       method: "POST",
-      userId: users.adminA.id,
+      userId: users.platformOps.id,
     });
 
     expect(res.status).toBe(200);
@@ -479,7 +771,7 @@ describe("POST /api/payments/:id/confirm - the bank transfer arrives", () => {
 
     const [businessId, updates] = h.calls.updateBusiness[0];
     expect(businessId).toBe(A);
-    expect(updates.plan).toBe("profesional");
+    expect(updates.subscriptionPlan).toBe("profesional");
     expect(updates.subscriptionStatus).toBe("active");
     expect(new Date(updates.currentPeriodEnd).getTime()).toBeGreaterThan(Date.now());
   });
@@ -489,30 +781,47 @@ describe("POST /api/payments/:id/confirm - the bank transfer arrives", () => {
 
     await call(app.url, `/api/payments/${payment.id}/confirm`, {
       method: "POST",
-      userId: users.adminA.id,
+      userId: users.platformOps.id,
     });
     await call(app.url, `/api/payments/${payment.id}/confirm`, {
       method: "POST",
-      userId: users.adminA.id,
+      userId: users.platformOps.id,
     });
 
     expect(h.calls.updateBusiness).toHaveLength(1);
   });
 
-  it("refuses a payment that belongs to another tenant", async () => {
-    const theirs = seedPayment({ businessId: B, reference: "LV-OTRO01" });
+  it("a customer cannot confirm their OWN transfer (the free-plan hole)", async () => {
+    const payment = seedPayment();
+
+    // The customer is `admin` of their own business, so the endpoint must not be
+    // guarded by a role: otherwise they could grant themselves a paid plan by
+    // clicking "confirm" without ever paying.
+    const res = await call(app.url, `/api/payments/${payment.id}/confirm`, {
+      method: "POST",
+      userId: users.adminA.id,
+    });
+
+    expect(res.status).toBe(403);
+    expect(h.calls.updateBusiness).toBeUndefined();
+    expect(h.state.payments[payment.id].status).toBe("pending");
+    expect(h.state.payments[payment.id].paidAt).toBeNull();
+  });
+
+  it("a customer cannot confirm another tenant's payment either", async () => {
+    const theirs = seedPayment({ businessId: B, reference: "LD-OTRO01" });
 
     const res = await call(app.url, `/api/payments/${theirs.id}/confirm`, {
       method: "POST",
       userId: users.adminA.id,
     });
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
     expect(h.calls.updateBusiness).toBeUndefined();
     expect(h.state.payments[theirs.id].status).toBe("pending");
   });
 
-  it("only lets an admin confirm", async () => {
+  it("only the platform team can confirm: a staff login is refused too", async () => {
     const payment = seedPayment();
 
     const res = await call(app.url, `/api/payments/${payment.id}/confirm`, {
@@ -529,12 +838,43 @@ describe("POST /api/payments/:id/confirm - the bank transfer arrives", () => {
 
     const res = await call(app.url, `/api/payments/${payment.id}/confirm`, {
       method: "POST",
-      userId: users.adminA.id,
+      userId: users.platformOps.id,
     });
 
     expect(res.status).toBe(400);
     expect(h.state.payments[payment.id].status).toBe("pending");
     expect(h.calls.updateBusiness).toBeUndefined();
+  });
+});
+
+describe("GET /api/payments/pending-manual - the operator's queue", () => {
+  it("shows platform staff the pending transfer of every tenant, with its business", async () => {
+    const mine = seedPayment();
+    seedPayment({ businessId: B, reference: "LD-OTRO02" });
+    seedPayment({ status: "paid", reference: "LD-PAGADO" });
+
+    const res = await call(app.url, "/api/payments/pending-manual", {
+      userId: users.platformOps.id,
+    });
+
+    expect(res.status).toBe(200);
+    const references = res.body.map((row: any) => row.payment.reference);
+    expect(references).toContain(mine.reference);
+    // The team reconciles the money in its own Yape/bank, so it needs every
+    // customer, not only the tenant it happens to belong to.
+    expect(references).toContain("LD-OTRO02");
+    expect(references).not.toContain("LD-PAGADO");
+    expect(res.body[0].businessName).toBeTruthy();
+  });
+
+  it("is refused for a customer, even for their own pending transfer", async () => {
+    seedPayment();
+
+    const res = await call(app.url, "/api/payments/pending-manual", {
+      userId: users.adminA.id,
+    });
+
+    expect(res.status).toBe(403);
   });
 });
 
@@ -595,7 +935,7 @@ describe("POST /api/payments/webhook/:provider", () => {
     expect(providerCalls).toHaveLength(1);
     expect(providerCalls[0]).toContain("/v1/payments/555");
     expect(h.state.payments[payment.id].status).toBe("paid");
-    expect(h.calls.updateBusiness[0][1].plan).toBe("profesional");
+    expect(h.calls.updateBusiness[0][1].subscriptionPlan).toBe("profesional");
   });
 
   it("rejects a notification that under-reports the amount (tamper attempt)", async () => {
@@ -760,7 +1100,7 @@ function seedSubscription(overrides: Record<string, any> = {}) {
     userId: users.adminA.id,
     provider: "mercadopago",
     providerRef: `pre-${id}`,
-    reference: `LV-SUB${h.state.nextId}`,
+    reference: `LD-SUB${h.state.nextId}`,
     planId: "profesional",
     period: "monthly",
     amountCents: 2900,
@@ -867,18 +1207,137 @@ describe("POST /api/payments/checkout - recurring subscriptions", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Changing plan, or only the billing period of the same plan
+// ---------------------------------------------------------------------------
+
+/**
+ * The server side of a card that used to be impossible to click.
+ *
+ * A customer on Básico *mensual* who wanted Básico *anual* found the card
+ * disabled ("Plan activo"), so nothing here was ever exercised. Once the card
+ * became clickable (client/src/lib/plan-card-state.ts), the old month-to-month
+ * agreement had to be stopped as well: otherwise the customer pays for the
+ * monthly plan AND the annual one at the same time.
+ */
+describe("POST /api/payments/checkout - changing plan or period", () => {
+  it("stops the previous automatic charge when the same plan is bought for another period", async () => {
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    const previous = seedSubscription({
+      planId: "esencial",
+      period: "monthly",
+      status: "authorized",
+      providerRef: "pre-old",
+    });
+    const { providerCalls } = stubProviderByPath({
+      preapproval: { id: "pre-new", status: "pending", init_point: "https://mp/init-new" },
+    });
+
+    const res = await call(app.url, "/api/payments/checkout", {
+      method: "POST",
+      userId: users.adminA.id,
+      body: { plan: "esencial", period: "annual", provider: "mercadopago" },
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.mode).toBe("subscription");
+    // The annual agreement the customer just asked for...
+    expect(h.calls.createSubscription.at(-1)![0].period).toBe("annual");
+    // ...and the month-to-month one they are leaving, stopped at the provider.
+    expect(providerCalls.some((url) => url.endsWith("/preapproval/pre-old"))).toBe(true);
+    expect(h.state.subscriptions[previous.id].status).toBe("cancelled");
+  });
+
+  it("also stops it when the customer moves up to another plan", async () => {
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    const previous = seedSubscription({
+      planId: "esencial",
+      period: "monthly",
+      status: "authorized",
+      providerRef: "pre-old",
+    });
+    const { providerCalls } = stubProviderByPath({
+      preapproval: { id: "pre-new", status: "pending", init_point: "https://mp/init-new" },
+    });
+
+    await call(app.url, "/api/payments/checkout", {
+      method: "POST",
+      userId: users.adminA.id,
+      body: { plan: "profesional", period: "monthly", provider: "mercadopago" },
+    });
+
+    expect(providerCalls.some((url) => url.endsWith("/preapproval/pre-old"))).toBe(true);
+    expect(h.state.subscriptions[previous.id].status).toBe("cancelled");
+  });
+
+  it("leaves the agreement alone when the exact plan and period is bought again", async () => {
+    // A deliberate early renewal: `applyPaidPeriod` stacks the new period on top,
+    // so cancelling the agreement here would take away the customer's auto-renewal.
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    const previous = seedSubscription({
+      planId: "esencial",
+      period: "monthly",
+      status: "authorized",
+      providerRef: "pre-old",
+    });
+    const { providerCalls } = stubProviderByPath({
+      preapproval: { id: "pre-new", status: "pending", init_point: "https://mp/init-new" },
+    });
+
+    const res = await call(app.url, "/api/payments/checkout", {
+      method: "POST",
+      userId: users.adminA.id,
+      body: { plan: "esencial", period: "monthly", provider: "mercadopago" },
+    });
+
+    expect(res.status).toBe(201);
+    expect(providerCalls.some((url) => url.endsWith("/preapproval/pre-old"))).toBe(false);
+    expect(h.state.subscriptions[previous.id].status).toBe("authorized");
+    // The only write is the new row keeping its provider id / init point.
+    const cancellations = h.calls.updateSubscription.filter(([, updates]) => updates.status === "cancelled");
+    expect(cancellations).toHaveLength(0);
+  });
+
+  it("never ends a running trial by cancelling the agreement it replaces", async () => {
+    // A customer who authorises an automatic charge during the trial keeps the
+    // remaining free days; changing plan inside that window must not consume them.
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    h.state.businessById[A].subscriptionStatus = "trialing";
+    h.state.businessById[A].trialEndsAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+    seedSubscription({
+      planId: "esencial",
+      period: "monthly",
+      status: "authorized",
+      providerRef: "pre-old",
+    });
+    stubProviderByPath({
+      preapproval: { id: "pre-new", status: "pending", init_point: "https://mp/init-new" },
+    });
+
+    const res = await call(app.url, "/api/payments/checkout", {
+      method: "POST",
+      userId: users.adminA.id,
+      body: { plan: "esencial", period: "annual", provider: "mercadopago" },
+    });
+
+    expect(res.status).toBe(201);
+    expect(h.state.businessById[A].subscriptionStatus).toBe("trialing");
+  });
+});
+
+
 describe("subscription webhooks", () => {
   const authorizedPreapproval = {
     id: "pre-1",
     status: "authorized",
-    external_reference: "LV-SUB1",
+    external_reference: "LD-SUB1",
     init_point: "https://mp/init",
     auto_recurring: { frequency: 1, frequency_type: "months", transaction_amount: 29, currency_id: "PEN" },
   };
 
   it("activates the plan when the customer authorises the recurring charge", async () => {
     process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
-    const subscription = seedSubscription({ reference: "LV-SUB1", providerRef: "pre-1" });
+    const subscription = seedSubscription({ reference: "LD-SUB1", providerRef: "pre-1" });
     stubProviderByPath({ preapproval: authorizedPreapproval });
 
     const res = await call(app.url, "/api/payments/webhook/mercadopago", {
@@ -901,11 +1360,11 @@ describe("subscription webhooks", () => {
 
   it("books the first charge and extends the paid period", async () => {
     process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
-    const subscription = seedSubscription({ reference: "LV-SUB1", providerRef: "pre-1" });
+    const subscription = seedSubscription({ reference: "LD-SUB1", providerRef: "pre-1" });
     stubProviderByPath({
       authorizedPayment: { id: "inv-1", preapproval_id: "pre-1", status: "processed", payment: { id: 555 } },
       preapproval: authorizedPreapproval,
-      payment: { id: 555, status: "approved", transaction_amount: 29, external_reference: "LV-SUB1" },
+      payment: { id: 555, status: "approved", transaction_amount: 29, external_reference: "LD-SUB1" },
     });
 
     const res = await call(app.url, "/api/payments/webhook/mercadopago", {
@@ -924,18 +1383,18 @@ describe("subscription webhooks", () => {
     expect(created.providerRef).toBe("555");
 
     // The plan is running and the access window moved forward.
-    const businessUpdate = h.calls.updateBusiness.at(-1);
-    expect(businessUpdate[1].plan).toBe("profesional");
+    const businessUpdate = h.calls.updateBusiness.at(-1)!;
+    expect(businessUpdate[1].subscriptionPlan).toBe("profesional");
     expect(new Date(businessUpdate[1].currentPeriodEnd).getTime()).toBeGreaterThan(Date.now());
   });
 
   it("does not extend the period twice when the same charge is notified again", async () => {
     process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
-    seedSubscription({ reference: "LV-SUB1", providerRef: "pre-1" });
+    seedSubscription({ reference: "LD-SUB1", providerRef: "pre-1" });
     stubProviderByPath({
       authorizedPayment: { id: "inv-1", preapproval_id: "pre-1", status: "processed", payment: { id: 555 } },
       preapproval: authorizedPreapproval,
-      payment: { id: 555, status: "approved", transaction_amount: 29, external_reference: "LV-SUB1" },
+      payment: { id: 555, status: "approved", transaction_amount: 29, external_reference: "LD-SUB1" },
     });
 
     const send = () => call(app.url, "/api/payments/webhook/mercadopago", {
@@ -962,9 +1421,9 @@ describe("subscription webhooks", () => {
 
   it("links a renewal notified only on the payment topic, through external_reference", async () => {
     process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
-    const subscription = seedSubscription({ reference: "LV-SUB1", providerRef: "pre-1" });
+    const subscription = seedSubscription({ reference: "LD-SUB1", providerRef: "pre-1" });
     stubProviderByPath({
-      payment: { id: 777, status: "approved", transaction_amount: 29, external_reference: "LV-SUB1" },
+      payment: { id: 777, status: "approved", transaction_amount: 29, external_reference: "LD-SUB1" },
     });
 
     const res = await call(app.url, "/api/payments/webhook/mercadopago", {
@@ -976,12 +1435,12 @@ describe("subscription webhooks", () => {
     expect(res.status).toBe(200);
     expect(res.body.handled).toBe(true);
     expect(h.calls.createPayment[0][0].subscriptionId).toBe(subscription.id);
-    expect(h.calls.updateBusiness.at(-1)[1].plan).toBe("profesional");
+    expect(h.calls.updateBusiness.at(-1)![1].subscriptionPlan).toBe("profesional");
   });
 
   it("marks the subscription paused (past_due) without touching the plan", async () => {
     process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
-    const subscription = seedSubscription({ reference: "LV-SUB1", providerRef: "pre-1" });
+    const subscription = seedSubscription({ reference: "LD-SUB1", providerRef: "pre-1" });
     stubProviderByPath({ preapproval: { ...authorizedPreapproval, status: "paused" } });
 
     const res = await call(app.url, "/api/payments/webhook/mercadopago", {
@@ -1012,8 +1471,8 @@ describe("subscription endpoints", () => {
   });
 
   it("only shows the caller's own agreement", async () => {
-    const mine = seedSubscription({ reference: "LV-MINE1" });
-    const theirs = seedSubscription({ businessId: B, reference: "LV-OTRO1" });
+    const mine = seedSubscription({ reference: "LD-MINE1" });
+    const theirs = seedSubscription({ businessId: B, reference: "LD-OTRO1" });
 
     const res = await call(app.url, "/api/payments/subscription", { userId: users.adminA.id });
 
@@ -1037,7 +1496,7 @@ describe("subscription endpoints", () => {
   it("stops future charges and reports the cancellation", async () => {
     process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
     const subscription = seedSubscription({
-      reference: "LV-SUB1",
+      reference: "LD-SUB1",
       providerRef: "pre-1",
       status: "authorized",
     });
@@ -1112,7 +1571,7 @@ describe("subscriptions bought outside the app (panel plan link)", () => {
   const planPreapproval = {
     id: "pre-plan-1",
     status: "authorized",
-    external_reference: "LV-PROFESIONAL-A",
+    external_reference: "LD-PROFESIONAL-A",
     payer_email: "admin.a@example.com",
     preapproval_plan_id: "plan-abc",
     auto_recurring: {
@@ -1227,7 +1686,7 @@ describe("subscriptions bought outside the app (panel plan link)", () => {
         payment: { id: 909 },
       },
       preapproval: planPreapproval,
-      payment: { id: 909, status: "approved", transaction_amount: 189, external_reference: "LV-PROFESIONAL-A" },
+      payment: { id: 909, status: "approved", transaction_amount: 189, external_reference: "LD-PROFESIONAL-A" },
     });
 
     const res = await notify({ type: "subscription_authorized_payment", data: { id: "inv-plan-1" } });
@@ -1239,8 +1698,8 @@ describe("subscriptions bought outside the app (panel plan link)", () => {
     // Adopted and paid in one go: a year of access from the panel link.
     const created = h.calls.createSubscription[0][0];
     expect(created.businessId).toBe(A);
-    expect(h.calls.updatePayment.at(-1)[1].status).toBe("paid");
-    expect(h.calls.updateBusiness.at(-1)[1].plan).toBe("profesional");
+    expect(h.calls.updatePayment.at(-1)![1].status).toBe("paid");
+    expect(h.calls.updateBusiness.at(-1)![1].subscriptionPlan).toBe("profesional");
   });
 });
 

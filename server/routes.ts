@@ -14,6 +14,7 @@ import { registerComplaintsRoutes } from "./routes/complaints.routes";
 import { registerAttachmentsRoutes } from "./routes/attachments.routes";
 import { registerSubscriptionRoutes } from "./routes/subscription.routes";
 import { registerPaymentsRoutes } from "./routes/payments.routes";
+import { registerAdminRoutes } from "./routes/admin.routes";
 import { registerIntegrationsRoutes } from "./routes/integrations.routes";
 import { registerApiV1Routes } from "./routes/api.routes";
 import { registerStatusRoutes } from "./routes/status.routes";
@@ -55,6 +56,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerAttachmentsRoutes(app);
   registerSubscriptionRoutes(app);
   registerPaymentsRoutes(app);
+  registerAdminRoutes(app);
   registerIntegrationsRoutes(app);
   registerApiV1Routes(app);
   registerStatusRoutes(app);

@@ -7,6 +7,7 @@ import { PLANS, checkQuota } from "@shared/plans";
 import { storage } from "../storage";
 import { requireAuth, requireNonDemo, requireAdmin } from "../middleware/requireAuth";
 import { enforceQuota, newBusinessTrialDefaults } from "../services/subscriptionService";
+import { getTrialDays } from "../services/platformSettingsService";
 import { provisionDefaultEstablishment } from "../services/establishmentProvisioning";
 import { getManageableBusinessIds } from "../services/tenantAccess";
 import { closeBusiness } from "../services/accountClosureService";
@@ -84,7 +85,8 @@ export function registerBusinessesRoutes(app: Express): void {
 
       const business = await storage.createBusiness({
         ...businessData,
-        ...newBusinessTrialDefaults(),
+        // The trial length comes from the console (Planes) when an operator set one.
+        ...newBusinessTrialDefaults(new Date(), await getTrialDays()),
       });
 
       // Multi-RUC access grant so the business appears in the switcher
@@ -175,7 +177,7 @@ export function registerBusinessesRoutes(app: Express): void {
       await storage.createAuthAuditLog({
         action: 'business_closed',
         email: req.user.email,
-        ipAddress: req.ip || req.connection.remoteAddress || '',
+        ipAddress: req.ip || req.socket.remoteAddress || '',
         userAgent: req.get('User-Agent') || '',
         success: true,
         userId: req.user.id,
