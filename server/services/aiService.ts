@@ -1366,8 +1366,10 @@ Responde en JSON con exactamente estas claves:
         vencidos: input.stats.overdue,
         resueltos: input.stats.resolved,
         respondidos: input.stats.answered,
-        cumplimientoPlazoPorcentaje: input.stats.slaOnTimeRate,
-        tiempoMedioRespuestaDiasCalendario: input.stats.averageResponseDays,
+        cumplimientoPlazoPorcentaje:
+          input.stats.slaOnTimeRate === null ? 'sin datos' : input.stats.slaOnTimeRate,
+        tiempoMedioRespuestaDiasCalendario:
+          input.stats.answered > 0 ? input.stats.averageResponseDays : 'sin datos',
       },
       mesAnterior: input.previousMonth
         ? {
