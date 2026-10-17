@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# ============================================================================
+# Pre-commit guard: refuse to commit secrets.
+#
+# Paths under secrets/ (including vps/secrets/), .env files, keys and
+# certificates are always blocked. Staged content is also scanned for common
+# credential shapes (API tokens, private keys).
+#
+# Enable once per clone:
+#   git config core.hooksPath .githooks
+#
+# Bypass (do NOT use for secrets): git commit --no-verify
+# ============================================================================
+set -euo pipefail
+
+staged="$(git diff --cached --name-only --diff-filter=ACM)"
+[ -z "$staged" ] && exit 0
+
+blocked="$(printf '%s\n' "$staged" | grep -E '(^|/)secrets/|(^|/)\.env($|\.)|\.(pem|key|crt)$' || true)"
+if [ -n "$blocked" ]; then
+  printf 'Commit blocked — secret-like paths are staged:\n%s\n' "$blocked" >&2
+  exit 1
+fi
+
+# High-signal credential patterns. Documentation placeholders (gsk_..., APP_USR-...)
+# do not match because they are too short.
+if git diff --cached -U0 --no-color \
+  | grep -Eq '^\+.*(gsk_[A-Za-z0-9]{30,}|APP_USR-[0-9]{6,}-|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)'; then
+  printf 'Commit blocked — staged content looks like a real credential.\n' >&2
+  printf 'Remove it, rotate it at the provider, and try again.\n' >&2
+  exit 1
+fi
+
+exit 0

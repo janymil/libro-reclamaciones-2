@@ -24,3 +24,10 @@ e2e/.auth/
 # Captured test output pasted/redirected to a file (local only, never source)
 final-run.txt
 
+# VPS deployment secrets (Docker secret files, never committed)
+/secrets/*.txt
+/vps/secrets/
+*.pem
+*.key
+*.crt
+

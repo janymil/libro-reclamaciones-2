@@ -1,0 +1,64 @@
+# ============================================================================
+# Host Caddy site block for the VPS deployment.
+# ============================================================================
+# The host already runs Caddy on :80/:443, so the app container does NOT run
+# its own Caddy. Append this block to /etc/caddy/Caddyfile, then:
+#
+#   caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+#   systemctl reload caddy
+#
+# Traffic flow:
+#   browser -> host Caddy :443
+#                |-- /api/* -> 127.0.0.1:5001 (app container)
+#                `-- /*     -> /var/www/libro-de-reclamaciones (SPA + assets)
+# ============================================================================
+
+librodigital.pe, www.librodigital.pe {
+	encode gzip zstd
+
+	# Operator console: keep it out of search indexes (matches VITE_ADMIN_PATH).
+	@admin path /acceso/operaciones-7f31 /acceso/operaciones-7f31/*
+	header @admin X-Robots-Tag "noindex, nofollow"
+
+	handle /api/* {
+		# PDF generation and AI calls can take a while.
+		reverse_proxy 127.0.0.1:5001 {
+			transport http {
+				read_timeout 120s
+				write_timeout 120s
+			}
+		}
+	}
+
+	handle {
+		root * /var/www/libro-de-reclamaciones
+
+		# `route` preserves the order below: default no-cache for HTML, then the
+		# per-file cache policy, then static serving.
+		route {
+			try_files {path} /index.html
+			header Cache-Control "no-cache"
+			header /assets/* Cache-Control "public, max-age=31536000, immutable"
+			header /sw.js Cache-Control "no-store"
+			header /reset.html Cache-Control "no-store"
+			header /widget.js Cache-Control "public, max-age=300"
+
+			# Static responses skip the app (helmet), so the same headers live here.
+			header {
+				Strict-Transport-Security "max-age=31536000; includeSubDomains"
+				X-Content-Type-Options "nosniff"
+				X-Frame-Options "SAMEORIGIN"
+				Referrer-Policy "no-referrer"
+				Cross-Origin-Opener-Policy "same-origin"
+				Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' ws: wss:"
+			}
+
+			file_server
+		}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

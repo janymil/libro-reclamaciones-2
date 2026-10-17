@@ -1,0 +1,130 @@
+# ============================================================================
+# Host-Caddy deployment for the VPS where Caddy is a system service.
+# ============================================================================
+# The repository's root docker-compose.yml runs its own Caddy container on
+# :80/:443. On this host Caddy already runs as a system service for other
+# sites, so this variant:
+#
+#   * runs only the app, published on 127.0.0.1:5001 (loopback);
+#   * lets the host Caddy terminate TLS and proxy /api/* to the container;
+#   * serves the built client from /var/www/libro-de-reclamaciones.
+#
+# Secrets are files under $SECRETS_DIR (default: ../secrets, i.e. the repo's
+# secrets/ directory). They are never committed.
+#
+# Run from this directory:
+#   docker compose build
+#   SECRETS_DIR=/opt/libro-de-reclamaciones/secrets docker compose up -d
+# ============================================================================
+name: librodigital
+
+services:
+  app:
+    build:
+      context: ..
+      args:
+        # Baked into the client bundle; changing it needs a rebuild.
+        VITE_ADMIN_PATH: ${VITE_ADMIN_PATH:-/acceso/operaciones-7f31}
+    image: librodigital/app:latest
+    restart: unless-stopped
+    init: false # tini is already the ENTRYPOINT
+
+    # Compose mounts secrets as bind mounts that keep their host mode (0600,
+    # root:root), so the container must start as root to read them. The image's
+    # entrypoint exports them and then `setpriv` drops to node (UID 1000) before
+    # the application starts — the app itself never runs as root.
+    user: "0:0"
+    entrypoint:
+      - /usr/bin/tini
+      - --
+      - /usr/local/bin/entrypoint.sh
+      - setpriv
+      - --reuid=1000
+      - --regid=1000
+      - --init-groups
+    command: ["node", "dist/index.js"]
+
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      HOME: /home/node
+      # Public address users and Mercado Pago see. Must be https://.
+      APP_URL: https://librodigital.pe
+      # 2 = Cloudflare in front of the host Caddy, which is in front of the app.
+      TRUST_PROXY: "2"
+      ATTACHMENTS_DIR: /data/uploads
+      VITE_ADMIN_PATH: ${VITE_ADMIN_PATH:-/acceso/operaciones-7f31}
+
+      # --- Email (SMTP). The password is a secret, everything else is not. ----
+      SMTP_HOST: smtp.zoho.com
+      SMTP_PORT: "587"
+      SMTP_SECURE: "false"   # 587 upgrades with STARTTLS; 465 is implicit SSL
+      SMTP_USER: hola@librodigital.pe
+      SMTP_FROM_NAME: LibroDigital.pe
+      SMTP_FROM_EMAIL: hola@librodigital.pe
+
+      # --- AI (OpenAI-compatible). The key is a secret. -----------------------
+      AI_BASE_URL: https://api.groq.com/openai/v1
+      AI_MODEL: openai/gpt-oss-120b
+      AI_MODEL_FAST: openai/gpt-oss-20b
+
+      # --- Payments. The access token is a secret. ----------------------------
+      MERCADOPAGO_SANDBOX: "false"
+      PAYMENTS_ALERT_EMAIL: hola@librodigital.pe
+      PLATFORM_ADMIN_EMAILS: hola@librodigital.pe
+
+      # --- Optional integrations ---------------------------------------------
+      RUC_API_PROVIDER: auto
+      WHATSAPP_API_VERSION: v21.0
+      WHATSAPP_ACCESS_TOKEN: ""
+      WHATSAPP_PHONE_NUMBER_ID: ""
+      WHATSAPP_VERIFY_TOKEN: ""
+      WHATSAPP_APP_SECRET: ""
+
+    secrets:
+      - DATABASE_URL
+      - SESSION_SECRET
+      - SMTP_PASSWORD
+      - AI_API_KEY
+      - MERCADOPAGO_ACCESS_TOKEN
+      - DECOLECTA_API_TOKEN
+
+    volumes:
+      # Consumer evidence attachments (2-year retention is enforced by the app).
+      - uploads:/data/uploads
+
+    ports:
+      # Loopback only: the host Caddy is the single public door.
+      - "127.0.0.1:5001:5000"
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Only what the root entrypoint needs to switch to UID/GID 1000.
+    cap_add:
+      - SETUID
+      - SETGID
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  uploads:
+
+secrets:
+  DATABASE_URL:
+    file: ${SECRETS_DIR:-../secrets}/DATABASE_URL.txt
+  SESSION_SECRET:
+    file: ${SECRETS_DIR:-../secrets}/SESSION_SECRET.txt
+  SMTP_PASSWORD:
+    file: ${SECRETS_DIR:-../secrets}/SMTP_PASSWORD.txt
+  AI_API_KEY:
+    file: ${SECRETS_DIR:-../secrets}/AI_API_KEY.txt
+  MERCADOPAGO_ACCESS_TOKEN:
+    file: ${SECRETS_DIR:-../secrets}/MERCADOPAGO_ACCESS_TOKEN.txt
+  DECOLECTA_API_TOKEN:
+    file: ${SECRETS_DIR:-../secrets}/DECOLECTA_API_TOKEN.txt
