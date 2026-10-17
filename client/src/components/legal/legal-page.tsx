@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'wouter';
 import { ArrowLeft, BookOpenCheck, ExternalLink, Mail, Phone } from 'lucide-react';
 import { BrandMark } from '@/components/landing/brand';
+import BackToTop from '@/components/layout/back-to-top';
 import {
   LEGAL_DOCUMENTS,
   LEGAL_LAST_UPDATED,
@@ -86,6 +87,9 @@ export function LegalPage({
       <footer className="border-t border-[#e3d9c6] px-5 py-8 text-center text-xs text-[#5c5246] sm:px-8">
         <p translate="no">© 2026 LibroDigital.pe</p>
       </footer>
+
+      {/* Documento largo: el visitante puede volver arriba sin recorrerlo entero. */}
+      <BackToTop />
     </div>
   );
 }

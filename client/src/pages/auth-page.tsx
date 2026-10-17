@@ -7,6 +7,7 @@ import { ADMIN_PATH } from "@/lib/admin-path";
 import { Link, useLocation } from "wouter";
 import { Loader2, Mail, UserPlus, LogIn, ShieldCheck, Timer, LockKeyhole, ArrowLeft } from "lucide-react";
 import { BrandMark, StampMark, HojaDocument } from "@/components/landing/brand";
+import BackToTop from "@/components/layout/back-to-top";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { apiRequest, apiErrorMessage } from "@/lib/queryClient";
 import { requestSolvedCaptcha } from "@/lib/pow";
@@ -777,6 +778,7 @@ export default function AuthPage() {
           </div>
         </div>
       </main>
+      <BackToTop />
     </div>
   );
 }

@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CheckCircle2, Search, FileText, ShieldCheck } from "lucide-react";
 import { privacyPolicyPath } from "@shared/privacy-policy";
+import BackToTop from "@/components/layout/back-to-top";
 
 interface PublicLibro {
   libro: {
@@ -357,6 +358,9 @@ export default function PublicPortal() {
           </TabsContent>
         </Tabs>
       </div>
+      {/* El widget embebido (?embed=1) vive dentro de la web de la empresa:
+          no le imponemos un botón flotante ajeno a su diseño. */}
+      {!isEmbed && <BackToTop />}
     </div>
   );
 }

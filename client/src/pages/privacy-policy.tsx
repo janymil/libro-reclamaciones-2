@@ -2,6 +2,7 @@ import { useParams, Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ExternalLink, FileText, ShieldCheck } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import BackToTop from "@/components/layout/back-to-top";
 
 /**
  * Privacy policy of a book (Ley 29733 / DS 016-2024-JUS).
@@ -156,6 +157,7 @@ export default function PrivacyPolicyPage() {
             : " La empresa puede publicar su propia política de privacidad y este enlace apuntará a ella."}
         </p>
       </div>
+      <BackToTop />
     </div>
   );
 }

@@ -19,6 +19,7 @@ import {
   type PlanDefinition,
 } from '@shared/plans';
 import { BrandMark, StampMark, QrGlyph, HojaDocument } from '@/components/landing/brand';
+import BackToTop from '@/components/layout/back-to-top';
 import { useAuth } from '@/hooks/use-auth';
 import { usePlans, useTrialDays } from '@/hooks/use-subscription';
 import { ADMIN_PATH } from '@/lib/admin-path';
@@ -1329,6 +1330,8 @@ export default function Landing() {
         <FinalCta />
       </main>
       <Footer />
+      {/* La portada es la página pública más larga: vuelta rápida al inicio. */}
+      <BackToTop />
     </div>
   );
 }

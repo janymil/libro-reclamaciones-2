@@ -146,4 +146,40 @@ test.describe('Public legal pages and footer identity', () => {
     await expect(page).toHaveURL(/\/privacidad$/);
     await expect(page.locator('[data-testid="privacidad-page"]')).toBeVisible();
   });
+
+  test('a long public document offers a back-to-top control that returns to the start', async ({
+    page,
+  }) => {
+    await page.goto('/terminos');
+
+    const button = page.locator('[data-testid="button-back-to-top"]');
+    // It must not cover the beginning of the document.
+    await expect(button).toBeHidden();
+
+    await page.evaluate(() => {
+      document.documentElement.style.scrollBehavior = 'auto';
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+    await expect(button).toBeVisible();
+
+    await button.click();
+
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    await expect(button).toBeHidden();
+  });
+
+  test('opening a document from the landing footer starts it at the top', async ({ page }) => {
+    await page.goto('/');
+
+    await page.evaluate(() => {
+      document.documentElement.style.scrollBehavior = 'auto';
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+
+    await page.locator('[data-testid="footer-link-terminos"]').click();
+
+    await expect(page).toHaveURL(/\/terminos$/);
+    await expect(page.locator('[data-testid="terminos-page"]')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  });
 });

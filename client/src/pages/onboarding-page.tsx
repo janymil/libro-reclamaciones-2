@@ -11,6 +11,7 @@ import { invalidateTenantQueries } from "@/lib/tenant-queries";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { Loader2, Building2, Book, Search } from "lucide-react";
+import BackToTop from "@/components/layout/back-to-top";
 import { libroSlugFrom } from "@shared/slug";
 import { firstIdentificationCode, type SalesChannel } from "@shared/establishments";
 import {
@@ -980,6 +981,7 @@ export default function OnboardingPage() {
           )}
         </div>
       </div>
+      <BackToTop />
     </div>
   );
 }

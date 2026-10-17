@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import BackToTop from "@/components/layout/back-to-top";
 
 /**
  * Public status page (Phase 3.13). Standalone (no AppLayout/auth) so it stays
@@ -119,6 +120,7 @@ export default function StatusPage() {
           <a href="/" className="text-primary hover:underline">Volver al inicio</a>
         </p>
       </div>
+      <BackToTop />
     </div>
   );
 }

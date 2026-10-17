@@ -2,6 +2,8 @@
  * Declaración de accesibilidad y política de cookies (Phase 3.13).
  * Standalone page (no auth), as WCAG 2.1 AA statements should be.
  */
+import BackToTop from "@/components/layout/back-to-top";
+
 export default function AccessibilityPage() {
   return (
     <div className="min-h-screen bg-surface py-12 px-4">
@@ -59,6 +61,7 @@ export default function AccessibilityPage() {
           <a href="/" className="text-primary hover:underline">Volver al inicio</a>
         </p>
       </div>
+      <BackToTop />
     </div>
   );
 }

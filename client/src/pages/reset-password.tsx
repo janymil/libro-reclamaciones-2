@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiRequest } from "@/lib/queryClient";
 import { BrandMark } from "@/components/landing/brand";
+import BackToTop from "@/components/layout/back-to-top";
 import { ArrowLeft, CheckCircle2, Loader2, LockKeyhole, ShieldAlert } from "lucide-react";
 
 const inputCls =
@@ -200,6 +201,7 @@ export default function ResetPasswordPage() {
           )}
         </div>
       </main>
+      <BackToTop />
     </div>
   );
 }

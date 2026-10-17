@@ -5,6 +5,7 @@ import { apiRequest, apiErrorMessage, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { BrandMark } from "@/components/landing/brand";
+import BackToTop from "@/components/layout/back-to-top";
 import { ArrowLeft, CheckCircle2, Loader2, MailCheck, ShieldAlert } from "lucide-react";
 
 /**
@@ -178,6 +179,7 @@ export default function VerifyEmailPage() {
           )}
         </div>
       </main>
+      <BackToTop />
     </div>
   );
 }

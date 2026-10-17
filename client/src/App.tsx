@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/use-auth";
 import CookieNotice from "@/components/cookie-notice";
+import ScrollToTop from "@/components/layout/scroll-to-top";
 import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
 import Complaints from "@/pages/complaints";
@@ -173,6 +174,8 @@ function App() {
             Saltar al contenido principal
           </a>
           <Toaster />
+          {/* Cada cambio de ruta empieza en la parte superior (ver el componente). */}
+          <ScrollToTop />
           <Router />
           <CookieNotice />
         </TooltipProvider>

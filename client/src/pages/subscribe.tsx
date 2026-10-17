@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "wouter";
 
 import CheckoutDialog from "@/components/payments/checkout-dialog";
+import BackToTop from "@/components/layout/back-to-top";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -176,6 +177,7 @@ export default function SubscribePage() {
           period={target.period}
         />
       )}
+      <BackToTop />
     </div>
   );
 }
