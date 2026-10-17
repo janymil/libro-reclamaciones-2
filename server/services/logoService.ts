@@ -94,6 +94,14 @@ export function saveLogo(file: { buffer: Buffer; originalname: string; mimetype:
  * name must live inside the logos directory).
  */
 export function resolveLogoPath(fileName: string): string | null {
+  // Stored names are `<random hex>.<ext>`; anything containing a path separator
+  // is rejected. Backslash is a separator on Windows but an ordinary filename
+  // character on POSIX, so check both before resolving — otherwise
+  // `..\..\.env` would be accepted as a literal file name on Linux.
+  if (fileName.includes("/") || fileName.includes("\\")) {
+    return null;
+  }
+
   const absolute = path.resolve(LOGOS_DIR, fileName);
   if (!absolute.startsWith(path.resolve(LOGOS_DIR) + path.sep)) {
     return null;
