@@ -564,6 +564,11 @@ export default function Reports() {
             </Card>
 
             {/* Abusive-clause detector (Phase 3.11) */}
+            <PlanGate
+              feature="aiDrafting"
+              title="Detector de cláusulas abusivas"
+              description="La revisión de contratos con IA está incluida desde el plan Pro."
+            >
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -625,6 +630,7 @@ export default function Reports() {
                 )}
               </CardContent>
             </Card>
+            </PlanGate>
           </TabsContent>
         </Tabs>
       </div>

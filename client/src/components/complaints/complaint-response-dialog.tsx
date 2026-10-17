@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { useUpgradeToast } from "@/hooks/use-plan-upgrade";
 import { useUpdateComplaint, useAISuggestResponse, useSimilarComplaints, useCaseSummary, type CaseSummaryResult } from "@/hooks/use-complaints";
+import { useSubscription } from "@/hooks/use-subscription";
 import { useBusinessDays } from "@/hooks/use-business-days";
 import type { Complaint } from "@shared/schema";
 
@@ -35,7 +36,14 @@ export default function ComplaintResponseDialog({ complaint, open, onOpenChange 
   const { getBusinessDaysRemaining, getUrgencyLevel } = useBusinessDays();
   const updateComplaint = useUpdateComplaint();
   const suggestResponse = useAISuggestResponse();
-  const { data: similarComplaints } = useSimilarComplaints(complaint?.id ?? "", open);
+  const { data: subscription } = useSubscription();
+  // Similar-case detection is Pro (aiDrafting); don't fire a request that the
+  // server will reject for lower plans.
+  const canUseAIDrafting = subscription ? subscription.plan.features.aiDrafting : true;
+  const { data: similarComplaints } = useSimilarComplaints(
+    complaint?.id ?? "",
+    open && canUseAIDrafting,
+  );
 
   const [providerActions, setProviderActions] = useState("");
   const [providerResponse, setProviderResponse] = useState("");
@@ -202,13 +210,11 @@ export default function ComplaintResponseDialog({ complaint, open, onOpenChange 
                     try {
                       const result = await caseSummaryMutation.mutateAsync(complaint.id);
                       setCaseSummary(result);
-                    } catch {
+                    } catch (error) {
                       setCaseSummary(null);
-                      toast({
-                        title: "No se pudo generar el resumen",
-                        description: "Intente nuevamente en unos momentos.",
-                        variant: "destructive",
-                      });
+                      // A 402 is a plan boundary, not a random failure: show
+                      // the server's message with the "Ver planes" action.
+                      upgradeToast(error, "No se pudo generar el resumen ejecutivo");
                     }
                   }}
                   disabled={caseSummaryMutation.isPending}

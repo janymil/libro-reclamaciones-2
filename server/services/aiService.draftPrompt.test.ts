@@ -128,4 +128,52 @@ describe("assistConsumerDraft prompt", () => {
     const user = promptOf("user");
     expect(user).not.toMatch(/DNI|documento de identidad|@|celular|teléfono/);
   });
+
+  it("never calls a draft complete while it still lists missing fields", async () => {
+    // Observed live: the model answered isComplete=true and, in the same
+    // object, listed optional data as missing. The UI then showed "Borrador
+    // completo" next to "Falta mencionar: ...".
+    h.create.mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              isComplete: true,
+              missingFields: ["el número de serie del equipo"],
+              suggestions: [],
+            }),
+          },
+        },
+      ],
+    });
+
+    const assistance = await aiService.assistConsumerDraft(
+      "Compré una licuadora y dejó de encender a los dos días. Pido el cambio.",
+    );
+
+    expect(assistance.missingFields).toEqual(["el número de serie del equipo"]);
+    expect(assistance.isComplete).toBe(false);
+  });
+
+  it("keeps the declared form fields when the provider call fails", async () => {
+    // The catch path used to call the heuristic without the context, so a
+    // provider outage made the assistant report the product and the date as
+    // missing even though the visitor had already typed them.
+    h.create.mockRejectedValueOnce(new Error("provider down"));
+
+    const assistance = await aiService.assistConsumerDraft(
+      "El equipo comenzó a fallar a los pocos días y pido la reparación.",
+      {
+        productServiceName: "TV Sony 50",
+        purchaseAmount: "4850",
+        purchaseDate: "2026-10-10",
+        receiptNumber: "4565548786654",
+      },
+    );
+
+    expect(assistance.source).toBe("fallback");
+    const reported = assistance.missingFields.join(" ");
+    expect(reported).not.toMatch(/fecha/i);
+    expect(reported).not.toMatch(/producto/i);
+  });
 });

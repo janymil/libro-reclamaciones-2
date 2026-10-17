@@ -9,10 +9,14 @@ import { aiLimiter, publicAiLimiter } from "../middleware/rateLimits";
 import { consumeCaptchaToken, verifyCaptcha } from "../services/captchaService";
 import { storage } from "../storage";
 
-/** Reusable 402 for the AI features that only Pro and up include. */
+/**
+ * Reusable 402 for the AI features that only Pro and up include
+ * (`aiDrafting` in shared/plans.ts: drafting, SLA prediction, trends, similar
+ * cases, case summary and abusive-clause review).
+ */
 const AI_DRAFTING_REQUIRED = {
   message:
-    "La IA que redacta respuestas está disponible desde el plan Pro. Mejore su plan en \"Plan y Cuotas\".",
+    "Esta función de IA está disponible desde el plan Pro. Mejore su plan en \"Plan y Cuotas\".",
   code: "plan_upgrade_required",
 };
 
@@ -152,6 +156,12 @@ export function registerAiRoutes(app: Express): void {
   // no upstream AI call, so it is free and instant.
   app.get('/api/ai/sla-prediction', requireAuth, async (req: any, res) => {
     try {
+      // Plans list SLA prediction under aiDrafting (Pro and up), so the route
+      // must enforce the same boundary as the UI.
+      if (!(await hasFeature(req.user.businessId, 'aiDrafting'))) {
+        return res.status(402).json(AI_DRAFTING_REQUIRED);
+      }
+
       const complaints = await storage.getComplaintsByBusiness(req.user.businessId);
       const open = complaints.filter(
         (complaint) => complaint.status === 'new' || complaint.status === 'in_progress'

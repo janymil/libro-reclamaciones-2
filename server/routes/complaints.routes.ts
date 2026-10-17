@@ -25,6 +25,13 @@ const complaintUpdateSchema = z.object({
   responseMethod: z.enum(['email', 'letter', 'phone']).nullable().optional(),
 });
 
+/** 402 for the AI features that plans group under `aiDrafting` (Pro and up). */
+const AI_DRAFTING_REQUIRED = {
+  message:
+    "Esta función de IA está disponible desde el plan Pro. Mejore su plan en \"Plan y Cuotas\".",
+  code: "plan_upgrade_required",
+};
+
 /**
  * Complaints: listing, detail, updates, audit log and public submission.
  */
@@ -55,6 +62,11 @@ export function registerComplaintsRoutes(app: Express): void {
   // that resemble this one, so staff can reuse an already-sent response.
   app.get('/api/complaints/:id/similar', requireAuth, async (req: any, res) => {
     try {
+      // Similar cases are part of the aiDrafting feature set in shared/plans.ts.
+      if (!(await hasFeature(req.user.businessId, 'aiDrafting'))) {
+        return res.status(402).json(AI_DRAFTING_REQUIRED);
+      }
+
       const complaint = await storage.getComplaint(req.params.id);
 
       if (!complaint || complaint.businessId !== req.user.businessId) {

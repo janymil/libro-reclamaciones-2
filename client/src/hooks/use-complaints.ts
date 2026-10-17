@@ -207,7 +207,7 @@ export interface SlaPrediction {
   summary: { total: number; highRisk: number; mediumRisk: number };
 }
 
-export function useSlaPrediction() {
+export function useSlaPrediction(enabled = true) {
   return useQuery({
     queryKey: ['/api/ai/sla-prediction'],
     queryFn: async () => {
@@ -217,6 +217,9 @@ export function useSlaPrediction() {
       }
       return response.json() as Promise<SlaPrediction>;
     },
+    // SLA prediction is a Pro feature (aiDrafting). Keeping the query disabled
+    // for other plans avoids a guaranteed 402 on every dashboard load.
+    enabled,
   });
 }
 

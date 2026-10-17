@@ -3,9 +3,10 @@
  *
  *   npx tsx scripts/verify-ai.ts
  *
- * Calls every AI feature once and prints the results, so you can confirm the
- * configured provider (default: Groq with open-weight Llama models) works
- * before relying on it in production.
+ * Calls every aiService feature once and prints the results, so you can confirm
+ * the configured provider (default: Groq with open-weight GPT-OSS models) works
+ * before relying on it in production. The compliance co-pilot is verified
+ * separately by `scripts/verify-agent.ts` (it has its own tool-calling loop).
  */
 import "../server/env";
 import { aiService, getAIStatus } from "../server/services/aiService";
@@ -62,7 +63,26 @@ async function main() {
       : "✓ No declared field (producto, monto, fecha de consumo, comprobante) is reported as missing."
   );
 
-  const ok = [classification, draft, trends, assistance].every((result) => result.source === "ai");
+  console.log("\n--- 5. Abusive-clause review ---");
+  const clauses = await aiService.detectAbusiveClauses(
+    "El proveedor no será responsable por ningún daño, pérdida o perjuicio derivado del uso del producto. " +
+      "El consumidor renuncia expresamente a presentar cualquier reclamo o denuncia ante INDECOPI. " +
+      "Las decisiones del proveedor sobre garantías son definitivas e inapelables.",
+  );
+  console.log(JSON.stringify(clauses, null, 2));
+
+  console.log("\n--- 6. Executive case summary ---");
+  const summary = await aiService.generateCaseSummary(
+    "Correlativo: 2026-0001\nTipo: reclamo (prioridad urgent)\nEstado: new\n" +
+      "Producto/Servicio: Celular\nDetalle: Compré un celular el 3 de enero y llegó con la pantalla dañada. " +
+      "Exijo un reembolso inmediato; si no me responden voy a denunciarlos ante INDECOPI.\n" +
+      "Pedido del consumidor: reembolso inmediato\nRespuesta enviada: Aún sin respuesta",
+  );
+  console.log(JSON.stringify(summary, null, 2));
+
+  const ok = [classification, draft, trends, assistance, clauses, summary].every(
+    (result) => result.source === "ai",
+  );
   console.log(`\n${ok ? "✓ All AI features verified against the live provider." : "✗ Some features fell back to heuristics - check the errors above."}`);
   process.exit(ok ? 0 : 1);
 }

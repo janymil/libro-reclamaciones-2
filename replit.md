@@ -214,11 +214,37 @@ The system uses a multi-tenant PostgreSQL database with the following core entit
 Simple session-based authentication is implemented for demo purposes, with user roles (admin, user, viewer) controlling access to different features. The system tracks user sessions and validates access to business-specific data.
 
 ### AI Integration
-OpenAI GPT-4 integration provides intelligent complaint classification:
-- Automatic detection of complaint type (reclamo vs queja)
-- Sentiment analysis and priority assessment
-- Risk level evaluation for legal compliance
-- Suggested response generation
+The AI layer is provider-agnostic: any OpenAI-compatible endpoint works. The
+deployment default is **Groq with open-weight GPT-OSS models**
+(`openai/gpt-oss-120b` for drafting/trends, `openai/gpt-oss-20b` for
+classification/assistance); DeepSeek, Together, OpenRouter or a local Ollama
+instance only need `AI_BASE_URL`, `AI_MODEL` and `AI_MODEL_FAST`. No OpenAI
+account and no GPT-4 model are involved - the `openai` package is used only as
+the compatible client. Without `AI_API_KEY` every feature degrades to local
+heuristics instead of failing.
+
+Implemented AI services (`server/services/aiService.ts`,
+`agentService.ts`, `similarityService.ts`):
+- **Classification and triage**: complaint type (reclamo vs queja), category,
+  priority, legal/reputational risk, sentiment, keywords and a short suggested
+  response, computed on intake (background) and on demand.
+- **Response drafting** in the business's own brand tone and policies (Pro+).
+- **Consumer draft assistant** on the public form: completeness feedback and an
+  improved version of the consumer's text (public, CAPTCHA-gated).
+- **Trend analysis**: recurring issues, severity, risk areas and actionable
+  recommendations over open complaints (Pro+).
+- **Abusive-clause review** against arts. 49 and 50 of the Consumer Protection
+  Code, and **executive case summaries** for managers (Pro+).
+- **SLA-breach prediction**: deterministic business-day scoring that ranks open
+  complaints by risk of missing the 15-business-day deadline.
+- **Similar-complaint retrieval**: real embeddings when `AI_EMBEDDINGS_MODEL` is
+  configured, otherwise local TF-IDF + cosine similarity (no external call).
+- **Compliance co-pilot**: tool-calling agent grounded in the curated legal
+  corpus and hard-scoped to the authenticated tenant.
+
+The configured provider/models are reported by `GET /api/ai/status` and
+`GET /api/status`. `scripts/verify-ai.ts` and `scripts/verify-agent.ts` exercise
+the live provider end to end.
 
 ### Business Logic
 Core business rules enforce Peruvian legal requirements:
@@ -327,9 +353,9 @@ competitors. Everything below is wired end to end (server + client):
 - **AI brand voice**: response drafts follow the business's own tone and policies
   (`brandTone`/`brandPolicies` injected into the prompt via `renderBrandInstructions`).
 - **Reincidence, abusive clauses, executive summary**: `GET /api/reports/reincidencia`,
-  `POST /api/ai/abusive-clauses` (art. 47 Código de Protección y Defensa del Consumidor) and
-  `POST /api/ai/case-summary`; surfaced in the "Analítica IA" tab of `/reportes` and in the
-  response dialog.
+  `POST /api/ai/abusive-clauses` (arts. 49 y 50 del Código de Protección y Defensa del
+  Consumidor) and `POST /api/ai/case-summary`; surfaced in the "Analítica IA" tab of
+  `/reportes` and in the response dialog.
 - **Multichannel intake**: embeddable `widget.js` (iframe modal, `/libro/:slug?embed=1`), public
   REST API `POST|GET /api/v1/complaints` with hashed API keys, and outgoing webhooks signed with
   HMAC-SHA256. UI at `/integraciones` (Corporativo).
@@ -414,8 +440,10 @@ Modern, responsive design using shadcn/ui components:
 - **Drizzle Kit**: Database migration and schema management tools
 
 ### AI Services
-- **OpenAI API**: GPT-4 integration for complaint classification and response generation
-- **Natural Language Processing**: Automated text analysis for Spanish language complaints
+- **OpenAI-compatible API**: the `openai` SDK points at `AI_BASE_URL`. Production defaults
+  to Groq (`openai/gpt-oss-120b` and `openai/gpt-oss-20b`); there is no GPT-4 dependency.
+- **Optional embedding model** (`AI_EMBEDDINGS_MODEL`) for semantic similar-complaint
+  detection; without it the app uses local TF-IDF, so no external service is required.
 
 ### UI Framework & Styling
 - **React**: Frontend framework with TypeScript support

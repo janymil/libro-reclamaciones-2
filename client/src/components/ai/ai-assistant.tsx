@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useUpgradeToast } from "@/hooks/use-plan-upgrade";
 import { useAIClassification, useAISuggestResponse, useAIStatus, useAITrends, useSlaPrediction } from "@/hooks/use-complaints";
+import { useSubscription } from "@/hooks/use-subscription";
+import PlanGate from "@/components/plan/plan-gate";
 import { COMPLAINT_TYPES } from "@/lib/constants";
 
 interface AIAssistantProps {
@@ -20,8 +22,13 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
   const { toast } = useToast();
   const upgradeToast = useUpgradeToast();
   const { data: aiStatus } = useAIStatus();
+  const { data: subscription } = useSubscription();
   const trendsMutation = useAITrends();
-  const { data: slaPrediction } = useSlaPrediction();
+  // Drafting, SLA prediction and trends are all part of the Pro `aiDrafting`
+  // feature. While the subscription loads we keep the request enabled (the
+  // server remains the source of truth), then disable it for other plans.
+  const canUseAIDrafting = subscription ? subscription.plan.features.aiDrafting : true;
+  const { data: slaPrediction } = useSlaPrediction(canUseAIDrafting);
   const classifyMutation = useAIClassification();
   const suggestResponseMutation = useAISuggestResponse();
 
@@ -230,6 +237,15 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
         </CardContent>
       </Card>
 
+      {/* Pro AI tools: drafting, SLA prediction and trends share one gate so a
+          customer on a lower plan sees one clear upgrade card instead of three
+          buttons that answer 402. */}
+      <PlanGate
+        feature="aiDrafting"
+        title="Redacción y análisis con IA"
+        description="El asistente de respuesta, la predicción de vencimientos y el análisis de tendencias están incluidos desde el plan Pro."
+      >
+        <div className="space-y-6">
       {/* Response Suggestion Tool */}
       <Card>
         <CardHeader>
@@ -459,6 +475,8 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
           )}
         </CardContent>
       </Card>
+        </div>
+      </PlanGate>
 
       {/* Quick Tips */}
       <Card>
@@ -480,7 +498,7 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
             </li>
             <li className="flex items-start space-x-2">
               <span className="material-icons text-xs mt-1">check_circle</span>
-              <span>La IA está entrenada con la normativa peruana vigente (DS 011-2011-PCM, DS 101-2022-PCM)</span>
+              <span>La IA redacta siguiendo la normativa peruana vigente (DS 011-2011-PCM, DS 101-2022-PCM)</span>
             </li>
             <li className="flex items-start space-x-2">
               <span className="material-icons text-xs mt-1">check_circle</span>
