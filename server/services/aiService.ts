@@ -478,7 +478,8 @@ export interface ExecutiveReportInput {
     resolved: number;
     answered: number;
     slaOnTimeRate: number | null;
-    averageResponseTime: number;
+    /** Average calendar days between submission and response. */
+    averageResponseDays: number;
   };
   previousMonth?: { complaints: number; resolved: number; overdue: number } | null;
   topProducts: Array<{ name: string; total: number; overdue: number }>;
@@ -1325,7 +1326,7 @@ Responde en JSON con exactamente estas claves:
       actions: ['Revise los casos abiertos con menor plazo restante.', 'Refuerce el área con más reincidencia.'],
       kpiNotes: [
         `Cumplimiento del plazo: ${input.stats.slaOnTimeRate === null ? 'sin datos' : `${input.stats.slaOnTimeRate}%`}.`,
-        `Tiempo medio de respuesta: ${input.stats.averageResponseTime} día(s).`,
+        `Tiempo medio de respuesta: ${input.stats.averageResponseDays} día(s) calendario.`,
       ],
       source: 'fallback',
     };
@@ -1338,7 +1339,10 @@ Responde en JSON con exactamente estas claves:
     const narratives = redactPIIList(input.complaints.slice(0, 30).map((item) => item.slice(0, 400)));
     const prompt = {
       periodo: input.periodLabel,
-      metricas: input.stats,
+      metricas: {
+        ...input.stats,
+        notaUnidades: 'averageResponseDays está en días calendario; slaOnTimeRate en porcentaje.',
+      },
       mesAnterior: input.previousMonth ?? null,
       productosConMasReclamos: input.topProducts.slice(0, 8),
       casos: narratives,

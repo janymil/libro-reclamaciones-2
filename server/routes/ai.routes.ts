@@ -400,7 +400,7 @@ export function registerAiRoutes(app: Express): void {
             answered: answered.length,
             slaOnTimeRate:
               answered.length > 0 ? Math.round((onTime.length / answered.length) * 100) : null,
-            averageResponseTime:
+            averageResponseDays:
               responseDays.length > 0
                 ? Math.round((responseDays.reduce((sum, days) => sum + days, 0) / responseDays.length) * 10) / 10
                 : 0,

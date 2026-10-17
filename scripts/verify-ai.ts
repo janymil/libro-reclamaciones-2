@@ -106,7 +106,7 @@ async function main() {
       resolved: 8,
       answered: 9,
       slaOnTimeRate: 89,
-      averageResponseTime: 3.4,
+      averageResponseDays: 3.4,
     },
     previousMonth: { complaints: 9, resolved: 6, overdue: 0 },
     topProducts: [
