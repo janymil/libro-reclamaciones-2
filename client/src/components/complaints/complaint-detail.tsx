@@ -123,12 +123,10 @@ function AIAnalysisSection({ complaint }: { complaint: Complaint }) {
 
         {typeMismatch && (
           <p className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-            La IA sugiere que este caso es una <strong>{COMPLAINT_TYPES[analysis.type!]}</strong>, pero el
-            consumidor registró una{' '}
-            <strong>
-              {COMPLAINT_TYPES[complaint.complaintType as keyof typeof COMPLAINT_TYPES] ?? complaint.complaintType}
-            </strong>
-            . El registro no se modificó: verifíquelo antes de responder.
+            La IA sugiere que este caso es{' '}
+            <strong>{analysis.type === 'queja' ? 'una queja' : 'un reclamo'}</strong>, pero el consumidor
+            registró <strong>{complaint.complaintType === 'queja' ? 'una queja' : 'un reclamo'}</strong>. El
+            registro no se modificó: verifíquelo antes de responder.
           </p>
         )}
 
