@@ -55,6 +55,17 @@ describe("chatCompletion", () => {
     expect((h.fallback.mock.calls[0][0] as { model: string }).model).toBe("fallback-model");
   });
 
+  it("retries once after a 429 before using the fallback", async () => {
+    const rateLimit = Object.assign(new Error("rate limit"), { status: 429 });
+    h.primary.mockRejectedValueOnce(rateLimit).mockResolvedValueOnce(success);
+
+    const response = await chatCompletion({ model: "primary-model", messages: [] });
+
+    expect(response).toEqual(success);
+    expect(h.primary).toHaveBeenCalledTimes(2);
+    expect(h.fallback).not.toHaveBeenCalled();
+  }, 10_000);
+
   it("retries without response_format when the provider cannot produce JSON", async () => {
     const jsonError = Object.assign(new Error("Failed to generate JSON"), { status: 400 });
     h.primary.mockRejectedValueOnce(jsonError).mockResolvedValueOnce(success);
