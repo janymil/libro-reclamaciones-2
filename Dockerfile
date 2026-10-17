@@ -60,20 +60,20 @@ ENV NODE_ENV=production \
     PORT=5000 \
     ATTACHMENTS_DIR=/data/uploads
 
-COPY --from=prod-deps /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY package.json ./
+COPY --chown=node:node --from=prod-deps /app/node_modules ./node_modules
+COPY --chown=node:node --from=build /app/dist ./dist
+COPY --chown=node:node package.json ./
 # Kept in the image so the operator can run migrations inside the container:
 #   docker compose exec app node scripts/apply-sql.mjs migrations/0013_....sql
-COPY migrations ./migrations
-COPY scripts ./scripts
+COPY --chown=node:node migrations ./migrations
+COPY --chown=node:node scripts ./scripts
 COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # CRLF would break the shebang on Linux; normalise before making it executable.
 RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
  && chmod 0755 /usr/local/bin/entrypoint.sh \
  && mkdir -p /data/uploads \
- && chown -R node:node /app /data
+ && chown -R node:node /data /app/dist /app/migrations /app/scripts /app/package.json
 
 USER node
 

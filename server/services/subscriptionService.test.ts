@@ -131,6 +131,37 @@ describe("plans & quotas", () => {
     expect(getPlan(legacy.subscriptionPlan).id).toBe("gratis");
     expect(getEffectivePlan(legacy).id).toBe("gratis");
   });
+
+  it("unlocks corporativo immediately when purchased during the trial window", () => {
+    const trialingCorp = business({
+      subscriptionPlan: "corporativo",
+      subscriptionStatus: "trialing",
+      trialEndsAt: new Date(Date.now() + 5 * 86_400_000),
+      currentPeriodEnd: new Date(Date.now() + 35 * 86_400_000),
+    });
+    expect(isTrialing(trialingCorp)).toBe(true);
+    expect(getEffectivePlan(trialingCorp).id).toBe("corporativo");
+  });
+
+  it("falls back to gratis once currentPeriodEnd has passed", () => {
+    const lapsed = business({
+      subscriptionPlan: "profesional",
+      subscriptionStatus: "active",
+      trialEndsAt: null,
+      currentPeriodEnd: new Date(Date.now() - 86_400_000),
+    });
+    expect(getEffectivePlan(lapsed).id).toBe("gratis");
+  });
+
+  it("keeps the paid plan while currentPeriodEnd is still in the future, even after cancellation", () => {
+    const cancelledWithRemainingDays = business({
+      subscriptionPlan: "profesional",
+      subscriptionStatus: "canceled",
+      trialEndsAt: null,
+      currentPeriodEnd: new Date(Date.now() + 10 * 86_400_000),
+    });
+    expect(getEffectivePlan(cancelledWithRemainingDays).id).toBe("profesional");
+  });
 });
 
 describe("subscriptionService helpers", () => {

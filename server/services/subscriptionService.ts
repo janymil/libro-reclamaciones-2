@@ -76,8 +76,10 @@ export async function getSubscriptionUsage(businessId: string, userId: string): 
 }
 
 async function countBusinessUsers(businessId: string): Promise<number> {
-  const all = await storage.getAllUsers();
-  return all.filter((user) => user.businessId === businessId && user.isActive).length;
+  const users = storage.getUsersByBusinessIds
+    ? await storage.getUsersByBusinessIds([businessId])
+    : await storage.getAllUsers();
+  return users.filter((user) => user.businessId === businessId && user.isActive).length;
 }
 
 async function countBusinessEstablishments(businessId: string): Promise<number> {

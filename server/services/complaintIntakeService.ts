@@ -200,12 +200,32 @@ export async function intakeComplaint(data: ComplaintSubmission): Promise<Intake
     logo: config?.logoFileName ? readLogoBuffer(config.logoFileName) : null,
   });
 
-  await emailService.sendComplaintConfirmation(
-    data.consumerEmail,
-    complaint,
-    confirmationPdf,
-    customization,
-  );
+  // Never fail the intake HTTP response after the complaint is already stored
+  // in the database if SMTP has a transient failure.
+  try {
+    await emailService.sendComplaintConfirmation(
+      data.consumerEmail,
+      complaint,
+      confirmationPdf,
+      customization,
+    );
+  } catch (error) {
+    console.error('Error sending consumer complaint confirmation email:', error);
+  }
+
+  const businessRecipient = config?.notificationEmail?.trim();
+  if (businessRecipient) {
+    try {
+      await emailService.sendNewComplaintAlert?.(
+        businessRecipient,
+        complaint,
+        business.businessName,
+        confirmationPdf,
+      );
+    } catch (error) {
+      console.error('Error sending business complaint alert email:', error);
+    }
+  }
 
   // In-app notification for the business
   await storage.createNotification({

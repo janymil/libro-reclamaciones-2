@@ -1152,7 +1152,23 @@ export async function refreshSubscription(businessId: string): Promise<Subscript
   }
 
   const state = await gateway.fetchSubscription(subscription.providerRef);
-  return syncSubscription(subscription, state);
+  const synced = await syncSubscription(subscription, state);
+
+  // If the subscription is live and the provider can look up payments by our
+  // external_reference, reconcile the charge so `currentPeriodEnd` is advanced
+  // even when the charge webhook has not arrived yet.
+  if (isSubscriptionLive(synced.status) && gateway.findPaymentByReference) {
+    try {
+      const charge = await gateway.findPaymentByReference(synced.reference);
+      if (charge) {
+        await recordSubscriptionCharge(synced, charge);
+      }
+    } catch (error) {
+      console.error('[payments] could not reconcile subscription charge during refresh:', error);
+    }
+  }
+
+  return synced;
 }
 
 /** The agreement the UI should show for a business, if any. */

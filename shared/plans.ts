@@ -284,6 +284,11 @@ export interface TrialWindow {
    * existed kept NULL there and only `createdAt` describes its window.
    */
   createdAt?: Date | string | null;
+  /**
+   * End of the currently paid period, when set. Once this date has passed, a
+   * business that is not trialing falls back to the Free tier.
+   */
+  currentPeriodEnd?: Date | string | null;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -343,14 +348,33 @@ export function getTrialDaysRemaining(business: TrialWindow, now: Date = new Dat
 /**
  * Resolves the *effective* plan for quota enforcement.
  *
- * During the trial every "profesional" feature is unlocked; once the trial
- * ends the stored plan applies.
+ * During the trial every "profesional" feature is unlocked (unless the tenant
+ * already purchased "corporativo", which unlocks Empresarial immediately);
+ * once the trial ends the stored plan applies for as long as the paid period
+ * (`currentPeriodEnd`) has not lapsed.
  */
 export function getEffectivePlan(
   business: Pick<Business, "subscriptionPlan"> & TrialWindow,
   now: Date = new Date(),
 ): PlanDefinition {
-  return isTrialing(business, now) ? PLANS.profesional : getPlan(business.subscriptionPlan);
+  if (isTrialing(business, now)) {
+    const stored = getPlan(business.subscriptionPlan);
+    return stored.id === "corporativo" ? PLANS.corporativo : PLANS.profesional;
+  }
+
+  if (business.currentPeriodEnd) {
+    const periodEnd = new Date(business.currentPeriodEnd);
+    if (!Number.isNaN(periodEnd.getTime()) && periodEnd <= now) {
+      return PLANS.gratis;
+    }
+  } else if (
+    business.subscriptionStatus === "canceled" ||
+    business.subscriptionStatus === "past_due"
+  ) {
+    return PLANS.gratis;
+  }
+
+  return getPlan(business.subscriptionPlan);
 }
 
 export type QuotaResource =

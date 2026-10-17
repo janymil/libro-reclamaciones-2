@@ -1,3 +1,4 @@
+import fs from "fs";
 import type { Express, Request, Response, NextFunction } from "express";
 
 import { storage } from "../storage";
@@ -12,6 +13,23 @@ import {
   ALLOWED_MIME_TYPES,
 } from "../services/attachmentService";
 import { enforceQuota } from "../services/subscriptionService";
+
+function cleanupUploadedFiles(files: Express.Multer.File[] | undefined): void {
+  if (!files) {
+    return;
+  }
+  for (const file of files) {
+    if (file?.path) {
+      try {
+        if (fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+        }
+      } catch (error) {
+        console.error("[attachments] failed to clean up rejected upload:", error);
+      }
+    }
+  }
+}
 
 /**
  * Evidence attachments (Phase 1.1).
@@ -33,6 +51,8 @@ function uploadFiles(req: Request, res: Response, next: NextFunction) {
       return next();
     }
 
+    cleanupUploadedFiles(req.files as Express.Multer.File[] | undefined);
+
     const message =
       error.code === 'LIMIT_FILE_SIZE'
         ? `Cada archivo debe pesar como máximo ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB`
@@ -49,24 +69,39 @@ export function registerAttachmentsRoutes(app: Express): void {
   app.post(
     '/api/public/complaints/:id/attachments',
     // Per-complaint ceiling first (rejects early, before any file is written),
-    // then the per-IP one, then multer.
+    // then the per-IP one, then complaint existence check, then multer.
     evidenceUploadLimiter,
     uploadLimiter,
-    uploadFiles,
-    async (req, res) => {
+    async (req, res, next) => {
       try {
         const complaint = await storage.getComplaint(req.params.id);
         if (!complaint) {
+          return res.status(404).json({ message: "Reclamación no encontrada" });
+        }
+        (req as any).complaint = complaint;
+        return next();
+      } catch (error) {
+        console.error('Error loading complaint before attachment upload:', error);
+        return res.status(500).json({ message: "No se pudieron subir los archivos" });
+      }
+    },
+    uploadFiles,
+    async (req, res) => {
+      const files = (req.files as Express.Multer.File[]) ?? [];
+      try {
+        const complaint = (req as any).complaint ?? (await storage.getComplaint(req.params.id));
+        if (!complaint) {
+          cleanupUploadedFiles(files);
           return res.status(404).json({ message: "Reclamación no encontrada" });
         }
 
         // Knowledge check: the document number of the consumer who filed it.
         // Compared in constant time so the endpoint is not a timing oracle.
         if (!documentMatches(req.body?.documento, complaint.consumerDocumentNumber)) {
+          cleanupUploadedFiles(files);
           return res.status(403).json({ message: "No autorizado para adjuntar archivos a esta reclamación" });
         }
 
-        const files = (req.files as Express.Multer.File[]) ?? [];
         if (files.length === 0) {
           return res.status(400).json({ message: "No se recibieron archivos" });
         }
@@ -75,6 +110,7 @@ export function registerAttachmentsRoutes(app: Express): void {
         const current = await storage.countAttachmentsByComplaint(complaint.id);
         const quota = await enforceQuota(complaint.businessId, null, 'attachmentsPerComplaint', current + files.length);
         if (!quota.allowed) {
+          cleanupUploadedFiles(files);
           return res.status(402).json({ message: quota.reason, code: "quota_exceeded" });
         }
 
@@ -109,6 +145,7 @@ export function registerAttachmentsRoutes(app: Express): void {
 
         res.status(201).json({ success: true, attachments: created });
       } catch (error) {
+        cleanupUploadedFiles(files);
         console.error('Error uploading attachments:', error);
         res.status(500).json({ message: "No se pudieron subir los archivos" });
       }

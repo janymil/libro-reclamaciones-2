@@ -125,8 +125,9 @@ export default function CheckoutDialog({
 
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   // A provider with a recurring rail can also sell just one period, which is the
-  // only way to pay with Yape, Plin or cash. `false` = charge automatically.
-  const [oneTime, setOneTime] = useState(false);
+  // only way to pay with Yape, Plin or cash (and does not require logging into a
+  // Mercado Pago account). `true` = one-time Checkout Pro by default.
+  const [oneTime, setOneTime] = useState(true);
   // A promo code only makes sense on a single period: a recurring charge at a
   // discounted amount would follow the customer forever.
   const [code, setCode] = useState('');
@@ -160,7 +161,7 @@ export default function CheckoutDialog({
   useEffect(() => {
     if (open) {
       setOffline(null);
-      setOneTime(false);
+      setOneTime(true);
       setCode('');
       setApplied(null);
       setCodeError(null);

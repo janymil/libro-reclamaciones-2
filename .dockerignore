@@ -12,6 +12,7 @@ backups
 uploads
 test-results
 playwright-report
+playwright.config.ts
 e2e
 .dev-server*.log
 *.log

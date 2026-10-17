@@ -666,8 +666,8 @@ ${verificationText}
               <p>Se ha iniciado sesión en tu cuenta de LibroDigital.pe.</p>
               <div class="info-box">
                 <p><strong>Fecha y hora:</strong> ${new Date().toLocaleString('es-PE')}</p>
-                <p><strong>Dirección IP:</strong> ${ipAddress}</p>
-                <p><strong>Dispositivo:</strong> ${userAgent}</p>
+                <p><strong>Dirección IP:</strong> ${escapeHtml(ipAddress)}</p>
+                <p><strong>Dispositivo:</strong> ${escapeHtml(userAgent)}</p>
               </div>
               <p>Si fuiste tú, puedes ignorar este email. Si no reconoces este acceso, cambia tu contraseña inmediatamente.</p>
             </div>
@@ -712,7 +712,7 @@ ${verificationText}
           <div style="max-width: 600px; margin: 0 auto; padding: 24px;">
             <h2>Solicitud de acceso a ${escapeHtml(businessName)}</h2>
             <p>
-              <strong>${requesterName}</strong> (${requesterEmail}) solicita acceso al RUC
+              <strong>${escapeHtml(requesterName)}</strong> (${escapeHtml(requesterEmail)}) solicita acceso al RUC
               registrado en esta cuenta para administrar el Libro de Reclamaciones.
             </p>
             ${message ? `<p style="background: #f1f5f9; padding: 12px; border-radius: 6px;">"${escapeHtml(message)}"</p>` : ''}
@@ -773,13 +773,13 @@ ${verificationText}
         <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b;">
           <div style="max-width: 600px; margin: 0 auto; padding: 24px;">
             <h2>${approved ? 'Acceso aprobado' : 'Solicitud rechazada'}</h2>
-            <p>¡Hola ${requesterName}!</p>
+            <p>¡Hola ${escapeHtml(requesterName)}!</p>
             <p>
               ${approved
                 ? `Ya puede administrar el Libro de Reclamaciones de <strong>${escapeHtml(businessName)}</strong>. Inicie sesión y elija esa empresa en el selector de empresas.`
                 : `Su solicitud de acceso a <strong>${escapeHtml(businessName)}</strong> fue rechazada. Si cree que es un error, contacte a la empresa o inténtelo nuevamente más adelante.`}
             </p>
-            ${note ? `<p style="background: #f1f5f9; padding: 12px; border-radius: 6px;">"${note}"</p>` : ''}
+            ${note ? `<p style="background: #f1f5f9; padding: 12px; border-radius: 6px;">"${escapeHtml(note)}"</p>` : ''}
             ${approved ? `<p>Ingrese en: <a href="${loginUrl}">${loginUrl}</a></p>` : ''}
             <p style="color: #64748b; font-size: 14px;">© 2024 LibroDigital.pe</p>
           </div>
@@ -939,14 +939,14 @@ ${verificationText}
               <h1>📄 Respuesta a tu reclamación</h1>
             </div>
             <div class="content">
-              <h2>Hola ${complaint.consumerFullName}</h2>
+              <h2>Hola ${escapeHtml(complaint.consumerFullName)}</h2>
               <div class="info-box">
-                <p><strong>Número de registro:</strong> ${complaint.correlativeNumber}</p>
-                <p><strong>Tipo:</strong> ${complaint.complaintType}</p>
+                <p><strong>Número de registro:</strong> ${escapeHtml(complaint.correlativeNumber)}</p>
+                <p><strong>Tipo:</strong> ${escapeHtml(complaint.complaintType)}</p>
                 <p><strong>Fecha de presentación:</strong> ${new Date(complaint.submissionDate).toLocaleDateString('es-PE')}</p>
               </div>
-              <p>Esta es la respuesta de la empresa a tu ${complaint.complaintType}:</p>
-              <div class="response-box">${response}</div>
+              <p>Esta es la respuesta de la empresa a tu ${escapeHtml(complaint.complaintType)}:</p>
+              <div class="response-box">${escapeHtml(response)}</div>
               <p>Si tienes alguna consulta adicional, responde a este correo.</p>
             </div>
             <div class="footer">
@@ -1021,11 +1021,11 @@ ${plainSignature(customization)}
               <h1>✅ Reclamación registrada</h1>
             </div>
             <div class="content">
-              <h2>Hola ${complaint.consumerFullName}</h2>
-              <p>Tu ${complaint.complaintType} ha sido registrada correctamente en nuestro Libro de Reclamaciones.</p>
+              <h2>Hola ${escapeHtml(complaint.consumerFullName)}</h2>
+              <p>Tu ${escapeHtml(complaint.complaintType)} ha sido registrada correctamente en nuestro Libro de Reclamaciones.</p>
               <div class="info-box">
-                <p><strong>Número de registro:</strong> ${complaint.correlativeNumber}</p>
-                <p><strong>Tipo:</strong> ${complaint.complaintType}</p>
+                <p><strong>Número de registro:</strong> ${escapeHtml(complaint.correlativeNumber)}</p>
+                <p><strong>Tipo:</strong> ${escapeHtml(complaint.complaintType)}</p>
                 <p><strong>Fecha de presentación:</strong> ${new Date(complaint.submissionDate).toLocaleDateString('es-PE')}</p>
                 <p><strong>Fecha límite de respuesta:</strong> ${new Date(complaint.dueDate).toLocaleDateString('es-PE')}</p>
               </div>
@@ -1073,6 +1073,71 @@ ${plainSignature(customization)}
     } catch (error) {
       console.error('Error sending complaint confirmation:', error);
       throw new Error('Failed to send complaint confirmation');
+    }
+  }
+
+  /**
+   * Notifies the business's configured notification email when a new complaint
+   * is filed, attaching the PDF constancia and linking to the management panel.
+   */
+  async sendNewComplaintAlert(
+    to: string,
+    complaint: Complaint,
+    businessName: string,
+    pdfBuffer?: Buffer,
+  ): Promise<void> {
+    const panelUrl = `${process.env.APP_URL || 'https://librodigital.pe'}/reclamos`;
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      replyTo: complaint.consumerEmail,
+      to,
+      subject: `Nueva ${complaint.complaintType} ${complaint.correlativeNumber} - ${businessName}`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Nueva reclamación recibida</title>
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 24px;">
+            <h2>Nueva ${escapeHtml(complaint.complaintType)} recibida (${escapeHtml(complaint.correlativeNumber)})</h2>
+            <p>Se ha registrado una nueva ${escapeHtml(complaint.complaintType)} en el Libro de Reclamaciones de <strong>${escapeHtml(businessName)}</strong>.</p>
+            <div style="background: #f1f5f9; border-radius: 8px; padding: 16px; margin: 16px 0;">
+              <p style="margin: 4px 0;"><strong>Consumidor:</strong> ${escapeHtml(complaint.consumerFullName)} (${escapeHtml(complaint.consumerEmail)})</p>
+              <p style="margin: 4px 0;"><strong>Fecha límite legal (15 días hábiles):</strong> ${new Date(complaint.dueDate).toLocaleDateString('es-PE')}</p>
+              <p style="margin: 8px 0 4px;"><strong>Detalle:</strong></p>
+              <p style="margin: 0; white-space: pre-wrap;">${escapeHtml(complaint.complaintDetail)}</p>
+            </div>
+            <p>Puede gestionarla y responder desde su panel: <a href="${panelUrl}">${panelUrl}</a></p>
+            <p style="color: #64748b; font-size: 14px;">© 2024 LibroDigital.pe</p>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `Nueva ${complaint.complaintType} recibida (${complaint.correlativeNumber}) - ${businessName}
+
+Consumidor: ${complaint.consumerFullName} (${complaint.consumerEmail})
+Fecha límite legal (15 días hábiles): ${new Date(complaint.dueDate).toLocaleDateString('es-PE')}
+
+Detalle:
+${complaint.complaintDetail}
+
+Gestione y responda esta reclamación en: ${panelUrl}
+`,
+      attachments: pdfBuffer
+        ? [{
+            filename: `reclamacion-${complaint.correlativeNumber}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf',
+          }]
+        : undefined,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending new complaint alert to business:', error);
     }
   }
 
@@ -1322,6 +1387,7 @@ LibroDigital.pe
    */
   async sendTestEmail(email: string, firstName?: string): Promise<void> {
     const greeting = firstName ? `¡Hola ${firstName}!` : '¡Hola!';
+    const htmlGreeting = firstName ? `¡Hola ${escapeHtml(firstName)}!` : '¡Hola!';
 
     const mailOptions = {
       from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
@@ -1336,7 +1402,7 @@ LibroDigital.pe
         </head>
         <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b;">
           <div style="max-width: 600px; margin: 0 auto; padding: 24px;">
-            <h2>${greeting}</h2>
+            <h2>${htmlGreeting}</h2>
             <p>Este es un correo de prueba enviado desde el Libro de Reclamaciones para verificar la configuración de envío.</p>
             <p>Si lo recibiste, el servicio de correo está configurado correctamente.</p>
             <p style="color: #64748b; font-size: 14px;">© 2024 LibroDigital.pe</p>
