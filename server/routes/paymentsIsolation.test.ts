@@ -14,6 +14,10 @@ import { clearPlatformSettingsCache } from "../services/platformSettingsService"
  * The provider HTTP calls are stubbed with `fetch`, which lets the webhook path
  * (notification -> authoritative status -> settle -> activate plan) be tested
  * end to end without any credentials.
+ *
+ * The token fixture is `APP_USR-…` on purpose: the gateway reads the credential
+ * prefix to decide whether the recurring rail is usable, and sandbox `TEST-…`
+ * tokens cannot create preapprovals. These tests exercise the production flow.
  */
 
 const A = "11111111-1111-4111-8111-111111111111";
@@ -931,7 +935,7 @@ describe("POST /api/payments/webhook/:provider", () => {
   });
 
   it("activates the plan only after confirming the status with the provider API", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     const payment = seedPayment({
       provider: "mercadopago",
       method: null,
@@ -965,7 +969,7 @@ describe("POST /api/payments/webhook/:provider", () => {
   });
 
   it("rejects a notification that under-reports the amount (tamper attempt)", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     const payment = seedPayment({
       provider: "mercadopago",
       method: null,
@@ -993,7 +997,7 @@ describe("POST /api/payments/webhook/:provider", () => {
   });
 
   it("ignores a payment id that belongs to no known order", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     const { providerCalls } = stubProvider({ id: 12345, status: "approved", transaction_amount: 29 });
 
     const res = await call(app.url, "/api/payments/webhook/mercadopago", {
@@ -1014,7 +1018,7 @@ describe("POST /api/payments/webhook/:provider", () => {
   });
 
   it("ignores event types that are not payments", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     const { providerCalls } = stubProvider({ id: 1, status: "approved", transaction_amount: 29 });
 
     const res = await call(app.url, "/api/payments/webhook/mercadopago", {
@@ -1029,7 +1033,7 @@ describe("POST /api/payments/webhook/:provider", () => {
   });
 
   it("asks the provider to retry when its API cannot be reached", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     seedPayment({ provider: "mercadopago", method: null, providerRef: "888" });
 
     const realFetch = globalThis.fetch;
@@ -1149,7 +1153,7 @@ function seedSubscription(overrides: Record<string, any> = {}) {
 
 describe("POST /api/payments/checkout - recurring subscriptions", () => {
   it("creates a subscription (not a one-off charge) when the provider can recur", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
 
     const { providerCalls } = stubProvider({
       id: "pre-1",
@@ -1181,7 +1185,7 @@ describe("POST /api/payments/checkout - recurring subscriptions", () => {
   });
 
   it("prices an annual subscription from the catalogue", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     stubProvider({
       id: "pre-2",
       status: "pending",
@@ -1201,7 +1205,7 @@ describe("POST /api/payments/checkout - recurring subscriptions", () => {
   });
 
   it("still allows a deliberate one-off payment", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     stubProvider({
       id: "pref-1",
       init_point: "https://www.mercadopago.com.pe/checkout/v1/redirect?pref_id=1",
@@ -1248,7 +1252,7 @@ describe("POST /api/payments/checkout - recurring subscriptions", () => {
  */
 describe("POST /api/payments/checkout - changing plan or period", () => {
   it("stops the previous automatic charge when the same plan is bought for another period", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     const previous = seedSubscription({
       planId: "esencial",
       period: "monthly",
@@ -1275,7 +1279,7 @@ describe("POST /api/payments/checkout - changing plan or period", () => {
   });
 
   it("also stops it when the customer moves up to another plan", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     const previous = seedSubscription({
       planId: "esencial",
       period: "monthly",
@@ -1299,7 +1303,7 @@ describe("POST /api/payments/checkout - changing plan or period", () => {
   it("leaves the agreement alone when the exact plan and period is bought again", async () => {
     // A deliberate early renewal: `applyPaidPeriod` stacks the new period on top,
     // so cancelling the agreement here would take away the customer's auto-renewal.
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     const previous = seedSubscription({
       planId: "esencial",
       period: "monthly",
@@ -1327,7 +1331,7 @@ describe("POST /api/payments/checkout - changing plan or period", () => {
   it("never ends a running trial by cancelling the agreement it replaces", async () => {
     // A customer who authorises an automatic charge during the trial keeps the
     // remaining free days; changing plan inside that window must not consume them.
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     h.state.businessById[A].subscriptionStatus = "trialing";
     h.state.businessById[A].trialEndsAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
     seedSubscription({
@@ -1362,7 +1366,7 @@ describe("subscription webhooks", () => {
   };
 
   it("activates the plan when the customer authorises the recurring charge", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     const subscription = seedSubscription({ reference: "LD-SUB1", providerRef: "pre-1" });
     stubProviderByPath({ preapproval: authorizedPreapproval });
 
@@ -1385,7 +1389,7 @@ describe("subscription webhooks", () => {
   });
 
   it("books the first charge and extends the paid period", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     const subscription = seedSubscription({ reference: "LD-SUB1", providerRef: "pre-1" });
     stubProviderByPath({
       authorizedPayment: { id: "inv-1", preapproval_id: "pre-1", status: "processed", payment: { id: 555 } },
@@ -1415,7 +1419,7 @@ describe("subscription webhooks", () => {
   });
 
   it("does not extend the period twice when the same charge is notified again", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     seedSubscription({ reference: "LD-SUB1", providerRef: "pre-1" });
     stubProviderByPath({
       authorizedPayment: { id: "inv-1", preapproval_id: "pre-1", status: "processed", payment: { id: 555 } },
@@ -1446,7 +1450,7 @@ describe("subscription webhooks", () => {
   });
 
   it("links a renewal notified only on the payment topic, through external_reference", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     const subscription = seedSubscription({ reference: "LD-SUB1", providerRef: "pre-1" });
     stubProviderByPath({
       payment: { id: 777, status: "approved", transaction_amount: 29, external_reference: "LD-SUB1" },
@@ -1465,7 +1469,7 @@ describe("subscription webhooks", () => {
   });
 
   it("marks the subscription paused (past_due) without touching the plan", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     const subscription = seedSubscription({ reference: "LD-SUB1", providerRef: "pre-1" });
     stubProviderByPath({ preapproval: { ...authorizedPreapproval, status: "paused" } });
 
@@ -1520,7 +1524,7 @@ describe("subscription endpoints", () => {
   });
 
   it("stops future charges and reports the cancellation", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     const subscription = seedSubscription({
       reference: "LD-SUB1",
       providerRef: "pre-1",
@@ -1570,7 +1574,7 @@ describe("subscription endpoints", () => {
   });
 
   it("is idempotent: cancelling twice does not call the provider again", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     seedSubscription({ providerRef: "pre-1", status: "cancelled" });
     const { providerCalls } = stubProviderByPath({ preapproval: { id: "pre-1", status: "cancelled" } });
 
@@ -1612,7 +1616,7 @@ describe("subscriptions bought outside the app (panel plan link)", () => {
     call(app.url, "/api/payments/webhook/mercadopago", { method: "POST", userId: null, body });
 
   it("adopts it for the account that owns the payer email and activates the plan", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     stubProviderByPath({ preapproval: planPreapproval });
 
     const res = await notify({ type: "subscription_preapproval", data: { id: "pre-plan-1" } });
@@ -1633,7 +1637,7 @@ describe("subscriptions bought outside the app (panel plan link)", () => {
   });
 
   it("recognises the plan from the price when the panel code is missing", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     stubProviderByPath({
       preapproval: { ...planPreapproval, external_reference: "algo-inesperado" },
     });
@@ -1645,7 +1649,7 @@ describe("subscriptions bought outside the app (panel plan link)", () => {
   });
 
   it("adopts it only once, however many notifications arrive", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     stubProviderByPath({ preapproval: planPreapproval });
 
     await notify({ type: "subscription_preapproval", data: { id: "pre-plan-1" } });
@@ -1655,7 +1659,7 @@ describe("subscriptions bought outside the app (panel plan link)", () => {
   });
 
   it("refuses to guess when the purchase is not identifiable", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     stubProviderByPath({
       preapproval: {
         ...planPreapproval,
@@ -1672,7 +1676,7 @@ describe("subscriptions bought outside the app (panel plan link)", () => {
   });
 
   it("alerts the operator when the payer email belongs to no account", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     process.env.PAYMENTS_ALERT_EMAIL = "ops@librodigital.pe";
     stubProviderByPath({
       preapproval: { ...planPreapproval, payer_email: "desconocido@gmail.com" },
@@ -1690,7 +1694,7 @@ describe("subscriptions bought outside the app (panel plan link)", () => {
   });
 
   it("does not alert twice for the same stray subscription", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     process.env.PAYMENTS_ALERT_EMAIL = "ops@librodigital.pe";
     stubProviderByPath({
       preapproval: { ...planPreapproval, payer_email: "desconocido@gmail.com" },
@@ -1703,7 +1707,7 @@ describe("subscriptions bought outside the app (panel plan link)", () => {
   });
 
   it("books the first charge of an adopted subscription", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     stubProviderByPath({
       authorizedPayment: {
         id: "inv-plan-1",
@@ -1758,7 +1762,7 @@ describe("a declined payment - the way back to the customer", () => {
   };
 
   it("emails the original checkout link and the transfer data, and records why it failed", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     const payment = seedPayment({
       provider: "mercadopago",
       method: null,
@@ -1808,7 +1812,7 @@ describe("a declined payment - the way back to the customer", () => {
   });
 
   it("sends it once, however many times the provider retries the notification", async () => {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-TEST-TOKEN";
     const payment = seedPayment({
       provider: "mercadopago",
       method: null,

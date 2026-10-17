@@ -267,6 +267,10 @@ export function registerPaymentsRoutes(app: Express): void {
         business,
         userId: req.user.id,
         userEmail: req.user.email,
+        // The name is part of the antifraud payload Mercado Pago scores; the
+        // account already has it, so the checkout should not arrive anonymous.
+        userFirstName: req.user.firstName,
+        userLastName: req.user.lastName,
         providerId: provider as PaymentProviderId,
         planId: plan,
         period: period as PlanPeriod,

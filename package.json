@@ -21,7 +21,10 @@
     "db:delete-business": "node scripts/delete-business.mjs",
     "db:change-business-ruc": "node scripts/change-business-ruc.mjs",
     "db:admin": "node scripts/setup-platform-admin.mjs",
-    "email:diagnose": "node scripts/smtp-diagnose.mjs"
+    "email:diagnose": "node scripts/smtp-diagnose.mjs",
+    "mcp:login": "node scripts/mercadopago-mcp-login.mjs",
+    "mcp:call": "node scripts/mercadopago-mcp-call.mjs",
+    "mcp:smoke": "node scripts/mercadopago-mcp-smoke.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

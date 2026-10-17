@@ -38,6 +38,29 @@ import {
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
+/**
+ * Who is paying, in the terms the provider's antifraud engine scores.
+ *
+ * Mercado Pago penalises a Checkout Pro preference that arrives without
+ * `payer.name`, `payer.surname` and `payer.identification`: an anonymous payer is
+ * riskier, and a live card can come back as `cc_rejected_high_risk` even when
+ * everything else about the order is correct. We therefore send what the panel
+ * already knows - never invented data. A field that is missing stays missing
+ * instead of being filled with a placeholder.
+ */
+export interface PayerProfile {
+  /** Given name(s) of the person buying. */
+  firstName?: string;
+  lastName?: string;
+  /**
+   * Document of the buying company (RUC, 11 digits) or of the person (DNI / CE).
+   * An invalid number is dropped, never "repaired".
+   */
+  identification?: { type: string; number: string };
+  /** Contact phone as typed in the panel (`+51 938 693 848`, `938693848`). */
+  phone?: string;
+}
+
 export interface CheckoutInput {
   /** Our own code, e.g. LD-8F3A2B. Printed on receipts and bank transfers. */
   reference: string;
@@ -47,6 +70,11 @@ export interface CheckoutInput {
   period: string;
   payerEmail: string;
   businessName: string;
+  /**
+   * Name, document and phone of the buyer. Optional because a missing value is
+   * harmless (the provider then asks for it), while a wrong one is not.
+   */
+  payer?: PayerProfile;
   successUrl: string;
   failureUrl: string;
   pendingUrl: string;
@@ -232,6 +260,11 @@ export function isMercadoPagoSandbox(): boolean {
  * Note the unit change: Mercado Pago speaks in the currency's main unit
  * (soles), while we store integer céntimos everywhere else, so this is the one
  * place the /100 conversion happens.
+ *
+ * The payload is deliberately complete: `category_id` plus the payer's name,
+ * document and phone are exactly the fields Mercado Pago's integration-quality
+ * checklist asks for, and leaving them empty measurably raises the chance of a
+ * `cc_rejected_high_risk` on a real card.
  */
 export function mercadopagoPreferenceBody(input: CheckoutInput): Record<string, unknown> {
   return {
@@ -240,12 +273,15 @@ export function mercadopagoPreferenceBody(input: CheckoutInput): Record<string, 
         id: `${input.planId}-${input.period}`,
         title: input.description,
         description: `${input.businessName} · ${input.reference}`,
+        // A plan is a service, never a shipment. Without a category the
+        // antifraud engine has one more reason to distrust the preference.
+        category_id: "services",
         quantity: 1,
         currency_id: PAYMENT_CURRENCY,
         unit_price: input.amountCents / 100,
       },
     ],
-    payer: { email: input.payerEmail },
+    payer: mercadopagoPayer(input),
     external_reference: input.reference,
     statement_descriptor: "LIBRODIGITAL",
     notification_url: input.notificationUrl,
@@ -256,6 +292,127 @@ export function mercadopagoPreferenceBody(input: CheckoutInput): Record<string, 
     },
     auto_return: "approved",
   };
+}
+
+/**
+ * Builds the `payer` block from the fields we actually know.
+ *
+ * `email` is always present (it is how Mercado Pago reaches the buyer); the
+ * rest is added only when it survived normalisation, because sending a
+ * malformed document makes the provider reject the whole preference.
+ */
+export function mercadopagoPayer(
+  input: Pick<CheckoutInput, "payerEmail" | "payer">,
+): Record<string, unknown> {
+  const payer: Record<string, unknown> = { email: input.payerEmail };
+
+  const name = input.payer?.firstName?.trim();
+  const surname = input.payer?.lastName?.trim();
+  if (name) {
+    payer.name = name;
+  }
+  if (surname) {
+    payer.surname = surname;
+  }
+
+  const identification = normalizeMercadoPagoIdentification(input.payer?.identification);
+  if (identification) {
+    payer.identification = identification;
+  }
+
+  const phone = normalizeMercadoPagoPhone(input.payer?.phone);
+  if (phone) {
+    payer.phone = phone;
+  }
+
+  return payer;
+}
+
+/**
+ * Mercado Pago's documents in Peru: RUC (11 digits, companies), DNI (8, people)
+ * and CE (9-12, foreign residents).
+ *
+ * A document whose shape does not match its type is DROPPED, not "corrected":
+ * the provider validates it and answers with a 400 that is much harder to
+ * diagnose than simply not sending it.
+ */
+export function normalizeMercadoPagoIdentification(
+  identification?: { type?: unknown; number?: unknown } | null,
+): { type: string; number: string } | undefined {
+  if (!identification) {
+    return undefined;
+  }
+
+  const type = String(identification.type ?? "").trim().toUpperCase();
+  // Punctuation is common in what people type ("10-411592-982", "004020253").
+  const number = String(identification.number ?? "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+
+  switch (type) {
+    case "RUC":
+      return /^\d{11}$/.test(number) ? { type, number } : undefined;
+    case "DNI":
+      return /^\d{8}$/.test(number) ? { type, number } : undefined;
+    case "CE":
+      return /^[0-9A-Z]{9,12}$/.test(number) ? { type, number } : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * `payer.phone` is `{ area_code, number }`, not a free-text string.
+ *
+ * The panel stores the phone as it was typed, so this strips the punctuation and
+ * the country code. Only a nine-digit mobile survives: in Peru that is the
+ * number Mercado Pago (and Yape) can validate, and a landline without its area
+ * code would be sent as misleading data - worse than sending nothing.
+ */
+export function normalizeMercadoPagoPhone(
+  phone?: string | null,
+): { area_code: string; number: string } | undefined {
+  const digits = String(phone ?? "").replace(/\D/g, "");
+  // "+51 938 693 848" -> "51938693848" -> "938693848".
+  const national = digits.startsWith("51") && digits.length > 9 ? digits.slice(2) : digits;
+
+  if (!/^9\d{8}$/.test(national)) {
+    return undefined;
+  }
+  return { area_code: "51", number: national };
+}
+
+/**
+ * Which address is sent as `payer.email`.
+ *
+ * Sandbox is the one place where the customer's real email actively breaks the
+ * test: Mercado Pago only approves test cards for a Mercado Pago **test buyer**
+ * (`test_user_…@testuser.com`), and a real address - especially the seller's own
+ * - makes the sandbox reject the card. `MERCADOPAGO_TEST_PAYER_EMAIL` therefore
+ * overrides it while `MERCADOPAGO_SANDBOX=true`; in live mode it is ignored,
+ * because there the real payer's address is what produces a valid receipt.
+ */
+export function resolveMercadoPagoPayerEmail(input: {
+  payerEmail: string;
+  sandbox: boolean;
+  testPayerEmail?: string;
+}): string {
+  const testPayer = (input.testPayerEmail ?? "").trim();
+  if (input.sandbox && testPayer) {
+    return testPayer;
+  }
+  return input.payerEmail;
+}
+
+/**
+ * `TEST-…` are the app-level sandbox credentials.
+ *
+ * Mercado Pago's `/preapproval` (Subscriptions) endpoint does not accept them:
+ * recurring billing requires the `APP_USR-…` token of a dedicated test *seller*
+ * paired with a test buyer. Claiming a capability we cannot use would fail the
+ * customer at the last step with the opaque `{"message":"User bad request"}`
+ * the provider returns, so the checkout offers a single period instead.
+ */
+export function isMercadoPagoTestToken(token: string | undefined): boolean {
+  return /^TEST-/i.test((token ?? "").trim());
 }
 
 /** Extracts the preference id and the checkout URL from the response. */
@@ -729,11 +886,36 @@ class MercadoPagoGateway implements PaymentGateway {
     return Boolean(readEnv("MERCADOPAGO_ACCESS_TOKEN"));
   }
 
+  /**
+   * A sandbox `TEST-` token cannot create a preapproval, so advertising the
+   * recurring rail would only fail the customer at the last step. The live
+   * `APP_USR-` token (and a test *seller* token) keeps it.
+   */
+  supportsRecurring(): boolean {
+    return !isMercadoPagoTestToken(readEnv("MERCADOPAGO_ACCESS_TOKEN"));
+  }
+
+  /**
+   * Swaps the payer email for the configured test buyer while in sandbox.
+   *
+   * Every other field is left untouched: in live mode this is a no-op, so a real
+   * customer's receipt keeps going to their own address.
+   */
+  private withSandboxPayerEmail<T extends { payerEmail: string }>(input: T): T {
+    const payerEmail = resolveMercadoPagoPayerEmail({
+      payerEmail: input.payerEmail,
+      sandbox: isMercadoPagoSandbox(),
+      testPayerEmail: readEnv("MERCADOPAGO_TEST_PAYER_EMAIL"),
+    });
+
+    return payerEmail === input.payerEmail ? input : { ...input, payerEmail };
+  }
+
   async createCheckout(input: CheckoutInput): Promise<CheckoutResult> {
     const token = requireEnv("MERCADOPAGO_ACCESS_TOKEN");
     const json = await postJson(
       `${MERCADOPAGO_API}/checkout/preferences`,
-      mercadopagoPreferenceBody(input),
+      mercadopagoPreferenceBody(this.withSandboxPayerEmail(input)),
       { Authorization: `Bearer ${token}` },
     );
 
@@ -770,10 +952,6 @@ class MercadoPagoGateway implements PaymentGateway {
     return parseMercadoPagoPayment(first);
   }
 
-  supportsRecurring(): boolean {
-    return true;
-  }
-
   /**
    * Creates a subscription (preapproval). The customer is not charged yet: the
    * response's `init_point` is where they authorise the recurring charge, and
@@ -781,9 +959,20 @@ class MercadoPagoGateway implements PaymentGateway {
    */
   async createSubscription(input: SubscriptionCheckoutInput): Promise<SubscriptionResult> {
     const token = requireEnv("MERCADOPAGO_ACCESS_TOKEN");
+
+    // Defence in depth: `supportsRecurring()` already hides the rail, but a
+    // direct call must fail with an explanation instead of the provider's
+    // cryptic 400 "User bad request".
+    if (isMercadoPagoTestToken(token)) {
+      throw new Error(
+        "Las credenciales de prueba (TEST-) no permiten cobro automático en Mercado Pago. " +
+          "Use el pago único o las credenciales APP_USR de un vendedor de prueba.",
+      );
+    }
+
     const json = await postJson(
       `${MERCADOPAGO_API}/preapproval`,
-      mercadopagoPreapprovalBody(input),
+      mercadopagoPreapprovalBody(this.withSandboxPayerEmail(input)),
       { Authorization: `Bearer ${token}` },
     );
 

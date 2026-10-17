@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import type { Business } from "@shared/schema";
-import { applyPaidPeriod, newPaymentReference } from "./paymentService";
+import { applyPaidPeriod, buildPayerProfile, newPaymentReference } from "./paymentService";
 
 /**
  * Billing arithmetic tests (Phase 2.7).
@@ -32,6 +32,31 @@ const business = (overrides: Partial<Business> = {}): Business =>
   }) as Business;
 
 const NOW = new Date("2026-06-15T12:00:00.000Z");
+
+/**
+ * The payer profile is the part of the checkout Mercado Pago's antifraud engine
+ * reads. It must carry what the customer already told us and nothing invented.
+ */
+describe("buildPayerProfile", () => {
+  it("sends the account name plus the company RUC and phone", () => {
+    expect(buildPayerProfile(business({ phone: "938693848" }), {
+      userFirstName: "Ana",
+      userLastName: "Sotomayor",
+    })).toEqual({
+      firstName: "Ana",
+      lastName: "Sotomayor",
+      identification: { type: "RUC", number: "12345678901" },
+      phone: "938693848",
+    });
+  });
+
+  it("leaves out what the panel does not know instead of inventing it", () => {
+    const payer = buildPayerProfile(business({ phone: null }), { userFirstName: "Ana" });
+    expect(payer.phone).toBeUndefined();
+    expect(payer.lastName).toBeUndefined();
+    expect(payer.identification).toEqual({ type: "RUC", number: "12345678901" });
+  });
+});
 
 describe("applyPaidPeriod", () => {
   it("gives one month from today to an active business with no period yet", () => {

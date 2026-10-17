@@ -15,7 +15,6 @@ import {
   isSubscriptionLive,
   isSubscriptionStatus,
   paymentFailureHint,
-  providerSupportsRecurring,
   referenceSuffix,
   resolvePlanFromAmount,
   resolvePlanFromCode,
@@ -42,6 +41,7 @@ import { getAlertEmail, getIdentity } from "./platformSettingsService";
 import {
   getGateway,
   type CheckoutInput,
+  type PayerProfile,
   type ProviderStatus,
   type SubscriptionCheckoutInput,
   type SubscriptionState,
@@ -167,20 +167,53 @@ export interface PaymentProviderOption extends PaymentProviderDefinition {
  * failing at the last step.
  */
 export function paymentProviderOptions(): PaymentProviderOption[] {
-  return availablePaymentProviders().map((provider) => ({
-    ...provider,
-    configured: getGateway(provider.id).isConfigured(),
-  }));
+  return availablePaymentProviders().map((provider) => {
+    const gateway = getGateway(provider.id);
+    return {
+      ...provider,
+      // The capability depends on the credentials actually in use: Mercado Pago's
+      // sandbox `TEST-` token cannot create preapprovals even though the provider
+      // can, so the checkout must not offer a recurring charge it cannot honour.
+      supportsRecurring: gateway.supportsRecurring(),
+      configured: gateway.isConfigured(),
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
 // 1. Start a checkout
 // ---------------------------------------------------------------------------
 
+/**
+ * What the provider's antifraud engine is told about the buyer.
+ *
+ * Mercado Pago scores a preference with an empty `payer` block as riskier, and a
+ * live card can be refused (`cc_rejected_high_risk`) even when the order is
+ * otherwise correct. Everything here comes from data the customer already gave
+ * us - the account's name, the company's RUC and phone - and the gateway drops
+ * anything that is not valid instead of inventing it.
+ */
+export function buildPayerProfile(
+  business: Pick<Business, "ruc" | "phone">,
+  input: { userFirstName?: string; userLastName?: string },
+): PayerProfile {
+  return {
+    firstName: input.userFirstName,
+    lastName: input.userLastName,
+    // A company buys with its RUC: that is also the document it needs on the
+    // receipt. A malformed RUC is discarded by the gateway, never sent.
+    identification: { type: "RUC", number: business.ruc },
+    phone: business.phone ?? undefined,
+  };
+}
+
 export interface StartPaymentInput {
   business: Business;
   userId: string;
   userEmail: string;
+  /** Name of the person paying, when the caller knows it (the antifraud fields). */
+  userFirstName?: string;
+  userLastName?: string;
   providerId: PaymentProviderId;
   planId: string;
   period: PlanPeriod;
@@ -269,6 +302,7 @@ export async function startPayment(input: StartPaymentInput): Promise<StartPayme
     period: input.period,
     payerEmail: input.userEmail,
     businessName: input.business.businessName,
+    payer: buildPayerProfile(input.business, input),
     successUrl: `${base}/pagos?pago=ok&ref=${encodeURIComponent(reference)}`,
     failureUrl: `${base}/pagos?pago=error&ref=${encodeURIComponent(reference)}`,
     pendingUrl: `${base}/pagos?pago=pendiente&ref=${encodeURIComponent(reference)}`,
@@ -307,6 +341,9 @@ export interface StartSubscriptionInput {
   business: Business;
   userId: string;
   userEmail: string;
+  /** Name of the person paying, when the caller knows it (the antifraud fields). */
+  userFirstName?: string;
+  userLastName?: string;
   providerId: PaymentProviderId;
   planId: string;
   period: PlanPeriod;
@@ -401,6 +438,9 @@ export interface StartCheckoutInput {
   business: Business;
   userId: string;
   userEmail: string;
+  /** Name of the person paying, when the caller knows it (the antifraud fields). */
+  userFirstName?: string;
+  userLastName?: string;
   providerId: PaymentProviderId;
   planId: string;
   period: PlanPeriod;
@@ -418,10 +458,11 @@ export type StartCheckoutResult =
 /**
  * The single call the checkout screen makes.
  *
- * A SaaS wants recurring billing, so when the provider supports it the default
- * is a subscription. `one_time` remains available for the exceptions (a
- * customer who insists on paying once, or a provider without the recurring
- * rail, or the offline bank transfer).
+ * A SaaS wants recurring billing, so when the provider - with the credentials
+ * actually loaded - supports it, the default is a subscription. `one_time`
+ * remains available for the exceptions (a customer who insists on paying once, a
+ * provider without the recurring rail, the offline bank transfer, or Mercado
+ * Pago's `TEST-` sandbox token, which cannot create preapprovals).
  *
  * Discount codes are resolved here, once, against the price we are about to charge:
  * the result is stored on the payment, so what the customer was promised and what we
@@ -429,7 +470,7 @@ export type StartCheckoutResult =
  */
 export async function startCheckout(input: StartCheckoutInput): Promise<StartCheckoutResult> {
   const wantsRecurring =
-    input.mode !== "one_time" && providerSupportsRecurring(input.providerId);
+    input.mode !== "one_time" && getGateway(input.providerId).supportsRecurring();
 
   const code = (input.discountCode ?? "").trim();
 

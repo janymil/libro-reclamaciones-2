@@ -10,12 +10,15 @@ import {
   mapMercadoPagoSubscriptionStatus,
   mercadopagoPreapprovalBody,
   mercadopagoPreferenceBody,
+  normalizeMercadoPagoIdentification,
+  normalizeMercadoPagoPhone,
   parseMercadoPagoAuthorizedPayment,
   parseMercadoPagoNotification,
   parseMercadoPagoPayment,
   parseMercadoPagoPreapproval,
   parseMercadoPagoPreference,
   periodFromRecurrence,
+  resolveMercadoPagoPayerEmail,
   type CheckoutInput,
   type SubscriptionCheckoutInput,
 } from "./paymentGateway";
@@ -69,6 +72,130 @@ describe("mercadopagoPreferenceBody", () => {
     const body = mercadopagoPreferenceBody({ ...input, amountCents: 6900 }) as any;
     expect(body.items[0].unit_price).toBe(69);
     expect(Number.isInteger(body.items[0].unit_price)).toBe(true);
+  });
+
+  it("declares the item category the antifraud checklist asks for", () => {
+    // An empty `category_id` is one of the reasons a live card can come back as
+    // cc_rejected_high_risk even when the order itself is correct.
+    expect((mercadopagoPreferenceBody(input) as any).items[0].category_id).toBe("services");
+  });
+});
+
+/**
+ * The payer block is what Mercado Pago's risk engine scores. These tests pin the
+ * contract: send everything the panel knows, never invent the rest, and never
+ * send a document the provider would reject.
+ */
+describe("mercadopagoPreferenceBody - payer profile", () => {
+  const withPayer: CheckoutInput = {
+    ...input,
+    payer: {
+      firstName: "Ana",
+      lastName: "Sotomayor",
+      identification: { type: "RUC", number: "10411592982" },
+      phone: "+51 938 693 848",
+    },
+  };
+
+  it("sends the name, surname, RUC and phone of the buyer", () => {
+    const payer = (mercadopagoPreferenceBody(withPayer) as any).payer;
+    expect(payer.email).toBe("admin@empresa.pe");
+    expect(payer.name).toBe("Ana");
+    expect(payer.surname).toBe("Sotomayor");
+    expect(payer.identification).toEqual({ type: "RUC", number: "10411592982" });
+    expect(payer.phone).toEqual({ area_code: "51", number: "938693848" });
+  });
+
+  it("keeps the email-only payload when nothing else is known", () => {
+    const payer = (mercadopagoPreferenceBody(input) as any).payer;
+    expect(payer).toEqual({ email: "admin@empresa.pe" });
+  });
+
+  it("drops empty strings instead of sending anonymous fields", () => {
+    const payer = (mercadopagoPreferenceBody({
+      ...input,
+      payer: { firstName: "  ", lastName: "", phone: "" },
+    }) as any).payer;
+    expect(payer).toEqual({ email: "admin@empresa.pe" });
+  });
+
+  it("drops an invalid RUC rather than letting the provider reject the preference", () => {
+    const payer = (mercadopagoPreferenceBody({
+      ...input,
+      payer: { identification: { type: "RUC", number: "123" } },
+    }) as any).payer;
+    expect(payer).not.toHaveProperty("identification");
+  });
+});
+
+describe("normalizeMercadoPagoIdentification", () => {
+  it("accepts a Peruvian RUC, DNI and CE", () => {
+    expect(normalizeMercadoPagoIdentification({ type: "RUC", number: "10411592982" }))
+      .toEqual({ type: "RUC", number: "10411592982" });
+    expect(normalizeMercadoPagoIdentification({ type: "DNI", number: "41159298" }))
+      .toEqual({ type: "DNI", number: "41159298" });
+    expect(normalizeMercadoPagoIdentification({ type: "CE", number: "004020253" }))
+      .toEqual({ type: "CE", number: "004020253" });
+  });
+
+  it("strips the punctuation people type", () => {
+    expect(normalizeMercadoPagoIdentification({ type: "ruc", number: "10-411592-982" }))
+      .toEqual({ type: "RUC", number: "10411592982" });
+  });
+
+  it("refuses a number that does not match its document type", () => {
+    expect(normalizeMercadoPagoIdentification({ type: "RUC", number: "41159298" })).toBeUndefined();
+    expect(normalizeMercadoPagoIdentification({ type: "DNI", number: "10411592982" })).toBeUndefined();
+    expect(normalizeMercadoPagoIdentification({ type: "PASSPORT", number: "12345678" })).toBeUndefined();
+    expect(normalizeMercadoPagoIdentification(undefined)).toBeUndefined();
+  });
+});
+
+describe("normalizeMercadoPagoPhone", () => {
+  it("turns the typed mobile into area code + national number", () => {
+    expect(normalizeMercadoPagoPhone("938693848")).toEqual({ area_code: "51", number: "938693848" });
+    expect(normalizeMercadoPagoPhone("+51 938 693 848")).toEqual({ area_code: "51", number: "938693848" });
+    expect(normalizeMercadoPagoPhone("987-654-321")).toEqual({ area_code: "51", number: "987654321" });
+  });
+
+  it("refuses what cannot be a Peruvian mobile (a landline is worse than none)", () => {
+    expect(normalizeMercadoPagoPhone("")).toBeUndefined();
+    expect(normalizeMercadoPagoPhone(null)).toBeUndefined();
+    expect(normalizeMercadoPagoPhone("12345")).toBeUndefined();
+    expect(normalizeMercadoPagoPhone("(01) 421-1234")).toBeUndefined();
+    expect(normalizeMercadoPagoPhone("+1 415 555 2671")).toBeUndefined();
+  });
+});
+
+describe("resolveMercadoPagoPayerEmail", () => {
+  const testBuyer = "test_user_123456@testuser.com";
+
+  it("uses the configured test buyer while in sandbox", () => {
+    // A real email (especially the seller's own) makes Mercado Pago reject the
+    // test card, so the sandbox must speak as a test buyer.
+    expect(resolveMercadoPagoPayerEmail({
+      payerEmail: "dueno@empresa.pe",
+      sandbox: true,
+      testPayerEmail: testBuyer,
+    })).toBe(testBuyer);
+  });
+
+  it("keeps the customer's own email in live mode", () => {
+    expect(resolveMercadoPagoPayerEmail({
+      payerEmail: "dueno@empresa.pe",
+      sandbox: false,
+      testPayerEmail: testBuyer,
+    })).toBe("dueno@empresa.pe");
+  });
+
+  it("falls back to the customer's email when nothing is configured", () => {
+    expect(resolveMercadoPagoPayerEmail({ payerEmail: "dueno@empresa.pe", sandbox: true }))
+      .toBe("dueno@empresa.pe");
+    expect(resolveMercadoPagoPayerEmail({
+      payerEmail: "dueno@empresa.pe",
+      sandbox: true,
+      testPayerEmail: "   ",
+    })).toBe("dueno@empresa.pe");
   });
 });
 
@@ -516,7 +643,12 @@ describe("parseMercadoPagoAuthorizedPayment", () => {
 });
 
 describe("recurring capability of the gateway registry", () => {
+  afterEach(() => {
+    delete process.env.MERCADOPAGO_ACCESS_TOKEN;
+  });
+
   it("only claims recurring support for Mercado Pago", () => {
+    delete process.env.MERCADOPAGO_ACCESS_TOKEN;
     expect(getGateway("mercadopago").supportsRecurring()).toBe(true);
     expect(getGateway("manual").supportsRecurring()).toBe(false);
     expect(getGateway("culqi").supportsRecurring()).toBe(false);
@@ -524,8 +656,26 @@ describe("recurring capability of the gateway registry", () => {
     expect(getGateway("izipay").supportsRecurring()).toBe(false);
   });
 
+  it("stops advertising the recurring rail with sandbox TEST- credentials", () => {
+    // /preapproval answers `{"message":"User bad request"}` for TEST- tokens: the
+    // checkout must offer a single period rather than a dead end.
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-1234-5678-abcdef";
+    expect(getGateway("mercadopago").supportsRecurring()).toBe(false);
+  });
+
+  it("keeps the recurring rail with production APP_USR- credentials", () => {
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "APP_USR-1234-5678-abcdef";
+    expect(getGateway("mercadopago").supportsRecurring()).toBe(true);
+  });
+
   it("refuses to create a subscription with a provider that cannot recur", async () => {
     await expect(getGateway("manual").createSubscription(subscriptionInput))
       .rejects.toThrow(/cobro automático/i);
+  });
+
+  it("explains why a TEST- token cannot create a subscription instead of returning the provider's 400", async () => {
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-1234-5678-abcdef";
+    await expect(getGateway("mercadopago").createSubscription(subscriptionInput))
+      .rejects.toThrow(/credenciales de prueba/i);
   });
 });
