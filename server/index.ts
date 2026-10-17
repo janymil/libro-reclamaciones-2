@@ -1,4 +1,5 @@
 import "./env";
+import type { Server } from "node:http";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
@@ -8,6 +9,56 @@ import { storage } from "./storage";
 import { startScheduler } from "./services/scheduler";
 import { readTransferDetails } from "./services/paymentSettingsService";
 import { getAlertEmail, isFreePlanChangeAllowed } from "./services/platformSettingsService";
+
+/**
+ * Binds the port on BOTH address families.
+ *
+ * Binding `0.0.0.0` (IPv4 only) looks harmless and is not: Cloudflare Tunnel -
+ * which publishes https://dev.librodigital.pe for Mercado Pago - dials
+ * `localhost`, and on Windows that resolves to `[::1]` first. Every request to the
+ * public hostname then died with 502 "actively refused", including the payment
+ * webhook and the page the customer is redirected to after paying, so a payment
+ * could never activate a plan.
+ *
+ * `::` is dual-stack (Node sets `ipv6Only: false`), so IPv4 keeps working. Hosts
+ * without IPv6 reject the bind with EADDRNOTAVAIL/EAFNOSUPPORT/EINVAL, and the
+ * second attempt keeps them running exactly as before.
+ */
+async function listenDualStack(server: Server, port: number): Promise<string> {
+  const hosts = ["::", "0.0.0.0"];
+
+  for (const host of hosts) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: NodeJS.ErrnoException) => {
+          server.off("listening", onListening);
+          reject(error);
+        };
+        const onListening = () => {
+          server.off("error", onError);
+          resolve();
+        };
+
+        server.once("error", onError);
+        server.once("listening", onListening);
+
+        // SO_REUSEPORT is not supported on Windows (throws ENOTSUP), so only enable
+        // it elsewhere.
+        server.listen({ port, host, reusePort: process.platform !== "win32" });
+      });
+      return host;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EADDRNOTAVAIL" && code !== "EAFNOSUPPORT" && code !== "EINVAL") {
+        throw error;
+      }
+      log(`[server] ${host}:${port} unavailable (${code}); trying the next address family`);
+    }
+  }
+
+  throw new Error(`Could not bind port ${port} on IPv6 or IPv4`);
+}
+
 
 const app = express();
 // The raw body is kept so webhook signatures can be verified (WhatsApp Cloud
@@ -148,12 +199,6 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    // SO_REUSEPORT is not supported on Windows (throws ENOTSUP), so only enable it elsewhere
-    reusePort: process.platform !== "win32",
-  }, () => {
-    log(`serving on port ${port}`);
-  });
+  const host = await listenDualStack(server, port);
+  log(`serving on port ${port} (${host})`);
 })();

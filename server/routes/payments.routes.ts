@@ -5,6 +5,7 @@ import {
   PAYMENT_CURRENCY,
   PAYMENT_STATUS_LABELS,
   availablePaymentProviders,
+  isManualPaymentMethod,
   isPaymentProviderId,
   isPaymentStatus,
   isPlanPeriod,
@@ -18,8 +19,10 @@ import { storage } from "../storage";
 import { requireAdmin, requireAuth, requireNonDemo, requirePlatformAdmin } from "../middleware/requireAuth";
 import { paymentWebhookLimiter } from "../middleware/rateLimits";
 import {
+  PaymentRecoveryError,
   cancelSubscriptionForBusiness,
   confirmManualPayment,
+  confirmOfflinePayment,
   getActiveSubscription,
   handleProviderWebhook,
   listPayments,
@@ -27,6 +30,8 @@ import {
   paymentProviderOptions,
   refreshPayment,
   refreshSubscription,
+  registerManualPayment,
+  sendPaymentRecoveryEmail,
   startCheckout,
 } from "../services/paymentService";
 import { evaluateDiscountForCheckout, DiscountRejectedError } from "../services/discountService";
@@ -70,6 +75,10 @@ export function toPublicPayment(payment: Payment) {
     redirectUrl: payment.redirectUrl,
     failureReason: payment.failureReason,
     paidAt: payment.paidAt,
+    // What the customer has been told, so the console can show it and avoid
+    // sending the same reminder twice by accident.
+    recoveryEmailSentAt: payment.recoveryEmailSentAt,
+    recoveryEmailCount: payment.recoveryEmailCount,
     createdAt: payment.createdAt,
   };
 }
@@ -463,6 +472,146 @@ export function registerPaymentsRoutes(app: Express): void {
       }
       console.error('Error confirming payment:', error);
       res.status(500).json({ message: "No se pudo confirmar el pago" });
+    }
+  });
+
+  // ---- Recovering an unpaid order (platform staff) --------------------------
+
+  /**
+   * Resends the "finish your payment" email.
+   *
+   * The same message the webhook sends automatically when a charge is declined:
+   * the checkout link the customer already used, our own page as a fallback, and
+   * the transfer/Yape data for the same `LD-XXXXXX`. Platform staff only - a
+   * customer triggering mails to arbitrary accounts would be an abuse vector.
+   */
+  app.post('/api/payments/:id/payment-link', requireAuth, requireNonDemo, requirePlatformAdmin, async (req: any, res) => {
+    try {
+      const outcome = await sendPaymentRecoveryEmail(req.params.id);
+      if (!outcome.sent) {
+        return res.status(400).json({ message: "No se pudo enviar el enlace de pago." });
+      }
+
+      res.json({
+        message: `Enlace de pago enviado a ${outcome.sentTo}.`,
+        sentTo: outcome.sentTo,
+        payment: toPublicPayment(outcome.payment),
+      });
+    } catch (error) {
+      if (error instanceof PaymentRecoveryError) {
+        return res.status(400).json({ message: error.message });
+      }
+      console.error('Error sending the payment link:', error);
+      res.status(502).json({ message: "No se pudo enviar el correo con el enlace de pago" });
+    }
+  });
+
+  const confirmOfflineSchema = z.object({
+    method: z.string().trim(),
+    note: z.string().trim().max(500).nullish(),
+  });
+
+  /**
+   * The money arrived by transfer / Yape instead of the card checkout.
+   *
+   * Works on ANY provider row: the Mercado Pago order the customer did not finish
+   * is the one they quote when they transfer, so confirming it is what pairs the
+   * deposit with the order. The plan is applied through the same single write path
+   * as a provider-approved charge (and the receipt is sent).
+   */
+  app.post('/api/payments/:id/confirm-offline', requireAuth, requireNonDemo, requirePlatformAdmin, async (req: any, res) => {
+    const parsed = confirmOfflineSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Datos inválidos" });
+    }
+    if (!isManualPaymentMethod(parsed.data.method)) {
+      return res.status(400).json({
+        message: "Elija transferencia, Yape, Plin o efectivo: una tarjeta no se confirma a mano.",
+      });
+    }
+
+    try {
+      const confirmed = await confirmOfflinePayment(req.params.id, req.user.id, {
+        method: parsed.data.method,
+        note: parsed.data.note ?? null,
+      });
+      if (!confirmed) {
+        return res.status(404).json({ message: "Pago no encontrado" });
+      }
+
+      res.json({
+        message: `Pago ${confirmed.reference} confirmado como recibido. El plan quedó activo.`,
+        payment: toPublicPayment(confirmed),
+      });
+    } catch (error) {
+      console.error('Error confirming an offline payment:', error);
+      res.status(500).json({
+        message: error instanceof Error ? error.message : "No se pudo confirmar el pago",
+      });
+    }
+  });
+
+  const registerManualSchema = z.object({
+    businessId: z.string().uuid(),
+    planId: z.string().trim(),
+    period: z.string().trim(),
+    method: z.string().trim(),
+    /** Céntimos. Omitted = the console's price for the plan. */
+    amountCents: z.number().int().positive().max(100_000_000).optional(),
+    note: z.string().trim().max(500).nullish(),
+  });
+
+  /**
+   * Records a payment with no order behind it (the customer paid "por fuera", or
+   * never started a checkout) and applies the plan in the same step.
+   *
+   * Without this, an operator either invented a plan change with no money trail or
+   * asked the customer to run a checkout for a payment already received. The row it
+   * creates carries the reference, the method, the amount and who confirmed it, so
+   * the ledger and the receipt stay complete.
+   */
+  app.post('/api/payments/manual', requireAuth, requireNonDemo, requirePlatformAdmin, async (req: any, res) => {
+    const parsed = registerManualSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Datos inválidos" });
+    }
+    if (!isPlanId(parsed.data.planId)) {
+      return res.status(400).json({ message: "Plan inválido" });
+    }
+    if (!isPlanPeriod(parsed.data.period)) {
+      return res.status(400).json({ message: "Periodo inválido" });
+    }
+    if (!isManualPaymentMethod(parsed.data.method)) {
+      return res.status(400).json({
+        message: "Elija transferencia, Yape, Plin o efectivo.",
+      });
+    }
+
+    try {
+      const payment = await registerManualPayment({
+        businessId: parsed.data.businessId,
+        adminUserId: req.user.id,
+        planId: parsed.data.planId,
+        period: parsed.data.period,
+        method: parsed.data.method,
+        amountCents: parsed.data.amountCents,
+        note: parsed.data.note ?? null,
+      });
+
+      res.status(201).json({
+        message: `Pago ${payment.reference} registrado. El plan quedó activo.`,
+        payment: toPublicPayment(payment),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message === "Cliente no encontrado") {
+        return res.status(404).json({ message });
+      }
+      if (/Plan inválido|Elija un método|monto debe ser mayor/i.test(message)) {
+        return res.status(400).json({ message });
+      }
+      console.error('Error registering a manual payment:', error);
+      res.status(500).json({ message: "No se pudo registrar el pago" });
     }
   });
 }

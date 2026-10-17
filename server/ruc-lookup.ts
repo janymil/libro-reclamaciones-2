@@ -255,6 +255,17 @@ type FailureKind =
   | "unreachable";
 
 /**
+ * Customer-facing wording.
+ *
+ * The technical distinction lives in `code` (for the client and for support)
+ * and in the server log - never in the text the customer reads: no vendor
+ * names, no mention of quotas, tokens or providers, nothing about the limits of
+ * the underlying data source.
+ */
+const UNAVAILABLE_ERROR = "No se pudo verificar el RUC";
+const UNAVAILABLE_MESSAGE = "Completa los datos de tu empresa manualmente.";
+
+/**
  * Turns a failure into something the client can act on.
  *
  * `code` plus the HTTP status is the contract: `ruc_not_found` (404) means the
@@ -262,46 +273,50 @@ type FailureKind =
  * lookup itself is unavailable, so the form keeps the manual entry path.
  */
 function respondWithFailure(res: Response, failure: FailureKind, upstreamStatus: number) {
-  switch (failure) {
-    case "not_found":
-      return res.status(404).json({
-        error: "RUC no encontrado",
-        code: "ruc_not_found",
-        message: "SUNAT no tiene información para ese RUC. Verifica el número.",
-      });
-
-    case "rate_limited":
-      // The provider's fair-use limit, not ours: ask the caller to wait instead
-      // of retyping the RUC.
-      res.setHeader("Retry-After", "60");
-      return res.status(429).json({
-        error: "Consulta no disponible",
-        code: "provider_rate_limited",
-        message: "El servicio de consulta está saturado en este momento. Ingresa la razón social manualmente.",
-      });
-
-    case "not_configured":
-      return res.status(503).json({
-        error: "Consulta no configurada",
-        code: "provider_not_configured",
-        message: "La consulta automática de RUC no está configurada. Ingresa la razón social manualmente.",
-      });
-
-    case "auth":
-      return res.status(502).json({
-        error: "Consulta no disponible",
-        code: "provider_auth_failed",
-        message: "No se pudo consultar el RUC. Ingresa la razón social manualmente.",
-      });
-
-    default:
-      console.error(`RUC lookup unavailable (upstream status ${upstreamStatus})`);
-      return res.status(502).json({
-        error: "Consulta no disponible",
-        code: failure === "provider_error" ? "provider_error" : "provider_unreachable",
-        message: "No se pudo consultar el RUC. Ingresa la razón social manualmente.",
-      });
+  if (failure === "not_found") {
+    return res.status(404).json({
+      error: "RUC no encontrado",
+      code: "ruc_not_found",
+      message: "No encontramos información para este RUC. Verifica el número.",
+    });
   }
+
+  if (failure === "rate_limited") {
+    // The provider quota is exhausted: invite a retry instead of a retype.
+    res.setHeader("Retry-After", "60");
+    return res.status(429).json({
+      error: UNAVAILABLE_ERROR,
+      code: "provider_rate_limited",
+      message: "Intenta nuevamente en unos minutos o completa los datos manualmente.",
+    });
+  }
+
+  // `not_configured` and `auth` stay distinct in the response and the log so an
+  // operator can act on them, while the customer sees the same neutral text as
+  // any other outage.
+  if (failure === "not_configured") {
+    console.error("RUC lookup is misconfigured: the selected provider requires a token");
+    return res.status(503).json({
+      error: UNAVAILABLE_ERROR,
+      code: "provider_not_configured",
+      message: UNAVAILABLE_MESSAGE,
+    });
+  }
+
+  if (failure === "auth") {
+    return res.status(502).json({
+      error: UNAVAILABLE_ERROR,
+      code: "provider_auth_failed",
+      message: UNAVAILABLE_MESSAGE,
+    });
+  }
+
+  console.error(`RUC lookup unavailable (upstream status ${upstreamStatus})`);
+  return res.status(502).json({
+    error: UNAVAILABLE_ERROR,
+    code: failure === "provider_error" ? "provider_error" : "provider_unreachable",
+    message: UNAVAILABLE_MESSAGE,
+  });
 }
 
 export function setupRUCLookup(app: Express) {

@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CheckCircle2, Search, FileText, ShieldCheck } from "lucide-react";
+import { privacyPolicyPath } from "@shared/privacy-policy";
 
 interface PublicLibro {
   libro: {
@@ -17,9 +18,17 @@ interface PublicLibro {
     slug: string;
     whatsappNumber: string | null;
     websiteUrl: string | null;
+    /** Business logo, uploaded in Personalización. */
+    logoUrl?: string | null;
     brandColor?: string | null;
     confirmationMessage?: string | null;
     allowedComplaintTypes?: Array<"reclamo" | "queja">;
+    /**
+     * The business's own privacy policy page, when it published one in
+     * Personalización. The consent checkbox links here; when it is null it links
+     * to the hosted policy of this book (see privacyPolicyPath).
+     */
+    privacyPolicyUrl?: string | null;
     /**
      * False while no administrator of the business has confirmed the
      * notification mailbox: the intake route refuses submissions, so the portal
@@ -139,6 +148,14 @@ export default function PublicPortal() {
         {!isEmbed && (
         <Card>
           <CardHeader>
+            {data.libro.logoUrl && (
+              <img
+                src={data.libro.logoUrl}
+                alt={data.business.businessName}
+                className="mb-2 h-14 w-auto max-w-[220px] object-contain"
+                data-testid="portal-logo"
+              />
+            )}
             <CardTitle className="flex items-center gap-2 text-2xl" style={brandColor ? { color: brandColor } : undefined}>
               <FileText className="h-6 w-6" style={brandColor ? { color: brandColor } : undefined} />
               {data.libro.name}
@@ -237,6 +254,8 @@ export default function PublicPortal() {
                         name: selectedEstablishment.name,
                         address: selectedEstablishment.address,
                       }}
+                      privacyPolicyUrl={data.libro.privacyPolicyUrl ?? null}
+                      privacyPolicyFallbackHref={privacyPolicyPath(data.libro.slug)}
                       allowedComplaintTypes={data.libro.allowedComplaintTypes}
                       onSuccess={(result) => {
                         setSubmitted({

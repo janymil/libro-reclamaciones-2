@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { Complaint, ComplaintSubmission } from "@shared/schema";
+import type { ConsumerDraftContext } from "@shared/consumer-draft-context";
 
 interface ComplaintFilters {
   status?: string;
@@ -231,20 +232,28 @@ export interface ConsumerAssistanceResult {
  *
  * Carries its own solved CAPTCHA: the server spends money on every accepted
  * call, so the endpoint refuses a request that does not prove the work. The
- * caller solves one puzzle per click (they are single-use). */
+ * caller solves one puzzle per click (they are single-use).
+ *
+ * `context` carries the non-personal fields the visitor already completed
+ * (product, amount, purchase date, receipt number), so the assistant does not
+ * report as missing what the form already holds. See
+ * shared/consumer-draft-context.ts for the whitelist. */
 export function useAIPublicAssist() {
   return useMutation({
     mutationFn: async ({
       text,
+      context,
       captchaToken,
       captchaAnswer,
     }: {
       text: string;
+      context?: ConsumerDraftContext;
       captchaToken: string;
       captchaAnswer: string;
     }) => {
       const response = await apiRequest('POST', '/api/ai/public/assist', {
         text,
+        context,
         captchaToken,
         captchaAnswer,
       });

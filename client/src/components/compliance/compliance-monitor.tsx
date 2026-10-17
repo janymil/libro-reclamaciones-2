@@ -346,17 +346,22 @@ export default function ComplianceMonitor() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
             <div>
               <h5 className="font-medium mb-1">DS 011-2011-PCM</h5>
-              <p className="text-gray-600">Reglamento del Libro de Reclamaciones del Código de Protección y Defensa del Consumidor</p>
+              <p className="text-gray-600">Reglamento del Libro de Reclamaciones del Código de Protección y Defensa del Consumidor (modificado por el DS 006-2014-PCM y el DS 101-2022-PCM)</p>
             </div>
             <div>
-              <h5 className="font-medium mb-1">DS 101-2022-PCM</h5>
-              <p className="text-gray-600">Modificación del plazo de respuesta a 15 días hábiles improrrogables</p>
+              <h5 className="font-medium mb-1">Ley 29571 (art. 152) + Ley 31435</h5>
+              <p className="text-gray-600">Plazo de 15 días hábiles improrrogables para responder reclamos y quejas; el DS 101-2022-PCM adecúa el Reglamento a ese plazo</p>
             </div>
             <div>
               <h5 className="font-medium mb-1">Ley 29733 + DS 016-2024-JUS</h5>
-              <p className="text-gray-600">Ley de Protección de Datos Personales y su nuevo Reglamento (vigente desde 30/03/2025)</p>
+              <p className="text-gray-600">Ley de Protección de Datos Personales y su nuevo Reglamento (DS N.° 016-2024-JUS, publicado el 30/11/2024)</p>
             </div>
           </div>
+          <p className="mt-4 text-xs">
+            <a href="/normativa" className="text-primary underline">
+              Ver el marco normativo completo y los enlaces oficiales
+            </a>
+          </p>
         </CardContent>
       </Card>
       {/* Asistente RNPD: registro de actividades de tratamiento */}

@@ -29,6 +29,7 @@ import { registerPublicRoutes } from "./routes/public.routes";
 import { registerDocumentsRoutes } from "./routes/documents.routes";
 import { registerWhatsAppRoutes } from "./routes/whatsapp.routes";
 import { registerEmailRoutes } from "./routes/email.routes";
+import { registerContactRoutes } from "./routes/contact.routes";
 
 /**
  * Wires the HTTP application together.
@@ -71,6 +72,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerDocumentsRoutes(app);
   registerWhatsAppRoutes(app);
   registerEmailRoutes(app);
+  registerContactRoutes(app);
 
   const httpServer = createServer(app);
   return httpServer;

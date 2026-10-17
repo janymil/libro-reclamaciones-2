@@ -91,7 +91,7 @@ class PDFService {
     complaint: Complaint, 
     business: Business, 
     establishment: Establishment,
-    options?: { attachmentNames?: string[]; consultUrl?: string },
+    options?: { attachmentNames?: string[]; consultUrl?: string; logo?: Buffer | null },
   ): Promise<Buffer> {
     const verificationCode = computeComplaintVerificationCode(business.id, complaint);
     const consultUrl = options?.consultUrl;
@@ -118,7 +118,24 @@ class PDFService {
           resolve(pdfBuffer);
         });
 
-        // Header
+        // Header: the business's own logo first, so the printed constancia is
+        // recognizable as coming from the business. Best effort - a corrupt
+        // image must never block a legal document from being issued.
+        const logo = options?.logo;
+        if (logo) {
+          try {
+            const boxWidth = 140;
+            const boxHeight = 60;
+            const usableWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+            doc.image(logo, doc.page.margins.left + (usableWidth - boxWidth) / 2, doc.y, {
+              fit: [boxWidth, boxHeight],
+            });
+            doc.y += boxHeight + 10;
+          } catch (error) {
+            console.error('No se pudo incluir el logo en la constancia:', error);
+          }
+        }
+
         doc.fontSize(16).font('Helvetica-Bold').text('CONSTANCIA DE RECLAMACIÓN', { align: 'center' });
         doc.moveDown();
         
@@ -183,14 +200,15 @@ class PDFService {
           doc.moveDown();
         }
 
-        // Legal notice
+        // Legal notice. El plazo es improrrogable desde la Ley N.° 31435: no se
+        // puede prometer una extensión de 30 días que el Código ya no permite.
         const noticeTop = doc.y;
         doc.rect(50, noticeTop, 500, 60).stroke();
         doc.fontSize(8).font('Helvetica-Oblique');
-        doc.text('IMPORTANTE: La presentación de esta hoja de reclamación no limita otras vías de solución, ' +
-                 'ni constituye condición previa para denunciar ante las autoridades competentes. ' +
-                 'El proveedor deberá dar respuesta en un plazo no mayor a 15 días hábiles, ' +
-                 'pudiendo extenderse hasta 30 días en casos debidamente justificados.', 
+        doc.text('IMPORTANTE: La formulación de esta queja o reclamo no limita otras vías de solución, ' +
+                 'ni constituye vía previa necesaria para denunciar ante INDECOPI. ' +
+                 'El proveedor debe responder por escrito en un plazo no mayor a 15 días hábiles ' +
+                 'improrrogables (art. 152 del Código, modificado por la Ley N.° 31435).', 
                  60, noticeTop + 10, { width: 480 });
         doc.y = noticeTop + 70;
 
@@ -259,15 +277,17 @@ class PDFService {
           resolve(pdfBuffer);
         });
 
-        // Title with required font size (minimum 1x1 cm)
-        doc.fontSize(28).font('Helvetica-Bold').text('LIBRO DE RECLAMACIONES', { align: 'center' });
+        // Título >= 1x1 cm (1 cm = 28.35 pt): 30 pt para no quedar al filo.
+        doc.fontSize(30).font('Helvetica-Bold').text('LIBRO DE RECLAMACIONES', { align: 'center' });
         doc.moveDown(2);
 
-        // Rest of text with minimum 0.5x0.5 cm
-        doc.fontSize(14).font('Helvetica');
-        
-        doc.text('Conforme a lo establecido en el Código de Protección y Defensa del Consumidor ' +
-                'este establecimiento cuenta con un Libro de Reclamaciones a disposición del consumidor.');
+        // Resto del texto >= 0.5x0.5 cm (0.5 cm = 14.17 pt): 15 pt.
+        doc.fontSize(15).font('Helvetica');
+
+        // Texto del aviso del Anexo II, literal del Reglamento: no se parafrasea.
+        doc.text('Conforme a lo establecido en el Código de Protección y Defensa del Consumidor este ' +
+                'establecimiento cuenta con un Libro de Reclamaciones a tu disposición. Solicítalo ' +
+                'para registrar la queja o reclamo que tengas.');
         doc.moveDown();
 
         doc.text('El consumidor puede formular su reclamo o queja y solicitar el Libro de Reclamaciones:');
@@ -313,17 +333,20 @@ class PDFService {
   }
 
   /**
-   * Anexo II of DS 011-2011-PCM: the print-ready blank "hoja de reclamación"
-   * (Phase 1.4). Title uses a font of at least 1x1 cm (>= 28.35 pt) and the
-   * body at least 0.5x0.5 cm (>= 14.17 pt), as the regulation requires for
-   * printed formats. Print it, hand it to the consumer and later transcribe
-   * the record into the virtual libro.
+   * Print-ready blank "hoja de reclamación" with the fields of Anexo I of DS
+   * 011-2011-PCM (formato vigente aprobado por el DS N.° 101-2022-PCM).
+   *
+   * No es el Anexo I oficial: es un formato de apoyo para transcribir el
+   * reclamo cuando el libro es virtual. Por eso el PDF no se rotula como
+   * "Anexo I" — el Anexo II del Reglamento es el aviso, no la hoja, y decir lo
+   * contrario sería describir mal la norma. Título >= 1x1 cm y cuerpo >= 0.5x0.5
+   * cm, las medidas que exige el Reglamento para el material impreso.
    */
   async generateAnexoRegistroForm(business: Business): Promise<Buffer> {
     return this.render((doc) => {
       // Title >= 1 cm high (29 pt) - regulation minimum
       doc.fontSize(29).font('Helvetica-Bold').text('HOJA DE RECLAMACIÓN', { align: 'center' });
-      doc.fontSize(15).font('Helvetica').text('(Anexo II - DS 011-2011-PCM)', { align: 'center' });
+      doc.fontSize(15).font('Helvetica').text('Campos del Anexo I · DS 011-2011-PCM', { align: 'center' });
       doc.moveDown(2);
 
       // Body >= 0.5 cm high (15 pt) - regulation minimum
@@ -396,7 +419,7 @@ class PDFService {
 
       const rows: Array<[string, boolean, string]> = [
         ['DS 011-2011-PCM — Reglamento del Libro de Reclamaciones', report.ds011Status, 'Libro de Reclamaciones habilitado y publicado'],
-        ['DS 101-2022-PCM — Plazo de 15 días hábiles', report.ds101Status, 'Respuestas a reclamos dentro del plazo legal'],
+        ['Ley N.° 29571, art. 152 (Ley N.° 31435) — Plazo de 15 días hábiles', report.ds101Status, 'Respuestas a reclamos y quejas dentro del plazo legal'],
         ['Ley 29733 — Protección de Datos Personales', report.ley29733Status, 'Tratamiento de datos conforme a la normativa'],
       ];
 

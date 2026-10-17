@@ -43,7 +43,7 @@ export default function LibroWebLinkCard() {
   const publicUrl = `${window.location.origin}/libro/${config.urlSlug}`;
   const linkCode = `<a href="${publicUrl}" target="_blank" rel="noopener">Libro de Reclamaciones</a>`;
   const buttonCode = `<a href="${publicUrl}" target="_blank" rel="noopener" style="display:inline-block;background:#c02b0a;color:#fff;font-weight:600;padding:12px 22px;border-radius:10px;text-decoration:none;font-family:Arial,sans-serif;">Libro de Reclamaciones</a>`;
-  const footerCode = `<p>Conforme al Codigo de Proteccion y Defensa del Consumidor (Ley N 29571) y al DS 011-2011-PCM, contamos con un Libro de Reclamaciones a su disposicion.</p><p><a href="${publicUrl}" target="_blank" rel="noopener">Registre su reclamo en nuestro Libro de Reclamaciones Virtual</a></p>`;
+  const footerCode = `<p>Conforme a lo establecido en el Código de Protección y Defensa del Consumidor, contamos con un Libro de Reclamaciones a tu disposición.</p><p><a href="${publicUrl}" target="_blank" rel="noopener">Solicítalo aquí para registrar tu queja o reclamo</a></p>`;
 
   const copy = async (text: string, okTitle: string) => {
     try {
@@ -108,7 +108,7 @@ export default function LibroWebLinkCard() {
           </TabsList>
           <TabsContent value="enlace"><p className="text-sm text-gray-600">Enlace de texto. Ideal para menu o contacto.</p></TabsContent>
           <TabsContent value="boton"><p className="text-sm text-gray-600">Boton rojo sin CSS. Para home o checkout.</p></TabsContent>
-          <TabsContent value="footer"><p className="text-sm text-gray-600">Texto legal DS 011-2011-PCM. Para el footer.</p></TabsContent>
+          <TabsContent value="footer"><p className="text-sm text-gray-600">Aviso del Anexo II (DS 011-2011-PCM). Para el footer.</p></TabsContent>
         </Tabs>
         <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-gray-900 p-4 text-xs text-gray-100" data-testid="web-link-snippet">{currentCode}</pre>
         <div className="flex flex-wrap items-center gap-2">
@@ -123,7 +123,7 @@ export default function LibroWebLinkCard() {
         <div className="rounded-lg border">
           <div className="border-b px-4 pt-3">
             <p className="pb-1 text-sm font-semibold">Donde pegar el enlace (2 minutos)</p>
-            <p className="pb-3 text-xs text-gray-500">El DS 011-2011-PCM exige aviso visible. Pongalo en 2 lugares: footer + checkout o contacto.</p>
+            <p className="pb-3 text-xs text-gray-500">El art. 151 del Código exige un aviso o enlace visible y fácilmente accesible al Libro. Póngalo en 2 lugares: footer + checkout o contacto.</p>
           </div>
           <Accordion type="single" collapsible className="px-4" data-testid="web-link-help">
             <AccordionItem value="footer">

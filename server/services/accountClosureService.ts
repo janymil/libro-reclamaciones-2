@@ -1,6 +1,7 @@
 import { storage } from '../storage';
 import type { Business } from '@shared/schema';
 import { cancelSubscriptionForBusiness } from './paymentService';
+import { deleteLogo } from './logoService';
 
 /** Start of time: the tenant's lifetime complaint count. */
 const START_OF_TIME = new Date(0);
@@ -39,6 +40,13 @@ export async function closeBusiness(business: Business): Promise<CloseBusinessRe
   });
 
   if (complaintCount === 0) {
+    // The logo is a file on disk whose row disappears with the purge: remove it
+    // here, or it stays fetchable at its public URL with nothing pointing at it.
+    const logoConfig = await storage.getLibroConfiguration(business.id).catch(() => undefined);
+    if (logoConfig?.logoFileName) {
+      deleteLogo(logoConfig.logoFileName);
+    }
+
     await storage.purgeBusiness(business.id);
     return {
       purged: true,

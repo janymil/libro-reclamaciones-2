@@ -16,6 +16,12 @@ export interface CurrentUser {
   businessName?: string | null;
   isActive: boolean;
   isEmailVerified: boolean;
+  /**
+   * Shared demo/sandbox account. Its mailbox cannot be confirmed by anybody and
+   * its tenant is hand-seeded, so guidance aimed at a real customer (the
+   * "Primeros pasos" checklist) is skipped for it.
+   */
+  isDemo: boolean;
   onboardingStep: number;
   onboardingCompleted: boolean;
   lastLoginAt: string | null;
@@ -107,9 +113,5 @@ export interface ReportStats {
   formalComplianceRate: number;
 }
 
-export interface MonthlyReport {
-  month: string;
-  complaints: number;
-  resolved: number;
-  overdue: number;
-}
+/** Built by `@shared/monthly-reports`, which also owns the aggregation. */
+export type { MonthlyReport } from '@shared/monthly-reports';

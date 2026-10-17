@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  MANUAL_PAYMENT_METHODS,
   PAYMENT_METHODS,
   PAYMENT_PROVIDERS,
   PAYMENT_STATUS_LABELS,
@@ -11,6 +12,7 @@ import {
   computePeriodEnd,
   estimateNetCents,
   getPaymentProvider,
+  isManualPaymentMethod,
   isPaymentProviderId,
   isPaymentSettled,
   isPaymentStatus,
@@ -19,9 +21,11 @@ import {
   isSubscriptionLive,
   isSubscriptionStatus,
   isPubliclyReachableBaseUrl,
+  paymentFailureHint,
   periodMonths,
   planAmountCents,
   PLAN_REFERENCE_CODES,
+  PAYMENT_FAILURE_HINT_FALLBACK,
   providerSupportsRecurring,
   recurrenceForPeriod,
   referenceSuffix,
@@ -354,5 +358,33 @@ describe("isPubliclyReachableBaseUrl - can the provider call us back?", () => {
     expect(isPubliclyReachableBaseUrl("")).toBe(false);
     expect(isPubliclyReachableBaseUrl("localhost:5000")).toBe(false);
     expect(isPubliclyReachableBaseUrl("no-es-una-url")).toBe(false);
+  });
+});
+
+describe("payment failure hints (what the customer reads after a decline)", () => {
+  it("translates Mercado Pago's high-risk rejection into something actionable", () => {
+    const hint = paymentFailureHint("cc_rejected_high_risk");
+    expect(hint).toContain("riesgo alto");
+    expect(hint).toContain("transferencia");
+  });
+
+  it("never returns nothing: an unknown or missing code still says what to do", () => {
+    expect(paymentFailureHint(undefined)).toBe(PAYMENT_FAILURE_HINT_FALLBACK);
+    expect(paymentFailureHint("")).toBe(PAYMENT_FAILURE_HINT_FALLBACK);
+    expect(paymentFailureHint("cc_rejected_algo_nuevo")).toBe(PAYMENT_FAILURE_HINT_FALLBACK);
+  });
+});
+
+describe("manual payment methods (what an operator may confirm by hand)", () => {
+  it("allows only money that arrives outside the provider", () => {
+    expect(MANUAL_PAYMENT_METHODS).toEqual(["transferencia", "yape", "plin", "efectivo"]);
+    for (const method of MANUAL_PAYMENT_METHODS) {
+      expect(isManualPaymentMethod(method)).toBe(true);
+    }
+  });
+
+  it("refuses a card: a hand-confirmed card charge would be a free plan", () => {
+    expect(isManualPaymentMethod("tarjeta")).toBe(false);
+    expect(isManualPaymentMethod("crypto")).toBe(false);
   });
 });

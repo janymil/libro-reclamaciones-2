@@ -6,6 +6,7 @@ import {
   emailVerificationSchema,
   forgotPasswordSchema,
   insertLibroConfigurationSchema,
+  libroSlugSchema,
   loginCodeSchema as authLoginCodeSchema,
   loginSchema as authLoginSchema,
   requestLoginCodeSchema,
@@ -434,8 +435,11 @@ export function registerAuthRoutes(app: Express): void {
 
       // businessId/userId are assigned by the transaction (the tenant may be
       // created by this very call), so they are not accepted from the client.
+      // The public URL is validated here as well as in the form: it becomes a
+      // public address, so arbitrary characters must never reach the database.
       const validLibroData = insertLibroConfigurationSchema
         .omit({ businessId: true, userId: true })
+        .extend({ urlSlug: libroSlugSchema })
         .parse(libroData);
 
       // The public URL is globally unique. Checked before writing anything so the
@@ -488,12 +492,15 @@ export function registerAuthRoutes(app: Express): void {
         },
         libro: validLibroData,
         // Every business needs at least one establishment so the public portal
-        // has a "lugar" to file against. Online stores get a virtual channel
-        // instead of a physical sucursal (DS 011-2011-PCM: selling over the
-        // Internet requires the book be reachable from that medium).
+        // has a "lugar" to file against, named after the book the user just
+        // named (a hard-coded "Casa Matriz" ignored it). The sales channel still
+        // decides the identification code: a pure online store gets a virtual
+        // channel instead of a physical sucursal (DS 011-2011-PCM: selling over
+        // the Internet requires the book be reachable from that medium).
         establishment: defaultEstablishmentFor(
-          { address: validBusinessData.address, phone: validBusinessData.phone ?? null },
+          validBusinessData,
           validLibroData.businessType,
+          validLibroData.libroName,
         ),
       });
 
@@ -502,6 +509,9 @@ export function registerAuthRoutes(app: Express): void {
         business: result.business,
         libroConfig: result.config,
         establishment: result.establishment,
+        // The Libro de Reclamaciones of that establishment, created in the same
+        // transaction so "Libros" is never empty after onboarding.
+        book: result.book,
         // true when a previous attempt had already created the tenant
         resumed: !result.createdBusiness,
         redirectTo: '/panel',

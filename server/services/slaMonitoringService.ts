@@ -105,7 +105,7 @@ async function notifyAssignee(
 async function remind(businessId: string, complaint: Complaint, remainingDays: number): Promise<void> {
   const message =
     `${complaint.correlativeNumber} vence en ${remainingDays} día(s) hábil(es). ` +
-    `Priorice la respuesta para cumplir el plazo legal de 15 días hábiles (DS 101-2022-PCM).`;
+    `Priorice la respuesta para cumplir el plazo legal de 15 días hábiles improrrogables (art. 152 del Código, Ley N.° 31435).`;
 
   await notifyAssignee(businessId, complaint, 'Recordatorio de plazo SLA', message);
 

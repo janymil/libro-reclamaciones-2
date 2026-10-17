@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { eq, and, desc, asc, count, gte, lte, lt, or } from "drizzle-orm";
 import {
+  businesses,
   complaints,
 } from "@shared/schema";
 import type { ComplianceTracking } from "@shared/schema";
@@ -13,6 +14,7 @@ import type {
 import { complaintStorage } from "./complaint.storage";
 import { complianceStorage } from "./compliance.storage";
 import { startOfPeruMonth } from "@shared/peru-time";
+import { buildMonthlyReports } from "@shared/monthly-reports";
 
 /** Data access for the "reporting" aggregate. */
 export const reportingStorage = {
@@ -169,36 +171,27 @@ export const reportingStorage = {
   },
 
   async getMonthlyReports(businessId: string): Promise<MonthlyReport[]> {
-    const rows = await db
-      .select({
-        submissionDate: complaints.submissionDate,
-        status: complaints.status,
-        isOverdue: complaints.isOverdue,
-      })
-      .from(complaints)
-      .where(eq(complaints.businessId, businessId));
+    const [businessRows, rows] = await Promise.all([
+      db
+        .select({ createdAt: businesses.createdAt })
+        .from(businesses)
+        .where(eq(businesses.id, businessId))
+        .limit(1),
+      db
+        .select({
+          submissionDate: complaints.submissionDate,
+          status: complaints.status,
+          isOverdue: complaints.isOverdue,
+        })
+        .from(complaints)
+        .where(eq(complaints.businessId, businessId)),
+    ]);
 
-    const now = new Date();
-    const reports: MonthlyReport[] = [];
-
-    // Report on the last 6 months, most recent first
-    for (let offset = 0; offset < 6; offset++) {
-      const start = startOfPeruMonth(now, -offset);
-      const end = startOfPeruMonth(now, -offset + 1);
-
-      const inMonth = rows.filter(row => {
-        const submitted = new Date(row.submissionDate);
-        return submitted >= start && submitted < end;
-      });
-
-      reports.push({
-        month: start.toLocaleDateString('es-PE', { month: 'long', year: 'numeric' }),
-        complaints: inMonth.length,
-        resolved: inMonth.filter(row => row.status === 'resolved').length,
-        overdue: inMonth.filter(row => row.isOverdue).length,
-      });
-    }
-
-    return reports;
+    // The window starts at the month the company exists from: a brand-new
+    // account must not be listed six months of "0 reclamaciones procesadas" for
+    // periods that predate its own registration (see @shared/monthly-reports).
+    return buildMonthlyReports(rows, {
+      firstMonth: businessRows[0]?.createdAt ?? null,
+    });
   },
 };

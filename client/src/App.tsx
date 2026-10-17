@@ -17,6 +17,12 @@ import Profile from "@/pages/profile";
 import History from "@/pages/history";
 import QrCodePage from "@/pages/qr-code";
 import PublicPortal from "@/pages/public-portal";
+import PrivacyPolicyPage from "@/pages/privacy-policy";
+import PrivacidadPage from "@/pages/privacidad";
+import TerminosPage from "@/pages/terminos";
+import AvisoLegalPage from "@/pages/aviso-legal";
+import NormativaPage from "@/pages/normativa";
+import ContactoPage from "@/pages/contacto";
 import ResetPasswordPage from "@/pages/reset-password";
 import VerifyEmailPage from "@/pages/verify-email";
 import Compliance from "@/pages/compliance";
@@ -51,6 +57,12 @@ function Router() {
       {/* Libro de Reclamaciones público: los consumidores registran y consultan
           sus reclamos sin necesidad de iniciar sesión. */}
       <Route path="/libro/:slug" component={PublicPortal} />
+
+      {/* Política de privacidad del libro (Ley 29733): el enlace que abre el
+          consumidor desde "Acepto el tratamiento de mis datos" cuando la empresa
+          no publicó una política propia. Va antes de `/libro/:slug` por claridad,
+          y es pública: la lee un consumidor sin cuenta. */}
+      <Route path="/libro/:slug/politica-de-privacidad" component={PrivacyPolicyPage} />
 
       {/* Enlace de suscripción compartible: público, para pegar en WhatsApp,
           correo o publicidad. Identifica al cliente antes de enviarlo a pagar. */}
@@ -102,6 +114,22 @@ function Router() {
       <Route path="/estado" component={StatusPage} />
       <Route path="/accesibilidad" component={AccessibilityPage} />
 
+      {/* Documentos legales del operador (públicos, sin sesión). No confundir
+          `/privacidad` con `/libro/:slug/politica-de-privacidad`: la primera es
+          la política de LibroDigital.pe como prestador del servicio; la segunda
+          es la del banco de datos de cada empresa cliente. */}
+      <Route path="/terminos" component={TerminosPage} />
+      <Route path="/privacidad" component={PrivacidadPage} />
+      <Route path="/aviso-legal" component={AvisoLegalPage} />
+
+      {/* Marco normativo: las normas del Libro de Reclamaciones con su enlace
+          oficial, para que el pie no tenga que cargar ocho entradas. */}
+      <Route path="/normativa" component={NormativaPage} />
+
+      {/* Nosotros y contacto: página pública con el formulario de contacto. */}
+      <Route path="/contacto" component={ContactoPage} />
+      <Route path="/nosotros"><Redirect to="/contacto" /></Route>
+
       {/* Rutas antiguas en inglés: se mantienen como redirecciones para no
           romper enlaces guardados ni correos enviados previamente. */}
       <Route path="/auth"><Redirect to="/acceso" /></Route>
@@ -123,6 +151,9 @@ function Router() {
       <Route path="/integrations"><Redirect to="/integraciones" /></Route>
       <Route path="/status"><Redirect to="/estado" /></Route>
       <Route path="/accessibility"><Redirect to="/accesibilidad" /></Route>
+      <Route path="/terms"><Redirect to="/terminos" /></Route>
+      <Route path="/privacy"><Redirect to="/privacidad" /></Route>
+      <Route path="/legal"><Redirect to="/aviso-legal" /></Route>
 
       <Route component={NotFound} />
     </Switch>

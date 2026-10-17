@@ -4,6 +4,7 @@ import { z } from "zod";
 import { complaintSubmissionSchema, type InsertComplaint } from "@shared/schema";
 
 import { emailService } from "../services/emailService";
+import { emailIdentityForBusiness } from "../services/emailIdentity";
 import { similarityService } from "../services/similarityService";
 import { storage } from "../storage";
 import { requireAuth, requireStaff } from "../middleware/requireAuth";
@@ -130,20 +131,20 @@ export function registerComplaintsRoutes(app: Express): void {
         userAgent: req.get('User-Agent') ?? null,
       });
       
-      // Send response to consumer if provided (with the business's templates)
+      // Send response to consumer if provided (with the business's templates and
+      // its own identity: the consumer must see who is answering them).
       if (updates.providerResponse) {
         const config = await storage.getLibroConfiguration(complaint.businessId);
         await emailService.sendComplaintResponse(
           updatedComplaint.consumerEmail,
           updatedComplaint,
           updates.providerResponse,
-          config
-            ? {
-                subjectPrefix: config.emailSubjectPrefix,
-                headerText: config.emailHeaderText,
-                footerText: config.emailFooterText,
-              }
-            : undefined,
+          {
+            subjectPrefix: config?.emailSubjectPrefix ?? null,
+            headerText: config?.emailHeaderText ?? null,
+            footerText: config?.emailFooterText ?? null,
+            identity: await emailIdentityForBusiness(complaint.businessId),
+          },
         );
       }
       

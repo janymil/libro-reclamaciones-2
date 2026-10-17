@@ -16,7 +16,8 @@ documents every variable.
 | `SESSION_SECRET` | **yes** | The server refuses to boot without it. Generate with `openssl rand -hex 32`. |
 | `APP_URL` | **yes** | Must be the real domain (`https://librodigital.pe`): every email link is built from it. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` | **yes** | Zoho Mail (`smtp.zoho.com`, port 465). `SMTP_PASSWORD` must be an **app-specific password**, not the mailbox password. Without them no email is ever delivered. |
-| `SMTP_FROM_NAME`, `SMTP_FROM_EMAIL` | recommended | Sender identity on all transactional mail (`LibroDigital.pe` / `hola@librodigital.pe`). |
+| `SMTP_FROM_NAME`, `SMTP_FROM_EMAIL` | recommended | Sender identity on all transactional mail (`LibroDigital.pe` / `hola@librodigital.pe`). Consumer-facing complaint mail is presented as the **business** (its name, logo, contact data and a Reply-To to its own inbox); the platform is only named in a discreet "Gestionado con LibroDigital.pe" line. |
+| `SMTP_ALLOWED_SENDER_DOMAINS` | only for a tenant's own sender address | Comma-separated domains the mail host lets the platform send **as** (default `librodigital.pe`). A business can ask to send its consumer emails from its own address (Personalización → Remitente propio, Pro), but Zoho only accepts an address whose domain has verified SPF/DKIM records. Any address outside this list is ignored at send time and the console says so; the message still goes out as `SMTP_FROM_EMAIL` with the business's display name and Reply-To. |
 | `PAYMENTS_ALERT_EMAIL` | recommended | `hola@librodigital.pe`. Without it a paid-but-unmatched subscription is only logged. |
 | `PLATFORM_ADMIN_EMAILS` | ⚠️ bootstrap only | Comma-separated e-mails that get operator rights **in the app** (the team's panel, confirming a transfer, managing customers). The durable grant is now `users.is_platform_admin`, set from the panel's **Equipo** tab or by `npm run db:admin -- --email <correo>`; this list survives only as the bootstrap door of the first operator and as an emergency way back in. Never a tenant role: every customer is `admin` of their own business. Empty + no flagged operator ⇒ nobody can confirm a transfer and paid transfers stay `pending` forever. |
 | `VITE_ADMIN_PATH` | recommended | Where the team's console lives (default `/acceso/operaciones-7f31`). **Never `/admin`**: that is the first path scanners try, so it stays a 404. The client bakes it at build time and the server reads it for `X-Robots-Tag: noindex`, so both must agree in a deployment. There is **one** sign-in page for everybody (`/acceso`): the server names the kind of account (`isPlatformAdmin` in the login response and in `/api/auth/user`) and the app routes it - operator ⇒ console, customer ⇒ `/panel`. Logging out returns to `/acceso`, where logging in again lands on the right screen by itself. |
@@ -320,14 +321,62 @@ is reachable with `curl -I https://<app-host>/reset.html` → `200` and `Cache-C
 
 Registered by `POST /api/auth/register` (step 1: account + emailed password and confirmation
 link) and finished by `POST /api/auth/complete-onboarding` (step 2: business + Libro + first
-establishment).
+establishment). **`POST /api/businesses` (Empresas → "Nueva Empresa") finishes the same write**
+for a company registered outside the wizard: it takes the company profile *plus* the Libro
+(`libro: { libroName, businessType, urlSlug?, notificationEmail? }`) and calls the same
+transaction, so a company is never created without its book.
 
 **The step-2 write is one transaction.** `storage.completeOnboarding` creates the tenant, the
-access grant, the Libro configuration and the default establishment, and flags the user as
-onboarded only as its last statement. Either the account is fully usable or nothing changed -
-a failure returns
+access grant, the Libro configuration, the default establishment and its Libro de Reclamaciones
+(`books` row), and flags the user as onboarded only as its last statement. Either the account is
+fully usable or nothing changed - a failure returns
 `500 {"code":"onboarding_failed","message":"...no se guardaron..."}` and the wizard can simply
-be retried. Two situations that used to be permanent dead ends are now recoverable:
+be retried. When the caller already has an active company (an additional RUC), the tenant is
+created with `makeActive: false`: it joins the switcher but does not steal `users.business_id`.
+
+**The first establishment is named after what the user typed** (`defaultEstablishmentFor`):
+the name of the Libro, else the commercial name, else the razón social. It used to be a
+hard-coded "Casa Matriz", so a tenant that named its book "Wong" saw "Casa Matriz" on
+Sucursales, Libros and the public portal. The sales channel still decides the identification
+code (`ONLINE-01` for `tienda_virtual`, `SUC-001` otherwise), and an existing sucursal can be
+renamed from /sucursales (`PATCH /api/establishments/:id`).
+
+**One public Libro per company, one register per local.** `libro_configuration.business_id`
+is UNIQUE: one public link, one QR, one notification inbox and one branding for the whole
+company, and the consumer **chooses the establishment** in the complaint form (the portal
+lists them). The folio is `YYYY-NNNN` and unique **per company** (not per local), so a
+correlative quoted by a consumer is unambiguous across sucursales. What each establishment has
+is its own row in `books`: the per-local register that `/libros` lists and exports
+(GET /api/books/:id/download renders the complaints of that establishment) for a local
+inspection. `POST /api/establishments` commits that register together with the establishment
+in ONE transaction (`storage.createEstablishmentWithBook`), and the registration does the same
+for the first local. Note the public intake does NOT consult `books` - it validates the
+business + establishment - so a legacy local without a register still receives complaints; the
+register is what makes its records exportable (and what the "Primeros pasos" row on /panel
+flags).
+
+**The wizard asks how the business operates** (un solo local / casa matriz + sucursales / solo
+online) and then names its first establishment accordingly: one local takes the business's
+name, a chain gets "Casa Matriz - <marca>" plus an optional total, an online-only store gets
+its brand with the `ONLINE-01` channel. A live panel lists what the transaction will write.
+Afterwards `/panel` shows **Primeros pasos** for real accounts (never for the shared demo):
+libro publicado, correo de reclamos confirmado (with a resend button), locales pendientes vs
+the total declared at signup, and a row that appears whenever `books < establishments` - i.e.
+the same repair a legacy tenant needs. It disappears when nothing is pending, and the customer
+can close it (per browser).
+
+**Closing a local does not delete it.** /sucursales can deactivate a sucursal
+(`PATCH /api/establishments/:id { isActive: false }`): it leaves the public portal list and the
+intake refuses new complaints for it (409, even from an already-printed QR), while its register
+and the complaints it already received stay intact - and the admin list keeps showing it so it
+can be reactivated with the same code. The plan's sucursal quota counts active ones only.
+`/libros` presents the result the way the customer thinks about it: ONE "Libro de Reclamaciones"
+card (name, public link, QR, all-company folios) and, below it, a "Registros por local" table
+with one row per local (its own PDF export, its description, and a "Crear registro" action when
+a legacy local predates the automatic register). The old "Libro activo" toggle is gone: it was
+never read by anything, and "this local is closed" belongs to the establishment.
+
+Two situations that used to be permanent dead ends are now recoverable:
 
 | Situation | Response | What to do |
 |---|---|---|
@@ -418,11 +467,14 @@ Run them deliberately, in order, against every environment:
 npm run db:apply -- migrations/0006_login_codes.sql                       # login_code_* columns for the code login
 npm run db:apply -- migrations/0008_platform_payment_settings.sql         # console "Configuración": our Yape number / bank accounts
 npm run db:apply -- migrations/0009_platform_settings_pricing_discounts.sql  # console: alerts, identity, flags, price list, discounts, audit
+npm run db:apply -- migrations/0010_expected_establishments.sql           # businesses.expected_establishments (locales declarados)
+npm run db:apply -- migrations/0011_libro_privacy_policy_url.sql          # libro_configuration.privacy_policy_url (política de privacidad del consentimiento)
 npm run db:apply -- migrations/manual/0006_business_access_requests.sql   # access-request table
 npm run db:apply -- migrations/manual/0007_users_role_default.sql         # users.role DEFAULT/NOT NULL
 npm run db:apply -- migrations/manual/0008_trial_lifecycle_backfill.sql   # trial_ends_at for pre-0003 tenants
 npm run db:apply -- migrations/manual/0009_normalize_plan_ids.sql         # legacy 'basic' -> 'gratis'
 npm run db:apply -- migrations/manual/0010_rebrand_domain_emails.sql      # @librovirtual.pe -> @librodigital.pe
+npm run db:apply -- migrations/manual/0011_provision_missing_books.sql    # Libro de Reclamaciones of pre-existing establishments
 ```
 
 `0008_platform_payment_settings.sql` is the console's **Configuración** tab (not to be
@@ -463,6 +515,29 @@ librovirtual.pe → librodigital.pe rebrand (old-domain rows: the demo account's
 and the demo tenant's notification mailbox — see §9.3). It deliberately leaves consumer
 addresses on legal records and the `login_attempts` / `auth_audit_log` history untouched,
 and fails loudly if an identity row survives. Idempotent.
+
+`0010` adds `businesses.expected_establishments` - how many locales the company says it will
+have (casa matriz included), asked during onboarding and used by the "Primeros pasos"
+checklist on /panel ("Sucursales 2 de 5"). It is nullable and pure guidance (no quota, billing
+or legal rule reads it), but the column IS required by the deployed code: the schema selects it
+on every `businesses` read, so **apply it before (or with) the release** - against a database
+without it, `GET /api/businesses/current`, the public portal and the dashboard all answer 500.
+It is listed in the journal, so an embedded PGlite dev database applies it automatically while
+Neon needs the `db:apply` line above.
+
+`0011` repairs the tenants left half-provisioned by the company-registration bug fixed in §6
+(an establishment with no register, and an establishment still named by the old rule). **It is
+optional**: it only does something where such a tenant still exists, and it is a no-op on a
+database whose establishments all have their register already (it prints what it found before
+touching anything). Run it when the audit query in the file reports rows - not as a routine
+step.
+every establishment of an active tenant gets the `books` row ("Libro de Reclamaciones of that
+establishment") it never had, and an establishment still carrying the old machine-generated
+name ("Casa Matriz" / "Tienda Online") is renamed to the book's name - only when that name is
+the only establishment of the tenant, so a human-typed name is never rewritten. Tenants with no
+`libro_configuration` at all are deliberately left alone: that row holds the **public URL** and
+the notification inbox, which are the customer's decision, not a migration's. Idempotent; the
+file prints the SELECT to review before the UPDATE.
 
 `0006` backs the code login (`POST /api/auth/request-code` → `POST /api/auth/login-with-code`):
 `login_code_hash`, `login_code_expires` and `login_code_attempts`. It is listed in

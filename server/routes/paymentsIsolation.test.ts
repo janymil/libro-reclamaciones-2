@@ -127,6 +127,19 @@ const h = vi.hoisted(() => {
       track("getBusiness", [id]);
       return state.businessById[id];
     },
+    getBusinessById: async (id: string) => {
+      track("getBusinessById", [id]);
+      return state.businessById[id];
+    },
+    getUser: async (id: string) => {
+      track("getUser", [id]);
+      return state.usersById[id];
+    },
+    /** The receipt/recovery email resolves the account owner from the tenant. */
+    getUsersByBusinessIds: async (ids: string[]) => {
+      track("getUsersByBusinessIds", [ids]);
+      return Object.values(state.usersById).filter((user: any) => ids.includes(user.businessId));
+    },
     updateBusiness: async (id: string, updates: any) => {
       track("updateBusiness", [id, updates]);
       const row = state.businessById[id];
@@ -221,7 +234,12 @@ const h = vi.hoisted(() => {
 });
 
 /** Captures the operational alerts instead of sending them. */
-const emailMock = vi.hoisted(() => ({ alerts: [] as Array<{ email: string; subject: string; details: string[] }> }));
+const emailMock = vi.hoisted(() => ({
+  alerts: [] as Array<{ email: string; subject: string; details: string[] }>,
+  receipts: [] as Array<Record<string, any>>,
+  /** Every "finish your payment" message (automatic or sent by an operator). */
+  recoveries: [] as Array<Record<string, any>>,
+}));
 
 vi.mock("../storage", () => ({ storage: h.storageMock }));
 vi.mock("../services/authService", () => ({ authService: h.authMock }));
@@ -229,6 +247,12 @@ vi.mock("../services/emailService", () => ({
   emailService: {
     sendPlatformAlert: async (email: string, subject: string, details: string[]) => {
       emailMock.alerts.push({ email, subject, details });
+    },
+    sendPaymentReceipt: async (params: Record<string, any>) => {
+      emailMock.receipts.push(params);
+    },
+    sendPaymentRecovery: async (params: Record<string, any>) => {
+      emailMock.recoveries.push(params);
     },
   },
 }));
@@ -295,6 +319,8 @@ beforeEach(async () => {
   // Confirming a transfer is platform-staff only; only `platformOps` is on it.
   process.env.PLATFORM_ADMIN_EMAILS = "ops@librodigital.pe";
   emailMock.alerts.length = 0;
+  emailMock.receipts.length = 0;
+  emailMock.recoveries.length = 0;
   clearPaymentAlertCache();
 
   app = await startTestApp((expressApp) => {
@@ -1700,6 +1726,278 @@ describe("subscriptions bought outside the app (panel plan link)", () => {
     expect(created.businessId).toBe(A);
     expect(h.calls.updatePayment.at(-1)![1].status).toBe("paid");
     expect(h.calls.updateBusiness.at(-1)![1].subscriptionPlan).toBe("profesional");
+  });
+});
+
+/**
+ * PAYMENT RECOVERY (Phase 2.7, step 5).
+ *
+ * A declined card must not end the story: the customer receives the same checkout
+ * link plus the transfer/Yape details, and an operator can resend it or pair a
+ * later transfer with the order the attempt left behind.
+ */
+describe("a declined payment - the way back to the customer", () => {
+  const settings = {
+    holderName: "LibroDigital S.A.C.",
+    holderRuc: "20123456789",
+    yapeNumber: "999888777",
+    plinNumber: null,
+    voucherEmail: "pagos@librodigital.pe",
+    voucherWhatsapp: null,
+    bankAccounts: [
+      {
+        bank: "BCP",
+        accountType: "corriente",
+        accountNumber: "193-1234567",
+        cci: "002-193-1234567",
+        currency: "PEN",
+        holder: null,
+      },
+    ],
+    notes: null,
+  };
+
+  it("emails the original checkout link and the transfer data, and records why it failed", async () => {
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    const payment = seedPayment({
+      provider: "mercadopago",
+      method: null,
+      providerRef: "pref-123",
+      reference: "LD-RECOV1",
+      redirectUrl: "https://www.mercadopago.com.pe/checkout/v1/redirect?pref_id=pref-123",
+      amountCents: 500,
+      planId: "esencial",
+    });
+    h.state.paymentSettings = settings;
+
+    stubProvider({
+      id: 184624883994,
+      status: "rejected",
+      status_detail: "cc_rejected_high_risk",
+      transaction_amount: 5,
+      external_reference: payment.reference,
+    });
+
+    const res = await call(app.url, "/api/payments/webhook/mercadopago", {
+      method: "POST",
+      userId: null,
+      body: { type: "payment", data: { id: "184624883994" } },
+    });
+
+    expect(res.status).toBe(200);
+    // Matched by our own reference even though the row stores the preference id.
+    expect(res.body.handled).toBe(true);
+    expect(res.body.status).toBe("failed");
+    expect(h.state.payments[payment.id].failureReason).toContain("riesgo alto");
+
+    await vi.waitFor(() => expect(emailMock.recoveries).toHaveLength(1));
+    const sent = emailMock.recoveries[0];
+    expect(sent.email).toBe(users.adminA.email);
+    // The SAME link the customer was sent to the first time.
+    expect(sent.checkoutUrl).toBe(payment.redirectUrl);
+    expect(sent.reference).toBe("LD-RECOV1");
+    expect(sent.amountLabel).toBe("S/ 5.00");
+    // And the offline alternative, carrying the same reference.
+    expect(sent.transferInstructions).toContain("Yape al 999888777");
+    expect(sent.transferInstructions).toContain("193-1234567");
+    expect(sent.transferInstructions).toContain("LD-RECOV1");
+    // Always a second way in, even if the provider link expires.
+    expect(sent.resumeUrl).toContain("/suscribir?plan=esencial&periodo=monthly");
+    expect(h.state.payments[payment.id].recoveryEmailCount).toBe(1);
+    expect(h.state.payments[payment.id].recoveryEmailSentAt).toBeTruthy();
+  });
+
+  it("sends it once, however many times the provider retries the notification", async () => {
+    process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-TOKEN";
+    const payment = seedPayment({
+      provider: "mercadopago",
+      method: null,
+      providerRef: "pref-456",
+      reference: "LD-RECOV2",
+      amountCents: 500,
+      planId: "esencial",
+    });
+
+    stubProvider({
+      id: 999,
+      status: "rejected",
+      status_detail: "cc_rejected_high_risk",
+      transaction_amount: 5,
+      external_reference: payment.reference,
+    });
+
+    const notify = () =>
+      call(app.url, "/api/payments/webhook/mercadopago", {
+        method: "POST",
+        userId: null,
+        body: { type: "payment", data: { id: "999" } },
+      });
+
+    await notify();
+    await vi.waitFor(() => expect(emailMock.recoveries).toHaveLength(1));
+
+    await notify();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(emailMock.recoveries).toHaveLength(1);
+    expect(h.state.payments[payment.id].recoveryEmailCount).toBe(1);
+  });
+
+  it("does not email when the customer has no address (and says so to the operator)", async () => {
+    const payment = seedPayment({ status: "failed", userId: null });
+
+    const res = await call(app.url, `/api/payments/${payment.id}/payment-link`, {
+      method: "POST",
+      userId: users.platformOps.id,
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain("correo");
+    expect(emailMock.recoveries).toHaveLength(0);
+  });
+
+  it("lets platform staff resend the link, and refuses a customer", async () => {
+    const payment = seedPayment({
+      status: "failed",
+      reference: "LD-RECOV3",
+      redirectUrl: "https://www.mercadopago.com.pe/checkout/v1/redirect?pref_id=pref-789",
+      amountCents: 500,
+      planId: "esencial",
+    });
+
+    const refused = await call(app.url, `/api/payments/${payment.id}/payment-link`, {
+      method: "POST",
+      userId: users.adminA.id,
+    });
+    expect(refused.status).toBe(403);
+    expect(emailMock.recoveries).toHaveLength(0);
+
+    const ok = await call(app.url, `/api/payments/${payment.id}/payment-link`, {
+      method: "POST",
+      userId: users.platformOps.id,
+    });
+    expect(ok.status).toBe(200);
+    expect(ok.body.sentTo).toBe(users.adminA.email);
+    expect(emailMock.recoveries).toHaveLength(1);
+    // An operator resend is deliberate: it still counts.
+    expect(h.state.payments[payment.id].recoveryEmailCount).toBe(1);
+  });
+
+  it("pairs a later transfer with the order the card attempt left behind", async () => {
+    const payment = seedPayment({
+      provider: "mercadopago",
+      method: null,
+      providerRef: "pref-pair",
+      reference: "LD-PAIR01",
+      status: "failed",
+      amountCents: 500,
+      planId: "esencial",
+      failureReason: "El proveedor de pagos marcó la operación como de riesgo alto.",
+    });
+
+    const res = await call(app.url, `/api/payments/${payment.id}/confirm-offline`, {
+      method: "POST",
+      userId: users.platformOps.id,
+      body: { method: "transferencia", note: "Operación BCP 123456" },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.payment.status).toBe("paid");
+
+    const row = h.state.payments[payment.id];
+    // Where the order started is kept; how the money arrived is added.
+    expect(row.provider).toBe("mercadopago");
+    expect(row.method).toBe("transferencia");
+    expect(row.confirmedByUserId).toBe(users.platformOps.id);
+    expect(row.failureReason).toBeNull();
+    expect(row.raw.manualConfirmation.note).toBe("Operación BCP 123456");
+    expect(row.paidAt).toBeTruthy();
+    // Same entitlement path as a provider-approved charge.
+    expect(h.calls.updateBusiness.at(-1)![1].subscriptionPlan).toBe("esencial");
+    expect(emailMock.receipts).toHaveLength(1);
+  });
+
+  it("refuses to mark a card charge as received by hand", async () => {
+    const payment = seedPayment({ provider: "mercadopago", method: null, status: "failed" });
+
+    const res = await call(app.url, `/api/payments/${payment.id}/confirm-offline`, {
+      method: "POST",
+      userId: users.platformOps.id,
+      body: { method: "tarjeta" },
+    });
+
+    expect(res.status).toBe(400);
+    expect(h.state.payments[payment.id].status).toBe("failed");
+    expect(h.calls.updateBusiness).toBeUndefined();
+  });
+
+  it("keeps the confirmation for platform staff only", async () => {
+    const payment = seedPayment({ provider: "mercadopago", method: null, status: "failed" });
+
+    const res = await call(app.url, `/api/payments/${payment.id}/confirm-offline`, {
+      method: "POST",
+      userId: users.adminA.id,
+      body: { method: "yape" },
+    });
+
+    expect(res.status).toBe(403);
+    expect(h.state.payments[payment.id].status).toBe("failed");
+    expect(h.calls.updateBusiness).toBeUndefined();
+  });
+});
+
+/** Money that arrived with no order behind it: the console records it. */
+describe("POST /api/payments/manual - a payment with no checkout", () => {
+  it("records it, credits the plan and emails the receipt to the account owner", async () => {
+    const res = await call(app.url, "/api/payments/manual", {
+      method: "POST",
+      userId: users.platformOps.id,
+      body: {
+        businessId: A,
+        planId: "profesional",
+        period: "monthly",
+        method: "yape",
+        amountCents: 2900,
+        note: "Yape 998877",
+      },
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.payment.status).toBe("paid");
+    expect(res.body.payment.provider).toBe("manual");
+    expect(h.calls.createPayment[0][0]).toMatchObject({
+      businessId: A,
+      planId: "profesional",
+      amountCents: 2900,
+      method: "yape",
+      // The receipt goes to the account owner, not to the operator who typed it.
+      userId: users.adminA.id,
+    });
+    expect(h.calls.updateBusiness.at(-1)![1].subscriptionPlan).toBe("profesional");
+    expect(emailMock.receipts).toHaveLength(1);
+  });
+
+  it("refuses a customer, and the publicly shared demo account", async () => {
+    for (const userId of [users.adminA.id, users.demoAdmin.id]) {
+      const res = await call(app.url, "/api/payments/manual", {
+        method: "POST",
+        userId,
+        body: { businessId: A, planId: "profesional", period: "monthly", method: "yape" },
+      });
+      expect(res.status).toBe(403);
+    }
+    expect(h.calls.createPayment).toBeUndefined();
+  });
+
+  it("rejects a card as the method (the provider owns that record)", async () => {
+    const res = await call(app.url, "/api/payments/manual", {
+      method: "POST",
+      userId: users.platformOps.id,
+      body: { businessId: A, planId: "profesional", period: "monthly", method: "tarjeta" },
+    });
+
+    expect(res.status).toBe(400);
+    expect(h.calls.createPayment).toBeUndefined();
   });
 });
 

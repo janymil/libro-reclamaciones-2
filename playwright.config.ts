@@ -30,7 +30,11 @@ export default defineConfig({
   },
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: process.env.APP_URL || 'http://localhost:5000',
+    // The dev server the developer is using (and the tunnel in front of it) stays
+    // on 5000. Tests get their own origin unless APP_URL points somewhere else,
+    // so a test run can never take over, restart or kill the instance behind the
+    // proxy - which is what used to happen when both wanted port 5000.
+    baseURL: process.env.APP_URL || 'http://localhost:5100',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -43,7 +47,7 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
-      testMatch: [/0[12]-.*\.spec\.ts/, /0[56]-.*\.spec\.ts/],
+      testMatch: [/0[12]-.*\.spec\.ts/, /0[56]-.*\.spec\.ts/, /1[012]-.*\.spec\.ts/],
     },
     {
       name: 'chromium-authenticated',
@@ -53,8 +57,10 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:5000/api/status',
+    // Dedicated port: `PORT` is read by server/index.ts, so this instance is
+    // separate from the one you run with `npm run dev` (5000).
+    command: 'cross-env PORT=5100 npm run dev',
+    url: 'http://localhost:5100/api/status',
     reuseExistingServer: true,
     timeout: 60000,
   },

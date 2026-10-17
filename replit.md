@@ -195,7 +195,13 @@ Two consequences for testing:
 The system uses a multi-tenant PostgreSQL database with the following core entities:
 - **Users**: Business user accounts with role-based access
 - **Businesses**: Company information, plan, trial and subscription lifecycle
-- **Establishments**: Multiple business locations per company
+- **Establishments**: Multiple business locations per company. The *public* Libro is ONE per
+  company (`libro_configuration.business_id` is UNIQUE: one link/QR, one inbox, the consumer
+  picks the local, folios `YYYY-NNNN` run per company), while `books` holds a per-local register
+  created together with each establishment in one transaction - what `/libros` lists and
+  exports per local for an inspection (DS 011-2011-PCM). A local can be closed without losing
+  anything: `PATCH /api/establishments/:id { isActive: false }` takes it out of the portal and
+  the intake refuses it (409), keeping its register and its records
 - **Complaints**: Customer complaints with full audit trail
 - **Complaint Attachments**: Evidence files submitted by consumers (metadata; files on disk)
 - **User Business Access**: multi-RUC grants (one login, several businesses)
@@ -219,7 +225,7 @@ Core business rules enforce Peruvian legal requirements:
 - **15-day response deadline**: Automatic calculation excluding weekends and holidays
 - **Correlative numbering**: Sequential complaint numbering per establishment
 - **Data retention**: enforced by a daily sweep that anonymizes consumer PII and purges evidence files 24 months after submission (`server/services/retentionService.ts`, scheduled by `server/services/scheduler.ts`)
-- **Legal notices**: Mandatory signage and disclosure requirements (Anexo II form + Anexo III poster + copy-paste web notice, see `server/routes/documents.routes.ts`)
+- **Legal notices**: Mandatory signage and disclosure requirements (Anexo I form fields + Anexo II poster + copy-paste web notice, see `server/routes/documents.routes.ts`)
 
 ### Compliance & commercial roadmap (implemented)
 Beyond the base Libro de Reclamaciones, the product now covers the gaps against the
@@ -237,8 +243,10 @@ competitors. Everything below is wired end to end (server + client):
 - **INDECOPI expediente**: `GET /api/complaints/expediente/descargar` returns a ZIP with
   `hojas/*.pdf` (constancias), `adjuntos/`, `sirec.csv` and `MANIFIESTO.txt` carrying the
   generation timestamp, filters and a SHA-256 verification code.
-- **Anexo II/III**: `GET /api/documents/anexo-ii` (print-ready A4 blank form, title >= 1 cm,
-  body >= 0.5 cm) plus the existing Anexo III poster and a copy-paste web-notice snippet.
+- **Anexo I/II**: `GET /api/documents/anexo-ii` (print-ready A4 blank form with the Anexo I
+  fields, title >= 1 cm, body >= 0.5 cm) plus the Anexo II poster and a copy-paste web-notice
+  snippet. The Reglamento has only two annexes; there is no "Anexo III" (the web
+  notice obligation comes from art. 151 of the Código).
 - **CAPTCHA + honeypot**: self-hosted proof-of-work challenge (`captchaService`, no third-party
   script, nothing for the consumer to read or type) plus a honeypot field on the public form;
   both verified on submission. The same gate protects the public AI assistant, the ARCO intake
@@ -251,6 +259,29 @@ competitors. Everything below is wired end to end (server + client):
   `GET /api/plans`, `GET|POST /api/subscription`, UI at `/plan`.
 - **Multi-RUC switcher**: `user_business_access` grants a login access to several businesses;
   `GET /api/auth/businesses` + `POST /api/auth/switch-business` and a header dropdown.
+  `POST /api/businesses` (UI: Empresas → "Nueva Empresa") registers the company **and its
+  Libro de Reclamaciones** in the same transaction the wizard uses
+  (`storage.completeOnboarding`): profile + `libro { libroName, businessType, urlSlug?,
+  notificationEmail? }`. The public URL is derived from the book's name when the form sends
+  none, the first establishment is named after that name (never the old hard-coded "Casa
+  Matriz"), and a login with no company yet also gets it as its active one - otherwise the
+  company appeared on /empresas while "Mi Perfil → Mi empresa" still answered "Aún no ha
+  registrado su empresa".
+- **Onboarding guidance for one local vs a chain**: registering creates exactly ONE
+  establishment (the casa matriz, or the online channel), which is right for a shop and
+  confusing for a chain. So step 2 asks "¿Cómo opera tu negocio?" (un solo local / casa matriz +
+  sucursales / solo online - `client/src/lib/locales-plan.ts`, tested): it relabels the name
+  field (local, casa matriz, tienda online), prefills "Casa Matriz - <marca>" for a chain,
+  locks the channel for an online-only store and never leaves the old `tienda_virtual` default
+  on a physical business. The live panel
+  `components/onboarding/what-will-be-created.tsx` lists what the transaction will actually
+  write (empresa · primer local + código · libro · enlace y QR · correo), and after
+  registration `/panel` shows **Primeros pasos** (`components/dashboard/getting-started.tsx` +
+  `lib/getting-started.ts`): real-data steps (libro publicado, correo confirmado, locales
+  faltantes vs lo declarado, cada local con su libro) that hide themselves when nothing is
+  pending. The establishment rules both sides share live in `shared/establishments.ts` (channel
+  → `ONLINE-01`/`SUC-001`, next free `SUC-00N`). Note `books` is NOT a second public Libro: it
+  is one register per local (link, QR, inbox, branding and folios are per company).
 - **Access requests** (one RUC, one tenant, no dead end): a RUC that is already registered
   cannot be registered again, so the second legitimate person (the accountant of a client, a
   new partner, staff turnover) asks for access instead: `POST /api/businesses/access-requests`
@@ -313,6 +344,28 @@ competitors. Everything below is wired end to end (server + client):
   `/api`), WCAG AA skip link/landmarks/ARIA labels, an accessibility and cookie statement at
   `/accesibilidad`, an informational cookie notice, and a public status page `/estado` backed by
   `GET /api/status`.
+- **Legal pages (public)**: the operator's identity and documents live in one
+  module, `client/src/lib/platform-legal.ts` (`OPERATOR`: business name "Servicios SAAS",
+  RUC 10411592982, phone, mailbox, optional `address`). The landing footer prints it and
+  links to `/terminos`, `/privacidad`, `/aviso-legal`, plus the operator's own
+  Libro de Reclamaciones — now the real public book
+  (`LIBRO_DE_RECLAMACIONES_URL = 'https://librodigital.pe/libro/servicios-saas'`), the
+  single line to change if it moves. The same module feeds `/terminos`, `/aviso-legal`,
+  `/contacto` and the legal index in `client/src/components/legal/legal-page.tsx`. Note that
+  `/privacidad` (platform) is not `/libro/:slug/politica-de-privacidad` (each customer's book).
+- **Marco normativo (`/normativa`)**: the eight norms that govern the Libro (Ley 29571, Ley 31435,
+  Ley 32495, DS 011-2011-PCM, DS 006-2014-PCM, DS 101-2022-PCM, Ley 29733, DS 016-2024-JUS) with
+  the articles each one touches and a verified gob.pe link. `client/src/lib/legal-norms.ts` is the
+  single source for the links, the UIT 2026 value (DS 301-2025-EF, S/ 5 500) and the art. 110 fine
+  caps; the landing footer and `/terminos` read from it. The pending draft DS (RM 244-2026-PCM,
+  July 2026) is listed as *not yet in force*, never as an obligation.
+- **Nosotros y contacto (`/contacto`)**: one public page with what the service does (no
+  software/coding talk), why it exists, how the team works (no address, map, headcount or
+  client counters) and the contact channels plus a form. The form posts to
+  `POST /api/contact` (`server/routes/contact.routes.ts`): shared schema
+  `shared/contact.ts`, proof-of-work CAPTCHA, honeypot, `contactLimiter` and the message
+  arrives at the platform identity's mailbox with the sender as Reply-To. The page states
+  that the form is *not* the Libro de Reclamaciones and links to it.
 - **Redes sociales (la vía simple)**: `client/src/components/libro/social-channels-card.tsx` en
   `/integraciones` entrega el enlace público del Libro, textos listos para copiar y los pasos por
   plataforma para publicarlo en WhatsApp Business, Instagram, TikTok, YouTube y Facebook. Sin API,
@@ -400,9 +453,10 @@ Modern, responsive design using shadcn/ui components:
   silently funnels every visitor into one rate-limit bucket and logs the CDN's IP.
 - **Zoho Mail** hosts the only mailbox, `hola@librodigital.pe`: it is the SMTP sender
   (`smtp.zoho.com`, port 465/SSL or 587/TLS - authentication with the mailbox password, or
-  an app-specific password when 2FA is on), the contact address on the landing and
-  accessibility pages, `PAYMENTS_ALERT_EMAIL`, and the address the compliance co-pilot
-  names when a user asks for human help. `npm run email:diagnose` finds the working
+  an app-specific password when 2FA is on), the contact address published by the landing
+  footer and the legal pages (`client/src/lib/platform-legal.ts`), `PAYMENTS_ALERT_EMAIL`,
+  and the address the compliance co-pilot names when a user asks for human help.
+  `npm run email:diagnose` finds the working
   host/password combination instead of guessing.
 - DNS records, the CSP-vs-Rocket-Loader trap and the end-to-end mail checklist live in
   **RUNBOOK.md §9**.

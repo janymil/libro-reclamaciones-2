@@ -42,9 +42,25 @@ async function main() {
   ]);
   console.log(JSON.stringify(trends, null, 2));
 
-  console.log("\n--- 4. Consumer form assistant ---");
-  const assistance = await aiService.assistConsumerDraft("me trataron mal");
+  console.log("\n--- 4. Consumer form assistant (draft + declared form fields) ---");
+  // Mirrors what the public form now sends: the draft *and* the non-personal
+  // fields the visitor already completed, so the assistant stops reporting as
+  // missing what the form already holds (product, amount, date, receipt number).
+  const assistance = await aiService.assistConsumerDraft(
+    "El dia 10 de octubre de 2026 compré un televisor Sony Smart TV de 55 pulgadas. Después de unos días de uso, el equipo comenzó a presentar problemas de imagen, con parpadeos constantes y líneas horizontales en la pantalla. He intentado solucionar el problema reiniciando el televisor y restableciendo la configuración de fábrica, pero la falla continúa.",
+    {
+      productServiceName: "TV Sony 50",
+      purchaseAmount: "4850",
+      purchaseDate: "2026-10-10",
+      receiptNumber: "4565548786654",
+    }
+  );
   console.log(JSON.stringify(assistance, null, 2));
+  console.log(
+    assistance.missingFields.some((field) => /producto|comprobante|factura|fecha de consumo/i.test(field))
+      ? "✗ The assistant still reports a declared field as missing."
+      : "✓ No declared field (producto, monto, fecha de consumo, comprobante) is reported as missing."
+  );
 
   const ok = [classification, draft, trends, assistance].every((result) => result.source === "ai");
   console.log(`\n${ok ? "✓ All AI features verified against the live provider." : "✗ Some features fell back to heuristics - check the errors above."}`);

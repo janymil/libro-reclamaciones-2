@@ -8,11 +8,13 @@
  * only cite what a human reviewer wrote down here.
  *
  * Sources (keep aligned with `attached_assets/Pasted-Base-legal-*.txt`):
- *  - Ley N.° 29571 (Código de Protección y Defensa del Consumidor), arts. 24 y 152,
- *    modificados por la Ley N.° 31435 (15 días hábiles improrrogables).
+ *  - Ley N.° 29571 (Código de Protección y Defensa del Consumidor), arts. 24, 150,
+ *    151 y 152, modificados por la Ley N.° 31435 (15 días hábiles) y por la
+ *    Ley N.° 32495 (plataformas digitales de comercio electrónico).
  *  - DS 011-2011-PCM (Reglamento del Libro de Reclamaciones) y sus modificatorias
- *    DS 006-2014-PCM (avisos) y DS 101-2022-PCM (adecuación y Anexo 1).
+ *    DS 006-2014-PCM (avisos) y DS 101-2022-PCM (adecuación y Anexo I).
  *  - Ley N.° 29733 y su nuevo Reglamento DS 016-2024-JUS (protección de datos).
+ *  - Textos y enlaces oficiales verificados en client/src/lib/legal-norms.ts.
  */
 
 export interface LegalKnowledgeEntry {
@@ -110,13 +112,15 @@ export const LEGAL_KNOWLEDGE: LegalKnowledgeEntry[] = [
   {
     id: 'ds006-2014-aviso',
     norm: 'DS 006-2014-PCM',
-    article: 'Anexo II y Anexo III',
+    article: 'Anexos I y II',
     title: 'Aviso obligatorio del Libro (medidas y aviso web)',
     keywords: ['aviso', 'anexo', 'medidas', 'letras', 'web', 'visible', 'indecopi', 'portal'],
     summary:
       'El aviso obligatorio es de tamaño mínimo A4: la frase "Libro de Reclamaciones" con letras mínimas de 1x1 cm ' +
-      'y el resto del texto con un mínimo de 0.5x0.5 cm. En portales web debe incluirse un aviso visible que enlace ' +
-      'al Libro virtual (Anexo III), con la línea de ayuda de INDECOPI.',
+      'y el resto del texto con un mínimo de 0.5x0.5 cm. En portales web y plataformas de comercio electrónico debe ' +
+      'publicarse un aviso o enlace visible y fácilmente accesible al Libro (art. 151 del Código, modificado por la ' +
+      'Ley N.° 32495). El Reglamento tiene dos anexos: el Anexo I (formato de la hoja) y el Anexo II (aviso); no existe ' +
+      'un "Anexo III".',
   },
   {
     id: 'ds101-2022-pcm',
@@ -210,8 +214,21 @@ export const LEGAL_KNOWLEDGE: LegalKnowledgeEntry[] = [
     keywords: ['instagram', 'whatsapp', 'tiktok', 'facebook', 'redes', 'sociales', 'marketplace', 'tienda', 'online', 'influencer', 'youtuber', 'streamer', 'creador', 'virtual'],
     summary:
       'La obligación no distingue el soporte: todo proveedor que vende por Internet (incluidas las redes sociales) debe ofrecer un Libro virtual ' +
-      'accesible desde ese mismo medio y publicar el aviso del Anexo III con un enlace visible. Un chat no reemplaza al Libro: la hoja exige los ' +
+      'accesible desde ese mismo medio y publicar el aviso o enlace visible que exige el art. 151 del Código, hoy también exigible a las ' +
+      'plataformas digitales de comercio electrónico (Ley N.° 32495). Un chat no reemplaza al Libro: la hoja exige los ' +
       'campos del Anexo 1, la constancia gratuita al consumidor y la respuesta por escrito en 15 días hábiles.',
+  },
+  {
+    id: 'ley-32495-plataformas',
+    norm: 'Ley N.° 32495',
+    article: 'Arts. 150 y 151 del Código',
+    title: 'Plataformas digitales de comercio electrónico también necesitan Libro',
+    keywords: ['plataforma', 'digital', 'marketplace', 'ecommerce', 'comercio', 'electronico', 'libro', 'obligacion'],
+    summary:
+      'La Ley N.° 32495 modificó los arts. 150 y 151 del Código para incluir a las plataformas digitales de comercio electrónico ' +
+      'en la obligación de contar con el Libro de Reclamaciones (físico o virtual) y de exhibir un aviso o enlace visible y ' +
+      'fácilmente accesible. El Poder Ejecutivo debe adecuar el Reglamento; el proyecto se publicó para comentarios en julio de 2026 ' +
+      '(RM N.° 244-2026-PCM) y todavía no es norma vigente.',
   },
 ];
 

@@ -9,14 +9,17 @@ import {
   centsToSoles,
   computePeriodEnd,
   getPaymentProvider,
+  isManualPaymentMethod,
   isPaymentSuccessful,
   isPubliclyReachableBaseUrl,
   isSubscriptionLive,
   isSubscriptionStatus,
+  paymentFailureHint,
   providerSupportsRecurring,
   referenceSuffix,
   resolvePlanFromAmount,
   resolvePlanFromCode,
+  type PaymentMethodId,
   type PaymentProviderDefinition,
   type PaymentProviderId,
   type PaymentStatus,
@@ -24,6 +27,8 @@ import {
   type SubscriptionStatus,
 } from "@shared/payments";
 import { getPlan, isPlanId, isTrialing } from "@shared/plans";
+import { buildTransferInstructions } from "@shared/payment-details";
+import { buildPaymentResumeUrl } from "@shared/payment-recovery";
 import { formatCalendarDate } from "@shared/peru-time";
 import type { Business, Payment, Subscription } from "@shared/schema";
 
@@ -558,6 +563,16 @@ export async function settlePayment(
   const updated = await storage.updatePayment(payment.id, {
     status,
     raw: raw ?? (payment.raw as Record<string, unknown> | null) ?? null,
+    // The reason the customer sees. Filled from the provider's decline code, and
+    // only when there is no reason yet, so a more precise one (the amount mismatch
+    // below) is never overwritten by a generic translation.
+    ...(status === "failed" && !payment.failureReason
+      ? {
+          failureReason: paymentFailureHint(
+            (raw as Record<string, unknown> | undefined)?.status_detail,
+          ),
+        }
+      : {}),
     ...(status === "paid" ? { paidAt: new Date() } : {}),
   });
   const settled = updated ?? payment;
@@ -578,6 +593,18 @@ export async function settlePayment(
     // confirmed payment, nor fail the webhook response the provider is waiting for.
     void sendPaymentReceipt(settled).catch((error) => {
       console.error(`[payments] no se pudo enviar el comprobante de ${settled.reference}:`, error);
+    });
+  } else if (settled.status === "failed") {
+    // A declined charge is the one moment the customer needs a way back, and the
+    // webhook is the only moment we are sure enough to act on it. Fire-and-forget
+    // like the receipt: an SMTP failure must never fail the provider's webhook.
+    // `automatic: true` makes it send at most once, however many times the provider
+    // retries the notification.
+    void sendPaymentRecoveryEmail(settled.id, { automatic: true }).catch((error) => {
+      console.error(
+        `[payments] no se pudo enviar el enlace de pago de ${settled.reference}:`,
+        error,
+      );
     });
   }
 
@@ -642,7 +669,142 @@ async function sendPaymentReceipt(payment: Payment): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 2b. Recurring agreements: state sync and the renewal ledger
+// 2b. Recovering an unpaid order
+// ---------------------------------------------------------------------------
+
+/** A recovery email that cannot be sent, with a message the API can return. */
+export class PaymentRecoveryError extends Error {}
+
+/**
+ * Only http(s), because the stored URL comes from a provider payload and ends up
+ * inside an email. A `javascript:` or `data:` value would turn the message into a
+ * weapon aimed at the customer, so anything else is dropped.
+ */
+function safeCheckoutUrl(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+export type PaymentRecoveryOutcome =
+  | { sent: true; sentTo: string; payment: Payment }
+  | {
+      sent: false;
+      reason: "not_found" | "already_paid" | "already_sent" | "no_email";
+    };
+
+/**
+ * Emails the customer a way to finish an unpaid order.
+ *
+ * Two callers, one message:
+ *
+ *   * `settlePayment` when a charge turns `failed` (the automatic path), and
+ *   * the operator's "send the payment link" button in the console.
+ *
+ * What travels is the SAME checkout URL the customer was sent to the first time
+ * (stored in `redirect_url`), our own `/suscribir` page as a fallback, and the
+ * transfer/Yape block for the same amount and reference - so paying by a
+ * different method still carries `LD-XXXXXX` and can be matched by hand.
+ *
+ * `automatic: true` sends at most once per payment: webhooks are retried, and a
+ * customer must not receive the same email three times. An operator can resend
+ * deliberately; every send is counted in `recoveryEmailCount`.
+ */
+export async function sendPaymentRecoveryEmail(
+  paymentId: string,
+  options: { automatic?: boolean } = {},
+): Promise<PaymentRecoveryOutcome> {
+  const automatic = options.automatic === true;
+
+  const payment = await storage.getPayment(paymentId);
+  if (!payment) {
+    if (automatic) {
+      return { sent: false, reason: "not_found" };
+    }
+    throw new PaymentRecoveryError("Pago no encontrado.");
+  }
+
+  if (payment.status === "paid") {
+    if (automatic) {
+      return { sent: false, reason: "already_paid" };
+    }
+    throw new PaymentRecoveryError("El pago ya está confirmado: no hay nada que cobrar.");
+  }
+
+  if (automatic && payment.recoveryEmailSentAt) {
+    // Already told once. Retries of the same webhook stop here.
+    return { sent: false, reason: "already_sent" };
+  }
+
+  const [user, business] = await Promise.all([
+    payment.userId ? storage.getUser(payment.userId) : Promise.resolve(undefined),
+    storage.getBusiness(payment.businessId),
+  ]);
+
+  if (!user?.email) {
+    if (automatic) {
+      return { sent: false, reason: "no_email" };
+    }
+    throw new PaymentRecoveryError(
+      "El cliente no tiene un correo electrónico registrado: no se puede enviar el enlace.",
+    );
+  }
+
+  const period: PlanPeriod = payment.period === "annual" ? "annual" : "monthly";
+  const periodLabel = period === "annual" ? "anual" : "mensual";
+  const planName = getPlan(payment.planId)?.name ?? payment.planId;
+  const description = `Plan ${planName} (${periodLabel})`;
+
+  // The identity also gives us the public base URL for the fallback link, which is
+  // the same one every other email and the PSP return URLs use.
+  const identity = await getIdentity().catch(() => undefined);
+  const baseUrl = (identity?.website || "https://librodigital.pe").replace(/\/+$/, "");
+
+  // Where to send a transfer / Yape, exactly as the checkout screen shows it. An
+  // unreadable settings table must not stop the email: it simply omits the block.
+  const transferDetails = await readTransferDetails().catch(() => undefined);
+  const transferInstructions =
+    buildTransferInstructions(
+      {
+        reference: payment.reference,
+        amountCents: payment.amountCents,
+        description,
+      },
+      transferDetails,
+    ) ?? null;
+
+  await emailService.sendPaymentRecovery({
+    email: user.email,
+    firstName: user.firstName ?? "",
+    businessName: business?.businessName ?? "su empresa",
+    planName,
+    periodLabel,
+    amountLabel: `${PAYMENT_CURRENCY_SYMBOL} ${centsToSoles(payment.amountCents).toFixed(2)}`,
+    reference: payment.reference,
+    checkoutUrl: safeCheckoutUrl(payment.redirectUrl),
+    resumeUrl: buildPaymentResumeUrl(baseUrl, payment.planId, period),
+    transferInstructions,
+    reason: payment.failureReason,
+    identity,
+  });
+
+  const updated = await storage.updatePayment(payment.id, {
+    // Kept from the first send so "when did we first reach out?" never moves.
+    recoveryEmailSentAt: payment.recoveryEmailSentAt ?? new Date(),
+    recoveryEmailCount: (payment.recoveryEmailCount ?? 0) + 1,
+  });
+
+  return { sent: true, sentTo: user.email, payment: updated ?? payment };
+}
+
+// ---------------------------------------------------------------------------
+// 2c. Recurring agreements: state sync and the renewal ledger
 // ---------------------------------------------------------------------------
 
 /** Business state that follows the agreement's state. */
@@ -1090,6 +1252,18 @@ async function handlePaymentNotification(providerId: PaymentProviderId, provider
     typeof authoritative.raw.external_reference === "string" ? authoritative.raw.external_reference : undefined;
 
   if (externalReference) {
+    // Checkout Pro stores the *preference* id as our `providerRef`, while the
+    // notification carries the *payment* id, so the lookup above can never match a
+    // one-off order. Our own reference does: it travels as `external_reference` on
+    // every charge the preference produces. Without this fallback a declined - and
+    // just as importantly, an approved - card was never recorded unless the customer
+    // happened to come back to the site and press "verify".
+    const order = await storage.getPaymentByReference(externalReference);
+    if (order && order.provider === providerId) {
+      const settled = await settlePayment(order, authoritative.status, authoritative.amountCents, authoritative.raw);
+      return { handled: true, status: settled.status };
+    }
+
     const subscription = await storage.getSubscriptionByReference(externalReference);
     if (subscription && subscription.provider === providerId) {
       const charge = await recordSubscriptionCharge(subscription, authoritative);
@@ -1233,4 +1407,134 @@ export async function confirmManualPayment(
 
   await activatePlan(settled);
   return settled;
+}
+
+/**
+ * Confirms a payment as received through a method that does not report itself.
+ *
+ * This is the "the customer ended up paying by transfer / Yape" path, and it
+ * deliberately works on ANY provider row: the order that Mercado Pago rejected is
+ * exactly the one the customer then pays against, quoting `LD-XXXXXX`, so
+ * confirming that row is what PAIRS the bank deposit with the order instead of
+ * leaving two unrelated records. `provider` is kept (it says where the order
+ * started); `method` and the `manualConfirmation` block say how the money arrived.
+ *
+ * It goes through `settlePayment` on purpose: the plan, the receipt and the
+ * discount redemption happen in the same single write path a provider-approved
+ * charge uses, so the two can never drift.
+ */
+export async function confirmOfflinePayment(
+  paymentId: string,
+  adminUserId: string,
+  input: { method: PaymentMethodId; note?: string | null },
+): Promise<Payment | undefined> {
+  const payment = await storage.getPayment(paymentId);
+  if (!payment) {
+    return undefined;
+  }
+  if (payment.status === "paid") {
+    return payment;
+  }
+  if (!isManualPaymentMethod(input.method)) {
+    throw new Error(
+      "Un cobro con tarjeta no se confirma a mano: elija transferencia, Yape, Plin o efectivo.",
+    );
+  }
+
+  const note = (input.note ?? "").trim() || null;
+  const raw = {
+    ...((payment.raw as Record<string, unknown> | null) ?? {}),
+    manualConfirmation: {
+      at: new Date().toISOString(),
+      byUserId: adminUserId,
+      method: input.method,
+      note,
+    },
+  };
+
+  const updated = await storage.updatePayment(payment.id, {
+    method: input.method,
+    confirmedByUserId: adminUserId,
+    failureReason: null,
+    raw,
+  });
+  const settled = updated ?? payment;
+
+  return settlePayment(settled, "paid", settled.amountCents, raw);
+}
+
+export interface RegisterManualPaymentInput {
+  businessId: string;
+  adminUserId: string;
+  planId: string;
+  period: PlanPeriod;
+  method: PaymentMethodId;
+  /**
+   * What actually arrived, in céntimos. Defaults to the console's price for the
+   * plan, which is what an operator normally collects; a negotiated amount is
+   * allowed because the bank deposit is the truth.
+   */
+  amountCents?: number;
+  /** Bank operation number, Yape reference, or who took the money. */
+  note?: string | null;
+}
+
+/**
+ * Records a payment that has no order behind it, and applies the plan.
+ *
+ * The case this exists for: the customer never finished a checkout (or paid by
+ * Yape "por fuera"), so there is no `payments` row to confirm. Creating the row
+ * anyway is what keeps the ledger complete - the console, the customer's history
+ * and the receipt all read from it - instead of the plan appearing from nowhere.
+ */
+export async function registerManualPayment(input: RegisterManualPaymentInput): Promise<Payment> {
+  if (!isPlanId(input.planId)) {
+    throw new Error("Plan inválido");
+  }
+  if (!isManualPaymentMethod(input.method)) {
+    throw new Error(
+      "Elija un método que se pueda cobrar fuera del proveedor: transferencia, Yape, Plin o efectivo.",
+    );
+  }
+
+  const business = await storage.getBusinessById(input.businessId);
+  if (!business) {
+    throw new Error("Cliente no encontrado");
+  }
+
+  const plan = getPlan(input.planId);
+  const listCents = await effectivePlanAmountCents(plan.id, input.period);
+  const amountCents =
+    typeof input.amountCents === "number" && Number.isFinite(input.amountCents) && input.amountCents > 0
+      ? Math.round(input.amountCents)
+      : listCents;
+
+  if (amountCents <= 0) {
+    throw new Error("El monto debe ser mayor que cero.");
+  }
+
+  // The receipt goes to `payments.userId`, so a row created by an operator still
+  // has to point at the person who owns the account.
+  const users = await storage.getUsersByBusinessIds([business.id]);
+  const owner = users.find((user) => user.role === "admin" && user.isActive) ?? users[0];
+
+  const created = await storage.createPayment({
+    businessId: business.id,
+    userId: owner?.id ?? null,
+    provider: "manual",
+    method: input.method,
+    reference: newPaymentReference(),
+    planId: plan.id,
+    period: input.period,
+    amountCents,
+    currency: PAYMENT_CURRENCY,
+    status: "pending",
+  });
+
+  const confirmed = await confirmOfflinePayment(created.id, input.adminUserId, {
+    method: input.method,
+    note: input.note,
+  });
+
+  return confirmed ?? created;
 }

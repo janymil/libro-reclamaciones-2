@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vites
 import crypto from "crypto";
 
 import { powInput, satisfiesPow } from "@shared/pow";
+import { RETENTION_MONTHS } from "@shared/plans";
 
 import { startTestApp, call } from "../test/routeTestHarness";
 
@@ -29,6 +30,8 @@ const h = vi.hoisted(() => ({
   createNotification: vi.fn(),
   getLibroConfigurationBySlug: vi.fn(),
   findComplaintByCorrelative: vi.fn(),
+  getBusinessById: vi.fn(),
+  getEstablishmentsByBusiness: vi.fn(),
 }));
 
 vi.mock("../services/complaintIntakeService", () => ({
@@ -67,6 +70,8 @@ vi.mock("../storage", () => ({
   storage: {
     getLibroConfigurationBySlug: h.getLibroConfigurationBySlug,
     findComplaintByCorrelative: h.findComplaintByCorrelative,
+    getBusinessById: h.getBusinessById,
+    getEstablishmentsByBusiness: h.getEstablishmentsByBusiness,
     getBusiness: h.getBusiness,
     createArcoRequest: h.createArcoRequest,
     createNotification: h.createNotification,
@@ -165,6 +170,8 @@ describe("CAPTCHA gate on the public endpoints", () => {
     });
     h.registerUser.mockResolvedValue({ success: true, message: "Cuenta creada", userId: "user-1" });
     h.getBusiness.mockResolvedValue(undefined);
+    h.getBusinessById.mockResolvedValue(undefined);
+    h.getEstablishmentsByBusiness.mockResolvedValue([]);
     h.createArcoRequest.mockImplementation(async (data: any) => ({ id: "arco-1", ...data }));
     h.createNotification.mockResolvedValue({ id: "notification-1" });
     h.getLibroConfigurationBySlug.mockResolvedValue({
@@ -344,6 +351,36 @@ describe("CAPTCHA gate on the public endpoints", () => {
       expect(h.assistConsumerDraft).toHaveBeenCalledTimes(1);
     });
 
+    it("forwards the declared form fields, but never the visitor's personal data", async () => {
+      const solved = await solveCaptcha();
+      const res = await call(app.url, "/api/ai/public/assist", {
+        method: "POST",
+        body: {
+          text: "El televisor comenzó a fallar a los pocos días de uso.",
+          context: {
+            productServiceName: "TV Sony 50",
+            purchaseDate: "2026-10-10",
+            receiptNumber: "4565548786654",
+            // Not whitelisted: a hostile body must not smuggle PII into the
+            // prompt the model reads.
+            consumerFullName: "Ana Pérez",
+            consumerDocumentNumber: "45678912",
+            consumerAddress: "Av. Siempre Viva 742",
+            consumerEmail: "ana@example.com",
+          },
+          captchaToken: solved.captchaToken,
+          captchaAnswer: solved.captchaAnswer,
+        },
+      });
+
+      expect(res.status).toBe(200);
+      expect(h.assistConsumerDraft).toHaveBeenCalledWith("El televisor comenzó a fallar a los pocos días de uso.", {
+        productServiceName: "TV Sony 50",
+        purchaseDate: "2026-10-10",
+        receiptNumber: "4565548786654",
+      });
+    });
+
     it("burns the challenge, so a solved puzzle cannot be replayed", async () => {
       const solved = await solveCaptcha();
       const first = await call(app.url, "/api/ai/public/assist", {
@@ -438,6 +475,90 @@ describe("CAPTCHA gate on the public endpoints", () => {
       // guessing an 8-digit document number.
       expect(answered.slice(0, 30).every((status) => status === 200)).toBe(true);
       expect(answered.slice(30).every((status) => status === 429)).toBe(true);
+    });
+  });
+
+  describe("public privacy policy", () => {
+    const publishedBook = {
+      id: "libro-1",
+      businessId: BUSINESS,
+      isActive: true,
+      urlSlug: "empresa-demo",
+      libroName: "Libro de Reclamaciones",
+      whatsappNumber: "999888777",
+      websiteUrl: "https://www.wong.pe",
+      privacyPolicyUrl: null as string | null,
+    };
+
+    const cencosud = {
+      id: BUSINESS,
+      businessName: "Cencosud Retail Perú S.A.",
+      commercialName: "Wong",
+      ruc: "20109072177",
+      address: "Av. Alfredo Benavides 3187",
+      distrito: "Santiago de Surco",
+      provincia: "Lima",
+      departamento: "Lima",
+      // Plan fields getEffectivePlan reads: the book payload resolves them.
+      subscriptionPlan: "gratis",
+      subscriptionStatus: "active",
+      trialEndsAt: null,
+    };
+
+    it("serves the hosted policy of the book, without the notification inbox", async () => {
+      h.getLibroConfigurationBySlug.mockResolvedValue(publishedBook);
+      h.getBusinessById.mockResolvedValue(cencosud);
+
+      const res = await call(app.url, "/api/public/libro/empresa-demo/privacy-policy");
+
+      expect(res.status).toBe(200);
+      expect(res.body.policy.responsible).toMatchObject({
+        name: "Cencosud Retail Perú S.A.",
+        ruc: "20109072177",
+        address: "Av. Alfredo Benavides 3187, Santiago de Surco, Lima, Lima",
+      });
+      expect(res.body.policy.retentionMonths).toBe(RETENTION_MONTHS);
+      expect(res.body.policy.sections).toHaveLength(8);
+      expect(res.body.policy.arcoChannels).toContain("Por WhatsApp al 999888777.");
+      // The notification inbox is internal contact data: the consumer-facing
+      // endpoints stopped exposing it, and the policy page must not leak it back.
+      expect(JSON.stringify(res.body)).not.toMatch(/@/);
+    });
+
+    it("answers 404 for a book that does not exist", async () => {
+      h.getLibroConfigurationBySlug.mockResolvedValue(undefined);
+
+      const res = await call(app.url, "/api/public/libro/no-existe/privacy-policy");
+
+      expect(res.status).toBe(404);
+    });
+
+    it("publishes the business's own policy link when it has one", async () => {
+      h.getLibroConfigurationBySlug.mockResolvedValue({
+        ...publishedBook,
+        privacyPolicyUrl: "https://www.wong.pe/politica-de-privacidad",
+      });
+      h.getBusinessById.mockResolvedValue(cencosud);
+
+      const res = await call(app.url, "/api/public/libro/empresa-demo");
+
+      expect(res.status).toBe(200);
+      expect(res.body.libro.privacyPolicyUrl).toBe("https://www.wong.pe/politica-de-privacidad");
+    });
+
+    it("never publishes a link that is not http(s), even if it is stored", async () => {
+      // A value written before the validation existed (or straight into the table)
+      // must not reach the href of the consent checkbox.
+      h.getLibroConfigurationBySlug.mockResolvedValue({
+        ...publishedBook,
+        privacyPolicyUrl: "javascript:alert(document.cookie)",
+      });
+      h.getBusinessById.mockResolvedValue(cencosud);
+
+      const res = await call(app.url, "/api/public/libro/empresa-demo");
+
+      expect(res.status).toBe(200);
+      expect(res.body.libro.privacyPolicyUrl).toBeNull();
     });
   });
 });

@@ -32,7 +32,9 @@ class LegalComplianceService {
   }
 
   async checkDs101Compliance(businessId: string): Promise<ComplianceCheck> {
-    // DS 101-2022-PCM - 15 días hábiles improrrogables
+    // Plazo de 15 días hábiles: art. 152 del Código, modificado por la Ley
+    // N.° 31435 (vigente desde el 21/05/2022). El DS 101-2022-PCM solo adecúa el
+    // Reglamento; el tipo se conserva por compatibilidad con la API y la BD.
     const complaints = await storage.getComplaintsByBusiness(businessId);
     const overdueComplaints = complaints.filter(c => 
       businessDayCalculator.isComplaintOverdue(c.submissionDate, c.responseDate ?? undefined)
@@ -41,7 +43,7 @@ class LegalComplianceService {
     return {
       type: 'ds_101_2022_pcm',
       status: overdueComplaints.length === 0 ? 'compliant' : 'overdue',
-      description: 'Respuesta en 15 días hábiles improrrogables - DS 101-2022-PCM',
+      description: 'Respuesta en 15 días hábiles improrrogables (art. 152 del Código, Ley N.° 31435)',
       actions: overdueComplaints.length > 0 ? [
         `Responder ${overdueComplaints.length} reclamaciones vencidas`,
         'Implementar sistema de alertas automáticas',

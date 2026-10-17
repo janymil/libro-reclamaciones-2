@@ -121,6 +121,21 @@ describe("business payload schemas - commercial lifecycle protection", () => {
     expect(parsed.ruc).toBeUndefined();
     expect(parsed.subscriptionPlan).toBeUndefined();
   });
+
+  it("accepts the declared number of locales, and lets it be cleared", () => {
+    // `expected_establishments` is guidance for the "Primeros pasos" checklist
+    // (how many locales the company says it will have), so the customer must be
+    // able to set it AND to clear it again from /sucursales.
+    expect(businessUpdateSchema.parse({ expectedEstablishments: 5 })).toMatchObject({
+      expectedEstablishments: 5,
+    });
+    expect(businessUpdateSchema.parse({ expectedEstablishments: null })).toMatchObject({
+      expectedEstablishments: null,
+    });
+    expect(businessProfileSchema.parse({ ...business, expectedEstablishments: 3 })).toMatchObject({
+      expectedEstablishments: 3,
+    });
+  });
 });
 
 describe("account email normalization - one account per person", () => {

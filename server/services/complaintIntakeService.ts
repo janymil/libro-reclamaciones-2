@@ -5,6 +5,8 @@ import { aiService } from "./aiService";
 import { businessDayCalculator } from "./businessDayCalculator";
 import { buildConsultUrl } from "./consultUrl";
 import { emailService } from "./emailService";
+import { emailIdentity } from "./emailIdentity";
+import { readLogoBuffer } from "./logoService";
 import { pdfService } from "./pdfService";
 import { routingService } from "./routingService";
 import { complaintCreatedPayload, dispatchWebhookEvent } from "./webhookService";
@@ -82,6 +84,16 @@ export async function intakeComplaint(data: ComplaintSubmission): Promise<Intake
     throw new IntakeError("Empresa o establecimiento no encontrado", 404);
   }
 
+  // A closed local must not accept complaints, even from a printed QR or a cached
+  // page: deactivating it in Sucursales is meant to take its book offline, which is
+  // also the only way to stop a local that stopped serving the public.
+  if (!establishment.isActive) {
+    throw new IntakeError(
+      "Este local ya no está recibiendo reclamos. Elige otro local o contacta a la empresa.",
+      409,
+    );
+  }
+
   // Correlative number: year + first free running sequence for this tenant.
   const year = getPeruYear(new Date());
   const existingCount = (await storage.getComplaintsByBusiness(data.businessId)).length;
@@ -109,15 +121,17 @@ export async function intakeComplaint(data: ComplaintSubmission): Promise<Intake
     aiRiskLevel: baseline.riskLevel,
   });
 
-  // Per-business email templates (Phase 2.8) and AI brand voice (Phase 3.10)
+  // Per-business email templates (Phase 2.8), the business's own identity in the
+  // message (logo, contact data, reply address) and AI brand voice (Phase 3.10).
+  // The identity is always built: the consumer filed with the business, so even
+  // an unconfigured tenant must not receive a platform-looking confirmation.
   const config = await storage.getLibroConfiguration(business.id);
-  const customization = config
-    ? {
-        subjectPrefix: config.emailSubjectPrefix,
-        headerText: config.emailHeaderText,
-        footerText: config.emailFooterText,
-      }
-    : undefined;
+  const customization = {
+    subjectPrefix: config?.emailSubjectPrefix ?? null,
+    headerText: config?.emailHeaderText ?? null,
+    footerText: config?.emailFooterText ?? null,
+    identity: emailIdentity(business, config),
+  };
   const brandContext = config
     ? { brandTone: config.brandTone, brandPolicies: config.brandPolicies }
     : undefined;
@@ -175,6 +189,9 @@ export async function intakeComplaint(data: ComplaintSubmission): Promise<Intake
   // page so the consumer can track the complaint without calling.
   const confirmationPdf = await pdfService.generateComplaintConfirmation(complaint, business, establishment, {
     consultUrl: buildConsultUrl(config?.urlSlug, complaint.correlativeNumber),
+    // The same logo the email shows, so the printed constancia is recognizable
+    // as coming from the business too.
+    logo: config?.logoFileName ? readLogoBuffer(config.logoFileName) : null,
   });
 
   await emailService.sendComplaintConfirmation(

@@ -32,6 +32,10 @@ export interface PaymentRecord {
   statusLabel: string;
   redirectUrl: string | null;
   failureReason: string | null;
+  /** When the "finish your payment" email first went out (automatic or manual). */
+  recoveryEmailSentAt?: string | null;
+  /** How many times it went out, so the console does not resend blindly. */
+  recoveryEmailCount?: number;
   paidAt: string | null;
   createdAt: string;
 }
@@ -205,6 +209,87 @@ export function useConfirmPayment() {
       // A confirmed transfer leaves the operator's queue.
       queryClient.invalidateQueries({ queryKey: ['/api/payments/pending-manual'] });
     },
+  });
+}
+
+/** Everything an operator action can move: the ledger, the plan and the queues. */
+function invalidatePaymentViews(queryClient: ReturnType<typeof useQueryClient>) {
+  for (const key of [
+    '/api/payments',
+    '/api/payments/pending-manual',
+    '/api/payments/subscription',
+    '/api/subscription',
+    '/api/admin/payments',
+    '/api/admin/overview',
+    '/api/admin/customers',
+  ]) {
+    queryClient.invalidateQueries({ queryKey: [key] });
+  }
+}
+
+/**
+ * Operator: email the customer a way to finish an unpaid order.
+ *
+ * The server sends the same message the webhook sends automatically: the checkout
+ * link they already used, our own page as a fallback, and the transfer/Yape data
+ * for the same reference.
+ */
+export function useSendPaymentLink() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (paymentId: string) => {
+      const response = await apiRequest('POST', `/api/payments/${paymentId}/payment-link`);
+      return response.json() as Promise<{ message: string; sentTo: string; payment: PaymentRecord }>;
+    },
+    onSuccess: () => invalidatePaymentViews(queryClient),
+  });
+}
+
+/**
+ * Operator: the customer paid a pending order by transfer / Yape instead.
+ *
+ * Confirming the existing row is what PAIRS the deposit with the order they quote,
+ * so the ledger keeps where the order started and how the money arrived.
+ */
+export function useConfirmOfflinePayment() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: { paymentId: string; method: string; note?: string }) => {
+      const response = await apiRequest('POST', `/api/payments/${input.paymentId}/confirm-offline`, {
+        method: input.method,
+        note: input.note ?? null,
+      });
+      return response.json() as Promise<{ message: string; payment: PaymentRecord }>;
+    },
+    onSuccess: () => invalidatePaymentViews(queryClient),
+  });
+}
+
+/**
+ * Operator: record a payment that has no order behind it and apply the plan.
+ *
+ * Used when the customer paid "por fuera" and no checkout was ever finished; the
+ * row it creates is what makes the plan change explainable later.
+ */
+export function useRegisterManualPayment() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: {
+      businessId: string;
+      planId: string;
+      period: string;
+      method: string;
+      /** Céntimos. Omitted = the console's price for the plan. */
+      amountCents?: number;
+      note?: string;
+    }) => {
+      const response = await apiRequest('POST', '/api/payments/manual', input);
+      return response.json() as Promise<{ message: string; payment: PaymentRecord }>;
+    },
+    onSuccess: () => invalidatePaymentViews(queryClient),
   });
 }
 

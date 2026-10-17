@@ -77,6 +77,11 @@ export interface AdminPaymentRow {
   statusLabel: string;
   paidAt: string | null;
   createdAt: string;
+  /** Why the provider declined, translated for the customer. */
+  failureReason?: string | null;
+  /** How many "finish your payment" emails have gone out, and when the first did. */
+  recoveryEmailSentAt?: string | null;
+  recoveryEmailCount?: number;
   /** Promo code used, when the amount is below the list price. */
   discountCode: string | null;
   discountCents: number;

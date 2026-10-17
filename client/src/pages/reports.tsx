@@ -4,7 +4,11 @@ import type { MonthlyReport, ReportStats } from '@/lib/api-types';
 import { downloadCsv, todayStamp } from '@/lib/export';
 import { downloadSirecReport } from '@/lib/sirec';
 import { useReincidenceReport, useAbusiveClauses } from '@/hooks/use-complaints';
-import type { Complaint } from '@shared/schema';
+import type { Complaint, Establishment } from '@shared/schema';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useToast } from '@/hooks/use-toast';
+import { COMPLAINT_TYPES } from '@/lib/constants';
+import { formatCalendarDate } from '@shared/peru-time';
 import AppLayout from '@/components/layout/app-layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import PlanGate from '@/components/plan/plan-gate';
@@ -15,10 +19,21 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { CalendarDays, Download, FileText, TrendingUp, PackageSearch, Gavel } from 'lucide-react';
 
+// Radix UI's Select forbids items whose value is an empty string (it is reserved
+// to clear the selection and show the placeholder). "Show everything" is modelled
+// with this sentinel and mapped back to "" in the filter state, where an empty
+// value already means "no filter".
+const ALL_FILTER = 'all';
+
 export default function Reports() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  // Custom-report filters, on top of the date range.
+  const [customEstablishmentId, setCustomEstablishmentId] = useState('');
+  const [customComplaintType, setCustomComplaintType] = useState('');
   const [contractText, setContractText] = useState('');
+
+  const { toast } = useToast();
 
   // Phase 1.3: INDECOPI expediente download
   const [isBuildingExpediente, setIsBuildingExpediente] = useState(false);
@@ -69,6 +84,18 @@ export default function Reports() {
     queryKey: ['/api/complaints'],
   });
 
+  // Sucursal options for the custom-report filter
+  const { data: establishments = [] } = useQuery<Establishment[]>({
+    queryKey: ['/api/establishments'],
+    queryFn: async () => {
+      const response = await fetch('/api/establishments', { credentials: 'include' });
+      if (!response.ok) {
+        return [];
+      }
+      return response.json();
+    },
+  });
+
   const { data: compliance } = useQuery<any>({
     queryKey: ['/api/compliance/report'],
   });
@@ -116,18 +143,27 @@ export default function Reports() {
   };
 
   const exportCustomRange = () => {
-    const from = startDate ? new Date(startDate) : null;
-    const to = endDate ? new Date(endDate) : null;
+    const establishmentNames = new Map<string, string>(
+      establishments.map((establishment): [string, string] => [establishment.id, establishment.name]),
+    );
 
     const rows = (complaints ?? [])
       .filter((c: any) => {
-        const submitted = new Date(c.submissionDate);
-        if (from && submitted < from) return false;
-        if (to && submitted > to) return false;
+        // Sucursal and tipo first, then the date range (inclusive on both ends).
+        if (customEstablishmentId && c.establishmentId !== customEstablishmentId) return false;
+        if (customComplaintType && c.complaintType !== customComplaintType) return false;
+
+        // Compared as Peruvian calendar dates (YYYY-MM-DD), so a complaint
+        // submitted in the evening of the selected end date is included and the
+        // result does not depend on the reader's time zone.
+        const submitted = c.submissionDate ? formatCalendarDate(new Date(c.submissionDate)) : '';
+        if (startDate && submitted < startDate) return false;
+        if (endDate && submitted > endDate) return false;
         return true;
       })
       .map((c: any) => ({
         'N° correlativo': c.correlativeNumber,
+        Sucursal: establishmentNames.get(c.establishmentId) ?? c.establishmentId ?? '',
         Tipo: c.complaintType,
         Estado: c.status,
         Consumidor: c.consumerFullName,
@@ -138,7 +174,20 @@ export default function Reports() {
         Vencido: c.isOverdue ? 'Sí' : 'No',
       }));
 
+    if (rows.length === 0) {
+      toast({
+        title: 'Nada que exportar',
+        description: 'No hay reclamaciones que coincidan con los filtros aplicados.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     downloadCsv(`reporte-personalizado-${todayStamp()}`, rows);
+    toast({
+      title: 'Exportación lista',
+      description: `${rows.length} reclamaciones exportadas a CSV.`,
+    });
   };
 
   const exportSirec = () => {
@@ -257,27 +306,35 @@ export default function Reports() {
               <CardHeader>
                 <CardTitle>Reportes Mensuales Automáticos</CardTitle>
                 <CardDescription>
-                  Reportes generados automáticamente según DS 011-2011-PCM
+                  Reportes generados automáticamente según DS 011-2011-PCM. Se listan los meses
+                  desde el registro de su empresa, hasta un máximo de 6.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {monthlyReports?.map((report: any, index: number) => (
-                  <div key={index} className="flex items-center justify-between p-4 border rounded-lg">
-                    <div>
-                      <h4 className="font-medium">{report.month}</h4>
-                      <p className="text-sm text-gray-600">{report.complaints} reclamaciones procesadas</p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => exportMonthly(report)}
-                      data-testid={`button-download-${index}`}
+                {monthlyReports && monthlyReports.length > 0 ? (
+                  monthlyReports.map((report, index) => (
+                    <div
+                      key={report.month}
+                      className="flex items-center justify-between p-4 border rounded-lg"
                     >
-                      <Download className="h-4 w-4 mr-2" />
-                      Descargar CSV
-                    </Button>
-                  </div>
-                )) || (
+                      <div>
+                        <h4 className="font-medium">{report.month}</h4>
+                        <p className="text-sm text-gray-600">
+                          {report.complaints} reclamaciones procesadas
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => exportMonthly(report)}
+                        data-testid={`button-download-${index}`}
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Descargar CSV
+                      </Button>
+                    </div>
+                  ))
+                ) : (
                   <div className="text-center py-8 text-gray-500">
                     No hay reportes disponibles
                   </div>
@@ -295,7 +352,7 @@ export default function Reports() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <Label htmlFor="start-date">Fecha Inicio</Label>
                     <Input
@@ -316,9 +373,54 @@ export default function Reports() {
                       data-testid="input-end-date"
                     />
                   </div>
+                  <div>
+                    <Label htmlFor="custom-establishment">Establecimiento</Label>
+                    <Select
+                      value={customEstablishmentId || ALL_FILTER}
+                      onValueChange={(value) =>
+                        setCustomEstablishmentId(value === ALL_FILTER ? '' : value)
+                      }
+                    >
+                      <SelectTrigger id="custom-establishment" data-testid="select-custom-establishment">
+                        <SelectValue placeholder="Establecimiento" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL_FILTER}>Todos los establecimientos</SelectItem>
+                        {establishments.map((establishment) => (
+                          <SelectItem key={establishment.id} value={establishment.id}>
+                            {establishment.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label htmlFor="custom-type">Tipo</Label>
+                    <Select
+                      value={customComplaintType || ALL_FILTER}
+                      onValueChange={(value) =>
+                        setCustomComplaintType(value === ALL_FILTER ? '' : value)
+                      }
+                    >
+                      <SelectTrigger id="custom-type" data-testid="select-custom-type">
+                        <SelectValue placeholder="Tipo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL_FILTER}>Todos los tipos</SelectItem>
+                        {Object.entries(COMPLAINT_TYPES).map(([key, label]) => (
+                          <SelectItem key={key} value={key}>
+                            {label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 <Button className="w-full" onClick={exportCustomRange} data-testid="button-generate-custom">
+                  <Download className="h-4 w-4 mr-2" />
                   Generar Reporte Personalizado
+                </Button>
+
                 <div className="border-t pt-4">
                   <p className="mb-1 text-sm font-medium">Reporte SIREC</p>
                   <p className="mb-3 text-sm text-gray-600">
@@ -335,9 +437,6 @@ export default function Reports() {
                     Exportar reporte SIREC (CSV)
                   </Button>
                 </div>
-
-
-                </Button>
               </CardContent>
             </Card>
           </TabsContent>
@@ -473,7 +572,8 @@ export default function Reports() {
                 </CardTitle>
                 <CardDescription>
                   Pegue las condiciones de sus contratos o contratos de adhesión y la IA las
-                  revisará contra el artículo 47 del Código de Protección y Defensa del Consumidor.
+                  revisará contra los artículos 49 y 50 del Código de Protección y Defensa del
+                  Consumidor (cláusulas abusivas).
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">

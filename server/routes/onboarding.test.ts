@@ -123,6 +123,7 @@ beforeEach(async () => {
     business: { id: "b-new", businessName: "Empresa SAC" },
     config: { id: "cfg", urlSlug: libroData.urlSlug },
     establishment: { id: "est", name: "Casa Matriz" },
+    book: { id: "book-1", bookType: "reclamos" },
     createdBusiness: true,
   };
 
@@ -145,10 +146,25 @@ describe("POST /api/auth/complete-onboarding", () => {
     // Nothing pre-existing: the transaction creates the tenant itself.
     expect(input.existingBusinessId).toBeNull();
     expect(input.refreshBusinessProfile).toBe(false);
-    // The establishment is derived from the sales channel, inside the same write.
-    expect(input.establishment.name).toBe("Casa Matriz");
+    // The establishment (the "lugar" of the book) carries the name the user gave
+    // the book in step 2, inside the same write - it used to be a hard-coded
+    // "Casa Matriz", which ignored it.
+    expect(input.establishment.name).toBe("Libro de Empresa");
+    expect(input.establishment.identificationCode).toBe("SUC-001");
     // The plan is server-assigned, never taken from the payload.
     expect(input.business.subscriptionPlan).toBe("gratis");
+  });
+
+  it("returns the Libro de Reclamaciones created with the tenant", async () => {
+    const response = await call(app.url, "/api/auth/complete-onboarding", {
+      method: "POST",
+      userId: h.state.user.id,
+      body: payload(FREE_RUC),
+    });
+
+    // The book row is what "Libros" lists; without it a fresh tenant answered
+    // "No hay libros creados" right after onboarding.
+    expect(response.body.book.bookType).toBe("reclamos");
   });
 
   it("resumes the tenant a previous failed attempt already created", async () => {

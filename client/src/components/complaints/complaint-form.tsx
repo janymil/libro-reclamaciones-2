@@ -17,6 +17,7 @@ import { DOCUMENT_TYPES, LEGAL_NOTICES } from "@/lib/constants";
 import { useCreateComplaint, useAIPublicAssist } from "@/hooks/use-complaints";
 import { useCaptchaChallenge } from "@/hooks/use-captcha";
 import { requestSolvedCaptcha } from "@/lib/pow";
+import { buildConsumerDraftContext } from "@shared/consumer-draft-context";
 
 const MAX_FILE_SIZE_MB = 5;
 const MAX_FILES = 5;
@@ -53,6 +54,16 @@ interface ComplaintFormProps {
   };
   /** Complaint types the business's plan accepts (Gratis = Reclamos only). */
   allowedComplaintTypes?: Array<"reclamo" | "queja">;
+  /**
+   * The business's own privacy policy page (Ley 29733), when it published one in
+   * Personalización: the consent checkbox opens it in a new tab.
+   */
+  privacyPolicyUrl?: string | null;
+  /**
+   * Platform-hosted policy of this book, used when the business published none.
+   * Without it the consent text used to link to "#", i.e. to itself.
+   */
+  privacyPolicyFallbackHref?: string;
   onSuccess?: (data: any) => void;
 }
 
@@ -62,6 +73,8 @@ export default function ComplaintForm({
   businessInfo,
   establishmentInfo,
   allowedComplaintTypes = ["reclamo", "queja"],
+  privacyPolicyUrl,
+  privacyPolicyFallbackHref,
   onSuccess
 }: ComplaintFormProps) {
   const { toast } = useToast();
@@ -571,6 +584,14 @@ export default function ComplaintForm({
                     aiAssist.mutate(
                       {
                         text: form.watch("complaintDetail") || "",
+                        // The visitor already filled the product, the amount, the
+                        // purchase date and the receipt number in the fields
+                        // above; sending them stops the assistant from listing as
+                        // "missing" what the form already holds.
+                        // buildConsumerDraftContext keeps only those non-personal
+                        // fields, so a name, a document or a phone number never
+                        // leaves the browser (shared/consumer-draft-context.ts).
+                        context: buildConsumerDraftContext(form.getValues()),
                         captchaToken: solved.token,
                         captchaAnswer: solved.solution,
                       },
@@ -616,6 +637,12 @@ export default function ComplaintForm({
                       <Badge className="bg-gray-100 text-gray-600">Asistente básico</Badge>
                     )}
                   </div>
+                  {aiAssist.variables?.context && (
+                    <p className="text-xs text-gray-500" data-testid="ai-review-context-note">
+                      La revisión incluyó los datos que ya completó en el formulario (producto, monto,
+                      fecha y comprobante), sin sus datos personales.
+                    </p>
+                  )}
                   {aiAssist.data.missingFields.length > 0 && (
                     <div>
                       <p className="text-xs font-medium text-gray-600">Falta mencionar:</p>
@@ -737,7 +764,33 @@ export default function ComplaintForm({
               />
               <Label htmlFor="consentGiven" className="text-sm text-gray-700 leading-relaxed">
                 Acepto el tratamiento de mis datos personales conforme a la{" "}
-                <a href="#" className="text-primary underline">Política de Privacidad</a>{" "}
+                {privacyPolicyUrl ? (
+                  // The business's own policy: it lives on its website, so it opens
+                  // in a new tab and never navigates the consumer away from a form
+                  // they have already half filled in.
+                  <a
+                    href={privacyPolicyUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary underline"
+                    data-testid="link-privacy-policy"
+                  >
+                    Política de Privacidad
+                  </a>
+                ) : privacyPolicyFallbackHref ? (
+                  <a
+                    href={privacyPolicyFallbackHref}
+                    className="text-primary underline"
+                    data-testid="link-privacy-policy"
+                  >
+                    Política de Privacidad
+                  </a>
+                ) : (
+                  // The public portal always passes one of the two; this keeps the
+                  // component from rendering a link that goes nowhere if it ever
+                  // does not.
+                  <span className="font-medium">Política de Privacidad</span>
+                )}{" "}
                 y la Ley N° 29733. Entiendo que tengo derecho al acceso, rectificación, cancelación y oposición de mis datos.
               </Label>
             </div>

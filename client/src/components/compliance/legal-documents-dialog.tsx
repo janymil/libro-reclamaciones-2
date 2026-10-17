@@ -27,15 +27,15 @@ interface LegalDocument {
 const DOCUMENTS: LegalDocument[] = [
   {
     key: 'aviso',
-    title: 'Aviso del Libro de Reclamaciones (Anexo III)',
-    description: 'Cartel imprimible exigido por el DS 011-2011-PCM.',
+    title: 'Aviso del Libro de Reclamaciones (Anexo II)',
+    description: 'Cartel imprimible exigido por el DS 011-2011-PCM (Anexo II, medidas del DS 006-2014-PCM).',
     endpoint: '/api/documents/complaint-notice',
     filename: 'aviso-libro-reclamaciones.pdf',
   },
   {
     key: 'anexo-ii',
-    title: 'Hoja de Reclamación (Anexo II)',
-    description: 'Formato imprimible en A4 para consumidores que prefieren registrarlo en papel.',
+    title: 'Hoja de Reclamación (campos del Anexo I)',
+    description: 'Formato de apoyo en A4 con los campos del Anexo I vigente; para el libro físico use el formato oficial publicado por INDECOPI.',
     endpoint: '/api/documents/anexo-ii',
     filename: 'anexo-ii-hoja-de-reclamacion.pdf',
   },

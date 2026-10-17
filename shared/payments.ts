@@ -35,6 +35,27 @@ export interface PaymentMethodInfo {
   icon: string;
 }
 
+/**
+ * Methods an operator may reconcile by hand.
+ *
+ * Everything listed here is money that arrived OUTSIDE the provider: a bank
+ * transfer, a Yape/Plin notification, cash at an agent. `tarjeta` is deliberately
+ * absent - a card charge either exists in the provider's API or it does not, and
+ * letting staff "confirm" one by hand would be a free-plan button.
+ *
+ * Used by the admin panel when a customer pays a pending order with one of these
+ * methods instead of finishing the card checkout.
+ */
+export const MANUAL_PAYMENT_METHODS: PaymentMethodId[] = ["transferencia", "yape", "plin", "efectivo"];
+
+export function isPaymentMethodId(value: string): value is PaymentMethodId {
+  return value in PAYMENT_METHODS;
+}
+
+export function isManualPaymentMethod(value: string): value is PaymentMethodId {
+  return MANUAL_PAYMENT_METHODS.includes(value as PaymentMethodId);
+}
+
 export const PAYMENT_METHODS: Record<PaymentMethodId, PaymentMethodInfo> = {
   tarjeta: {
     id: "tarjeta",
@@ -291,6 +312,52 @@ export function isPaymentSettled(status: string): boolean {
 /** The only status that unlocks the paid plan. */
 export function isPaymentSuccessful(status: string): boolean {
   return status === "paid";
+}
+
+/**
+ * Why a provider declined, in words the customer can act on.
+ *
+ * `status_detail` is the provider's own vocabulary (Mercado Pago: `cc_rejected_*`).
+ * We show it as the reason an attempt failed - in the payments screen and in the
+ * "finish your payment" email - so it has to be translated, and the translation
+ * has to suggest something to do next. The raw code stays in `payments.raw` for
+ * support; this map is only the human half.
+ */
+export const PAYMENT_FAILURE_HINTS: Record<string, string> = {
+  cc_rejected_bad_filled_card_number: "El número de la tarjeta no es correcto.",
+  cc_rejected_bad_filled_date: "La fecha de vencimiento de la tarjeta no es correcta.",
+  cc_rejected_bad_filled_other: "Algún dato de la tarjeta no es correcto.",
+  cc_rejected_bad_filled_security_code: "El código de seguridad (CVV) de la tarjeta no es correcto.",
+  cc_rejected_blacklist: "El banco bloqueó esta tarjeta. Use otra tarjeta o pague por transferencia.",
+  cc_rejected_call_for_authorize:
+    "El banco pidió autorizar el pago desde su aplicación. Autorícelo e intente de nuevo, o use otra tarjeta.",
+  cc_rejected_card_disabled:
+    "La tarjeta está desactivada para compras por internet. Actívela con su banco o use otra tarjeta.",
+  cc_rejected_card_error: "El banco no pudo procesar la tarjeta. Intente con otra tarjeta.",
+  cc_rejected_duplicated_payment:
+    "Ya existe un pago igual registrado. Revise su estado de cuenta antes de reintentar.",
+  cc_rejected_high_risk:
+    "El proveedor de pagos marcó la operación como de riesgo alto y no la autorizó. Intente con otra tarjeta, con otro titular, o pague por transferencia.",
+  cc_rejected_insufficient_amount: "La tarjeta no tiene saldo suficiente.",
+  cc_rejected_invalid_installments: "El banco no permite pagar en las cuotas elegidas.",
+  cc_rejected_max_attempts:
+    "Se superó el número de intentos permitidos con esta tarjeta. Use otra tarjeta o pague por transferencia.",
+  cc_rejected_other_reason: "El banco rechazó el pago sin indicar el motivo.",
+};
+
+/** Used for any other decline code (or none): still says what to do next. */
+export const PAYMENT_FAILURE_HINT_FALLBACK =
+  "El pago no se pudo completar. Puede intentarlo de nuevo con otra tarjeta o pagar por transferencia o Yape.";
+
+/**
+ * Always returns something printable: a failure with no reason is the worst
+ * message of all, so an unknown code degrades to the generic text instead of null.
+ */
+export function paymentFailureHint(statusDetail: unknown): string {
+  if (typeof statusDetail !== "string" || !statusDetail.trim()) {
+    return PAYMENT_FAILURE_HINT_FALLBACK;
+  }
+  return PAYMENT_FAILURE_HINTS[statusDetail.trim()] ?? PAYMENT_FAILURE_HINT_FALLBACK;
 }
 
 // ---------------------------------------------------------------------------

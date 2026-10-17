@@ -333,4 +333,33 @@ describe("GET /api/lookup-ruc/:ruc", () => {
     expect(response.status).toBe(503);
     expect(response.body.code).toBe("provider_not_configured");
   });
+
+  it("keeps vendors, quotas and tokens out of the customer-facing text", async () => {
+    // The technical reason lives in `code` (and the server log). What a customer
+    // reads must stay neutral: no vendor names, no infrastructure talk, nothing
+    // about the limits of our data sources.
+    const internal = /sunat|provider|proveedor|token|apikey|cuota|quota|saturad|configurad|no configurada/i;
+
+    answer = async () => jsonResponse(422, { message: "ruc no valido" });
+    const notFound = await call(app.url, "/api/lookup-ruc/20123456789");
+
+    answer = async () => jsonResponse(429, { error: "limits" });
+    const throttled = await call(app.url, "/api/lookup-ruc/20123456788");
+
+    answer = async () => {
+      throw new TypeError("fetch failed");
+    };
+    const unreachable = await call(app.url, "/api/lookup-ruc/20123456787");
+
+    process.env.RUC_API_PROVIDER = "decolecta";
+    answer = async () => jsonResponse(401, { error: "Apikey Required / Limit Exceeded" });
+    const misconfigured = await call(app.url, "/api/lookup-ruc/20123456786");
+
+    for (const response of [notFound, throttled, unreachable, misconfigured]) {
+      const text = `${response.body.error} ${response.body.message}`;
+
+      expect(text).not.toMatch(internal);
+      expect(text.trim().length).toBeGreaterThan(10);
+    }
+  });
 });

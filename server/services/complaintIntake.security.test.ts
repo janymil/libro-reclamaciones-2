@@ -1,13 +1,23 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const h = vi.hoisted(() => ({
+  business: null as any,
+  establishment: null as any,
+}));
 
 // The helper under test is pure; the module's data/service dependencies are not
 // exercised here, and mocking them keeps the test process off the real DB.
-vi.mock("../storage", () => ({ storage: {} }));
+vi.mock("../storage", () => ({
+  storage: {
+    getBusiness: async () => h.business,
+    getEstablishment: async () => h.establishment,
+  },
+}));
 vi.mock("../db", () => ({ db: {}, isLocalDatabase: true }));
 vi.mock("./emailService", () => ({ emailService: {} }));
 vi.mock("./pdfService", () => ({ pdfService: {} }));
 
-import { nextCorrelativeNumber, IntakeError } from "./complaintIntakeService";
+import { nextCorrelativeNumber, intakeComplaint, IntakeError } from "./complaintIntakeService";
 
 /**
  * Correlative-number integrity (F21): the legal folio (DS 011-2011-PCM) must
@@ -60,5 +70,42 @@ describe("nextCorrelativeNumber", () => {
 
   it("keeps the year the caller resolved (Peru calendar, not the host clock)", async () => {
     expect(await nextCorrelativeNumber(2027, 1, async () => false)).toBe("2027-0001");
+  });
+});
+
+/**
+ * Which locals accept complaints.
+ *
+ * Deactivating a sucursal on /sucursales is the way to close a local that stopped
+ * serving the public, and it has to mean something: an old QR or a cached page
+ * must not keep filing complaints into a closed local's book.
+ */
+describe("intakeComplaint - closed locals", () => {
+  const submission = {
+    businessId: "b1",
+    establishmentId: "e1",
+  } as any;
+
+  beforeEach(() => {
+    h.business = { id: "b1" };
+    h.establishment = { id: "e1", businessId: "b1", isActive: true };
+  });
+
+  it("refuses a complaint for a deactivated establishment (409)", async () => {
+    h.establishment = { id: "e1", businessId: "b1", isActive: false };
+
+    await expect(intakeComplaint(submission)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("still hides an establishment of another tenant (404)", async () => {
+    h.establishment = { id: "e1", businessId: "otra-empresa", isActive: true };
+
+    await expect(intakeComplaint(submission)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("still hides an unknown establishment (404)", async () => {
+    h.establishment = undefined;
+
+    await expect(intakeComplaint(submission)).rejects.toMatchObject({ status: 404 });
   });
 });

@@ -125,6 +125,24 @@ export const publicComplaintLimiter = rateLimit({
 
 // Public ARCO (data-rights) intake: unauthenticated, so throttle it like the
 // complaint form to prevent spam and notification flooding.
+/**
+ * Public contact form (POST /api/contact).
+ *
+ * Unauthenticated and every accepted message sends a real email to the
+ * operator's inbox (which is also the ARCO channel), so the ceiling is tighter
+ * than the rest of the public endpoints: enough for a person who made a typo,
+ * useless for a flood.
+ */
+export const contactLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  // Relaxed ONLY with the explicit opt-in used by local dev and the e2e suite
+  // (`RATE_LIMIT_RELAXED=true`); production stays at 5.
+  max: RELAXED_LIMITS ? 200 : 5, // Maximum 5 messages per hour per IP
+  message: { message: "Ha enviado varios mensajes. Escríbanos más tarde o por WhatsApp." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 export const arcoLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10,

@@ -1,0 +1,21 @@
+node_modules
+dist
+.git
+.gitignore
+# Never send credentials into the build context: the image must not contain them.
+.env
+.env.*
+!.env.example
+secrets
+.local-db
+backups
+uploads
+test-results
+playwright-report
+e2e
+.dev-server*.log
+*.log
+final-run.txt
+attached_assets
+README.md
+replit.md

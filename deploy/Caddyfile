@@ -1,0 +1,37 @@
+# ============================================================================
+# Caddy — TLS + reverse proxy for LibroDigital
+# ============================================================================
+# Replace app.example.com with the real domain (same value as APP_URL in
+# docker-compose.yml). Caddy obtains and renews the Let's Encrypt certificate
+# automatically, so ports 80 and 443 must be reachable from the internet.
+#
+# If Cloudflare proxies the domain (orange cloud), set TRUST_PROXY=2 in
+# docker-compose.yml so the real visitor IP survives both hops.
+# ============================================================================
+
+app.example.com {
+	encode zstd gzip
+
+	# Long-lived cached assets get a sane cache header; everything else is
+	# answered by the app with its own (stricter) headers.
+	@static path /assets/* /icons/* /favicon.ico /manifest.webmanifest
+	header @static Cache-Control "public, max-age=31536000, immutable"
+
+	reverse_proxy app:5000 {
+		# Generous but bounded: PDF generation and AI calls can take a while.
+		transport http {
+			read_timeout 120s
+			write_timeout 120s
+		}
+	}
+
+	# Security headers belong to the app (helmet); Caddy only adds HSTS, which
+	# depends on TLS being terminated here.
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	log {
+		# stdout -> `docker compose logs -f caddy`
+		output stdout
+		format console
+	}
+}

@@ -9,6 +9,7 @@ import AppLayout from "@/components/layout/app-layout";
 import StatsCards from "@/components/dashboard/stats-cards";
 import AlertsSection from "@/components/dashboard/alerts-section";
 import RecentComplaintsTable from "@/components/dashboard/recent-complaints-table";
+import GettingStarted from "@/components/dashboard/getting-started";
 import AIAssistant from "@/components/ai/ai-assistant";
 import ComplianceMonitor from "@/components/compliance/compliance-monitor";
 
@@ -48,6 +49,11 @@ export default function Dashboard() {
   return (
     <AppLayout title="Panel de Gestión">
       <div className="space-y-6" data-testid="dashboard">
+        {/* Primeros pasos: solo mientras quede algo pendiente (y el cliente no lo
+            haya cerrado). Responde las dudas que aparecen DESPUÉS de registrar:
+            sucursales faltantes, libros por sucursal, correo sin confirmar. */}
+        <GettingStarted />
+
         {/* Indicadores reales del negocio */}
         <StatsCards metrics={metrics} />
 

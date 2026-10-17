@@ -1,5 +1,6 @@
 import type { Express } from "express";
 
+import { buildConsumerDraftContext } from "@shared/consumer-draft-context";
 import { aiService, getAIStatus } from "../services/aiService";
 import { rankSlaRisk } from "../services/slaPredictionService";
 import { hasFeature } from "../services/subscriptionService";
@@ -70,7 +71,7 @@ export function registerAiRoutes(app: Express): void {
   });
 
   // Abusive-clause detection (Phase 3.11): paste contract terms or conditions
-  // and get them reviewed against art. 47 of the Consumer Protection Code.
+  // and get them reviewed against arts. 49 y 50 of the Consumer Protection Code.
   app.post('/api/ai/abusive-clauses', requireAuth, aiLimiter, async (req: any, res) => {
     try {
       if (!(await hasFeature(req.user.businessId, 'aiDrafting'))) {
@@ -199,7 +200,15 @@ export function registerAiRoutes(app: Express): void {
       // something: a rejected draft must not force the visitor to re-solve.
       consumeCaptchaToken(req.body.captchaToken);
 
-      const assistance = await aiService.assistConsumerDraft(text);
+      // The visitor normally filled in the product, the amount, the purchase date
+      // and the receipt number in the fields above the textarea. The assistant
+      // used to see the textarea alone, so it reported as "missing" what the form
+      // already held. The snapshot is sanitized here against the shared whitelist,
+      // which is what keeps the visitor's personal data (name, document, address,
+      // phone, e-mail) out of the prompt no matter what the caller sends.
+      const context = buildConsumerDraftContext(req.body.context);
+
+      const assistance = await aiService.assistConsumerDraft(text, context);
       res.json(assistance);
     } catch (error) {
       console.error('Error assisting consumer draft:', error);

@@ -23,6 +23,13 @@ import { useAuth } from '@/hooks/use-auth';
 import { usePlans, useTrialDays } from '@/hooks/use-subscription';
 import { ADMIN_PATH } from '@/lib/admin-path';
 import {
+  LEGAL_DOCUMENTS,
+  LIBRO_DE_RECLAMACIONES_PENDING,
+  LIBRO_DE_RECLAMACIONES_URL,
+  OPERATOR,
+} from '@/lib/platform-legal';
+import { FINE_CAPS, FOOTER_NORMS, UIT_2026 } from '@/lib/legal-norms';
+import {
   ArrowRight,
   Sparkles,
   Timer,
@@ -37,18 +44,24 @@ import {
   Star,
   CircleCheck,
   Landmark,
+  BookOpenCheck,
+  Mail,
+  Phone,
 } from 'lucide-react';
 
 /* -------------------------------------------------------------------------- */
 /* Content constants                                                           */
 /* -------------------------------------------------------------------------- */
 
-// Contacto oficial de la plataforma (buzón Zoho, ver "Cloudflare + Zoho Mail" en RUNBOOK.md).
-const CONTACT_EMAIL = 'hola@librodigital.pe';
+// Contacto oficial de la plataforma y datos del prestador: viven en
+// `@/lib/platform-legal` para que el pie, el aviso legal, los términos y la
+// política de privacidad no puedan contradecirse.
 const REGISTER_URL = '/acceso?modo=registro';
 const LOGIN_URL = '/acceso?modo=ingresar';
 
-const UIT_2026 = 5500; // D.S. 301-2025-EF
+// Multas: topes del art. 110 del Código de Protección y Defensa del Consumidor
+// (escala y UIT verificadas en client/src/lib/legal-norms.ts).
+const FINES = FINE_CAPS;
 
 const soles = (n: number) =>
   new Intl.NumberFormat('es-PE', {
@@ -56,13 +69,6 @@ const soles = (n: number) =>
     currency: 'PEN',
     maximumFractionDigits: 0,
   }).format(n);
-
-// Multas del Código de Protección y Defensa del Consumidor (topes por gravedad).
-const FINES = [
-  { label: 'Infracción leve', uit: 50 },
-  { label: 'Infracción grave', uit: 150 },
-  { label: 'Infracción muy grave', uit: 450 },
-];
 
 const STEPS = [
   {
@@ -92,12 +98,12 @@ const AI_FEATURES = [
   {
     icon: PenLine,
     title: 'Redacta con su tono',
-    body: 'Respuestas conforme al DS 101-2022-PCM, escritas con las políticas y el tono de su marca. Usted solo revisa y envía.',
+    body: 'Borradores de respuesta conformes al Código (Ley N.° 29571) y a su Reglamento, escritos con las políticas y el tono de su marca. Usted solo revisa y envía.',
   },
   {
     icon: Gavel,
     title: 'Previene multas',
-    body: 'Detector de cláusulas abusivas (art. 47) y predicción de SLA que alerta antes de que un plazo venza.',
+    body: 'Detector de cláusulas abusivas (arts. 49 y 50 del Código) y predicción de SLA que alerta antes de que un plazo venza.',
   },
 ];
 
@@ -132,15 +138,15 @@ const SECTORS = ['Restaurantes', 'Colegios', 'Hoteles', 'Tiendas online', 'Clín
 const faqItems = (trialDays: number) => [
   {
     q: '¿INDECOPI certifica o registra mi Libro de Reclamaciones?',
-    a: 'No. INDECOPI no registra ni certifica libros de reclamaciones, y tampoco se exige legalización notarial. El proveedor es responsable de implementar el formato oficial, mantenerlo disponible y atender las solicitudes. LibroDigital.pe facilita ese cumplimiento; no constituye un aval del Estado.',
+    a: 'No. El Reglamento no exige registrar el Libro ante INDECOPI ni legalizarlo notarialmente: la obligación es del proveedor, que debe implementar el formato oficial, mantenerlo disponible y responder. LibroDigital.pe facilita ese cumplimiento; no constituye un aval del Estado.',
   },
   {
     q: '¿Cuál es el plazo para responder un reclamo?',
-    a: 'El plazo general es de 15 días hábiles, improrrogable (DS 101-2022-PCM). La plataforma lo calcula con el calendario oficial de feriados peruanos y alerta a su equipo antes del vencimiento.',
+    a: 'Quince (15) días hábiles improrrogables, tanto para reclamos como para quejas (art. 152 del Código, modificado por la Ley N.° 31435, vigente desde el 21/05/2022; el Reglamento se adecuó por DS N.° 101-2022-PCM). La plataforma lo calcula con el calendario oficial de feriados peruanos y alerta a su equipo antes del vencimiento.',
   },
   {
     q: '¿Necesito tener página web?',
-    a: 'No. Al activar su cuenta recibe un enlace público y un código QR imprimible para su caja o mostrador. Si tiene tienda online, puede incrustar el widget o enlazar su libro desde el home, como exige el Anexo III.',
+    a: 'No si atiende en un local: le basta el enlace público y el código QR imprimible para su caja o mostrador. Si vende por Internet o es una plataforma de comercio electrónico, debe publicar un aviso o enlace visible y fácilmente accesible a su Libro (art. 151 del Código, modificado por la Ley N.° 32495).',
   },
   {
     q: '¿Qué pasa si INDECOPI me fiscaliza?',
@@ -262,6 +268,13 @@ function Nav() {
               {link.label}
             </a>
           ))}
+          <Link
+            href="/contacto"
+            className="text-sm font-medium text-[#5c5246] transition-colors hover:text-[#c02b0a]"
+            data-testid="nav-nosotros"
+          >
+            Nosotros
+          </Link>
         </div>
 
         <div className="hidden items-center gap-3 md:flex">
@@ -304,6 +317,13 @@ function Nav() {
                 {link.label}
               </a>
             ))}
+            <Link
+              href="/contacto"
+              onClick={() => setOpen(false)}
+              className="rounded-lg px-3 py-2.5 text-sm font-medium text-[#1b1611] hover:bg-[#1b1611]/5"
+            >
+              Nosotros y contacto
+            </Link>
           </div>
           <div className="mt-4 flex flex-col gap-2">
             <Link href={LOGIN_URL}>
@@ -334,7 +354,7 @@ function Hero() {
           <Reveal>
             <p className="inline-flex items-center gap-2 rounded-full border border-[#1b1611]/15 bg-[#fdfaf3] px-4 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-[#5c5246]">
               <ShieldCheck className="h-3.5 w-3.5 text-[#1e6b4a]" aria-hidden="true" />
-              Ley N.º 29571 · DS 011-2011-PCM · DS 101-2022-PCM
+              Ley N.º 29571 · Ley N.º 31435 · DS 011-2011-PCM
             </p>
           </Reveal>
 
@@ -517,7 +537,7 @@ function HowItWorks() {
             <div>
               <p className="font-semibold text-[#1b1611]">Su QR y su cartel oficial, al activar</p>
               <p className="text-sm text-[#5c5246]">
-                Imprimible para caja (Anexo II) y enlazable desde su web (Anexo III).
+                Imprimible para caja (Anexo II) y enlazable desde su web o tienda online.
               </p>
             </div>
           </div>
@@ -1134,13 +1154,6 @@ function FinalCta() {
   );
 }
 
-const FOOTER_NORMATIVA = [
-  { label: 'Ley N.º 29571 · Código de Protección al Consumidor', href: 'https://www.gob.pe/indecopi' },
-  { label: 'DS 011-2011-PCM · Reglamento del Libro', href: 'https://www.gob.pe/indecopi' },
-  { label: 'DS 101-2022-PCM · Plazo de 15 días hábiles', href: 'https://www.gob.pe/indecopi' },
-  { label: 'Ley N.º 29733 · Protección de Datos Personales', href: 'https://www.gob.pe/minjus' },
-];
-
 function Footer() {
   // The only visible way into /admin: deliberately not in the dashboard sidebar,
   // and only for the LibroDigital team (customers get a 403 from the API anyway).
@@ -1149,7 +1162,7 @@ function Footer() {
   return (
     <footer className="bg-[#1b1611] py-16 text-[#f7f2e8]">
       <div className="mx-auto max-w-6xl px-5 sm:px-8">
-        <div className="grid gap-10 md:grid-cols-[1.3fr_1fr_1fr_1fr]">
+        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div>
             <BrandMark dark />
             <p className="mt-5 max-w-xs text-pretty text-sm leading-relaxed text-[#f7f2e8]/60">
@@ -1168,6 +1181,7 @@ function Footer() {
               <li><a href="#como-funciona" className="transition-colors hover:text-amber-300">Cómo funciona</a></li>
               <li><a href="#precios" className="transition-colors hover:text-amber-300">Precios</a></li>
               <li><a href="#faq" className="transition-colors hover:text-amber-300">Preguntas frecuentes</a></li>
+              <li><Link href="/contacto" className="transition-colors hover:text-amber-300">Nosotros y contacto</Link></li>
               <li><Link href="/estado" className="transition-colors hover:text-amber-300">Estado del servicio</Link></li>
               {user?.isPlatformAdmin && (
                 <li>
@@ -1182,42 +1196,112 @@ function Footer() {
           <nav aria-label="Normativa">
             <h3 className="font-mono text-xs uppercase tracking-[0.22em] text-[#f7f2e8]/50">Normativa</h3>
             <ul className="mt-4 space-y-2.5 text-sm text-[#f7f2e8]/75">
-              {FOOTER_NORMATIVA.map((link) => (
-                <li key={link.label}>
-                  <a
-                    href={link.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 transition-colors hover:text-amber-300"
-                  >
-                    {link.label}
-                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                  </a>
-                </li>
-              ))}
+              {FOOTER_NORMS.map((norm) => {
+                const [number, ...rest] = norm.label.split(' · ');
+                return (
+                  <li key={norm.id}>
+                    <a
+                      href={norm.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-testid={`footer-norm-${norm.id}`}
+                      className="group inline-flex items-start gap-1.5 transition-colors hover:text-amber-300"
+                    >
+                      <span>
+                        <span className="block">{number}</span>
+                        <span className="block text-xs text-[#f7f2e8]/50 group-hover:text-amber-300/70">
+                          {rest.join(' · ')}
+                        </span>
+                      </span>
+                      <ExternalLink className="mt-1 h-3 w-3 shrink-0" aria-hidden="true" />
+                    </a>
+                  </li>
+                );
+              })}
+              <li>
+                <Link
+                  href="/normativa"
+                  data-testid="footer-link-normativa"
+                  className="font-medium text-[#f7f2e8] underline underline-offset-2 transition-colors hover:text-amber-300"
+                >
+                  Marco normativo completo (8 normas)
+                </Link>
+              </li>
             </ul>
           </nav>
 
-          <nav aria-label="Transparencia">
-            <h3 className="font-mono text-xs uppercase tracking-[0.22em] text-[#f7f2e8]/50">Transparencia</h3>
+          {/* Legal: los documentos del prestador. "Estado del servicio" ya está
+              en Producto, así que no se repite aquí. El enlace al Libro de
+              Reclamaciones del propio operador es un marcador de posición
+              (ver LIBRO_DE_RECLAMACIONES_URL en @/lib/platform-legal). */}
+          <nav aria-label="Legal">
+            <h3 className="font-mono text-xs uppercase tracking-[0.22em] text-[#f7f2e8]/50">Legal</h3>
             <ul className="mt-4 space-y-2.5 text-sm text-[#f7f2e8]/75">
-              <li><Link href="/accesibilidad" className="transition-colors hover:text-amber-300">Accesibilidad</Link></li>
-              <li><Link href="/estado" className="transition-colors hover:text-amber-300">Disponibilidad</Link></li>
+              {LEGAL_DOCUMENTS.filter(
+                (document) => document.href !== '/estado' && document.href !== '/normativa',
+              ).map((document) => (
+                <li key={document.href}>
+                  <Link
+                    href={document.href}
+                    data-testid={`footer-${document.testId}`}
+                    className="transition-colors hover:text-amber-300"
+                  >
+                    {document.label}
+                  </Link>
+                </li>
+              ))}
               <li>
-                <a href={`mailto:${CONTACT_EMAIL}`} className="inline-flex items-center gap-1.5 transition-colors hover:text-amber-300">
-                  {CONTACT_EMAIL}
+                <a
+                  href={LIBRO_DE_RECLAMACIONES_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="footer-link-libro-reclamaciones"
+                  className="inline-flex items-center gap-1.5 transition-colors hover:text-amber-300"
+                >
+                  <BookOpenCheck className="h-3.5 w-3.5 text-[#c02b0a]" aria-hidden="true" />
+                  Libro de Reclamaciones
+                  {LIBRO_DE_RECLAMACIONES_PENDING && (
+                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#f7f2e8]/40">
+                      (pronto)
+                    </span>
+                  )}
                 </a>
               </li>
             </ul>
           </nav>
         </div>
 
-        <div className="mt-12 flex flex-col gap-3 border-t border-[#f7f2e8]/10 pt-7 text-xs text-[#f7f2e8]/45 md:flex-row md:items-center md:justify-between">
-          <p translate="no">© 2026 LibroDigital.pe</p>
-          <p className="max-w-xl">
-            LibroDigital.pe es un servicio privado independiente y no constituye ni reemplaza a
-            ningún organismo del Estado. Los textos normativos se citan con fines informativos.
-          </p>
+        {/* Datos del prestador: el visitante debe poder saber quién está detrás
+            del servicio y cómo contactarlo sin abrir un documento legal. */}
+        <div className="mt-12 border-t border-[#f7f2e8]/10 pt-7 text-xs text-[#f7f2e8]/45">
+          <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-2">
+              <p translate="no" className="font-mono tracking-[0.08em]">
+                © 2026 LibroDigital.pe · {OPERATOR.businessName} · RUC {OPERATOR.ruc}
+              </p>
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                <a
+                  href={`tel:${OPERATOR.phoneHref}`}
+                  className="inline-flex items-center gap-1.5 transition-colors hover:text-amber-300"
+                >
+                  <Phone className="h-3.5 w-3.5" aria-hidden="true" />
+                  {OPERATOR.phone}
+                </a>
+                <a
+                  href={`mailto:${OPERATOR.email}`}
+                  className="inline-flex items-center gap-1.5 transition-colors hover:text-amber-300"
+                >
+                  <Mail className="h-3.5 w-3.5" aria-hidden="true" />
+                  {OPERATOR.email}
+                </a>
+                {OPERATOR.address && <span>{OPERATOR.address}</span>}
+              </div>
+            </div>
+            <p className="max-w-xl md:text-right">
+              LibroDigital.pe es un servicio privado independiente y no constituye ni reemplaza a
+              ningún organismo del Estado. Los textos normativos se citan con fines informativos.
+            </p>
+          </div>
         </div>
       </div>
     </footer>

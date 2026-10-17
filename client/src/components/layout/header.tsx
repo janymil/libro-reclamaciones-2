@@ -37,6 +37,13 @@ export default function Header({
     queryKey: ["/api/businesses/current"],
   });
 
+  // Business logo (Personalización → Logo). The header is the first thing the
+  // business sees when it logs in, and it carries the same mark as the
+  // consumer's email and the public book.
+  const { data: libroConfig } = useQuery<{ logoUrl: string | null }>({
+    queryKey: ["/api/libro-configuration"],
+  });
+
   // Multi-RUC switcher (Phase 2.7): the businesses this login may manage
   const { data: userBusinesses } = useUserBusinesses();
 
@@ -77,9 +84,19 @@ export default function Header({
   return (
     <header className="border-b border-[#e3d9c6] bg-[#fdfaf3]/90 px-6 py-4 backdrop-blur-sm" data-testid="header">
       <div className="flex items-center justify-between">
-        <div data-testid="header-info">
-          <h2 className="font-display text-2xl font-semibold tracking-tight text-[#1b1611]">{title}</h2>
-          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5c5246]">{subtitle || businessName}</p>
+        <div className="flex items-center gap-3" data-testid="header-info">
+          {libroConfig?.logoUrl && (
+            <img
+              src={libroConfig.logoUrl}
+              alt={businessName || "Logo"}
+              className="h-9 w-auto max-w-[130px] object-contain"
+              data-testid="header-logo"
+            />
+          )}
+          <div>
+            <h2 className="font-display text-2xl font-semibold tracking-tight text-[#1b1611]">{title}</h2>
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5c5246]">{subtitle || businessName}</p>
+          </div>
         </div>
 
         <div className="flex items-center space-x-4">

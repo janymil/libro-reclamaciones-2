@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest, apiErrorMessage } from '@/lib/queryClient';
+import { z } from 'zod';
 import AppLayout from '@/components/layout/app-layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,12 +9,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Badge } from '@/components/ui/badge';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Plus, Building2, MapPin, Users, Settings, Save, MailQuestion, CheckCircle2, XCircle, Loader2, Trash2 } from 'lucide-react';
 import { businessProfileSchema, type BusinessProfile, type InsertBusiness } from '@shared/schema';
+import { libroSlugFrom } from '@shared/slug';
+import { invalidateTenantQueries } from '@/lib/tenant-queries';
 import type { BusinessSummary } from '@/lib/api-types';
 import { useToast } from '@/hooks/use-toast';
 import { useUpgradeToast } from '@/hooks/use-plan-upgrade';
@@ -54,14 +58,33 @@ export default function Businesses() {
   const [closeTarget, setCloseTarget] = useState<BusinessSummary | null>(null);
   const [closeConfirmation, setCloseConfirmation] = useState('');
 
-  // Exactly the shape the server accepts (businessProfileSchema). Plan,
+  // Exactly the shape the server accepts (businessRegistrationSchema): the
+  // company profile plus the Libro de Reclamaciones it starts with. Plan,
   // subscription status, trial dates and isActive are server-assigned, so the
   // form does not carry them at all - a legacy `subscriptionPlan: 'basic'`
   // default used to travel in every create request.
-  const form = useForm<BusinessProfile>({
-    resolver: zodResolver(businessProfileSchema.extend({
-      ruc: businessProfileSchema.shape.ruc.min(11, 'RUC debe tener 11 dígitos'),
-    })),
+  //
+  // The book fields are here because registering a company IS registering its
+  // Libro: without them the server used to create a tenant with no book at all.
+  const registrationSchema = businessProfileSchema.extend({
+    ruc: businessProfileSchema.shape.ruc.min(11, 'RUC debe tener 11 dígitos'),
+    libroName: z.string().trim().min(1, 'El nombre del libro es obligatorio').max(200),
+    businessType: z.enum(['tienda_virtual', 'local_fisico', 'servicios', 'mixto']),
+    // Optional: the server derives the public URL from the book's name when the
+    // field is left empty, so this never blocks the registration.
+    urlSlug: z
+      .string()
+      .trim()
+      .max(100)
+      .regex(/^[a-z0-9-]*$/, 'La URL solo puede contener minúsculas, números y guiones')
+      .optional(),
+    notificationEmail: z.string().trim().email('Email inválido').optional(),
+  });
+
+  type RegistrationForm = z.infer<typeof registrationSchema>;
+
+  const form = useForm<RegistrationForm>({
+    resolver: zodResolver(registrationSchema),
     defaultValues: {
       ruc: '',
       businessName: '',
@@ -72,21 +95,57 @@ export default function Businesses() {
       provincia: '',
       departamento: '',
       website: '',
+      libroName: '',
+      businessType: 'local_fisico',
+      urlSlug: '',
+      notificationEmail: '',
     },
   });
 
+  const libroName = form.watch('libroName');
+  // Suggested URL: follows the book's name until the user edits it by hand.
+  const [slugTouched, setSlugTouched] = useState(false);
+
+  useEffect(() => {
+    if (slugTouched) return;
+    form.setValue('urlSlug', libroSlugFrom(libroName ?? ''));
+  }, [libroName, slugTouched, form]);
+
   const createBusinessMutation = useMutation({
-    mutationFn: async (data: BusinessProfile) => {
-      return apiRequest('POST', '/api/businesses', data);
+    mutationFn: async (data: {
+      business: BusinessProfile;
+      libro: {
+        libroName: string;
+        businessType: string;
+        urlSlug?: string;
+        notificationEmail?: string;
+      };
+    }) => {
+      const response = await apiRequest('POST', '/api/businesses', {
+        ...data.business,
+        libro: data.libro,
+      });
+      return response.json() as Promise<{
+        message: string;
+        libroConfig?: { libroName: string; urlSlug: string };
+      }>;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/businesses'] });
+    onSuccess: (result) => {
+      // The new company changes what every tenant-scoped page reads: the
+      // switcher, Mi Perfil ("Mi empresa"), the establishment/book lists and the
+      // public Libro. Without this, a page whose query already ran (the wizard
+      // caches /api/businesses/current before the company exists) keeps showing
+      // "Aún no ha registrado su empresa" until a reload.
+      invalidateTenantQueries(queryClient);
       toast({
-        title: "Empresa creada",
-        description: "La empresa se ha registrado exitosamente.",
+        title: 'Empresa registrada',
+        description: result.libroConfig
+          ? `${result.message} URL pública: librodigital.pe/${result.libroConfig.urlSlug}`
+          : result.message,
       });
       setIsDialogOpen(false);
       form.reset();
+      setSlugTouched(false);
     },
     onError: (error) => {
       const raw = error instanceof Error ? error.message : '';
@@ -104,13 +163,25 @@ export default function Businesses() {
         return;
       }
 
-      // The number of RUCs a login may manage is a plan limit.
+      // The number of RUCs a login may manage is a plan limit; a taken URL or an
+      // unconfirmed mailbox are not, and they explain themselves.
       upgradeToast(error, 'No se pudo crear la empresa');
     },
   });
 
-  const onSubmit = (data: BusinessProfile) => {
-    createBusinessMutation.mutate(data);
+  const onSubmit = (data: RegistrationForm) => {
+    const { libroName, businessType, urlSlug, notificationEmail, ...business } = data;
+
+    createBusinessMutation.mutate({
+      business: business as BusinessProfile,
+      libro: {
+        libroName,
+        businessType,
+        // Empty means "derive it from the book's name" server-side.
+        urlSlug: urlSlug?.trim() || undefined,
+        notificationEmail: notificationEmail?.trim() || undefined,
+      },
+    });
   };
 
   const manageMutation = useMutation({
@@ -120,7 +191,9 @@ export default function Businesses() {
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/businesses'] });
+      // Renaming/editing a company is visible in Mi Perfil too (same business
+      // record, different query key).
+      invalidateTenantQueries(queryClient);
       toast({
         title: "Empresa actualizada",
         description: "Los datos de la empresa se guardaron correctamente.",
@@ -146,11 +219,9 @@ export default function Businesses() {
       return response.json() as Promise<{ message: string; purged: boolean; complaintCount: number }>;
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/businesses'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/businesses/current'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/auth/user'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/auth/businesses'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/subscription'] });
+      // Closing a company can change the caller's active tenant, the switcher and
+      // every quota: refresh them all at once.
+      invalidateTenantQueries(queryClient);
       setCloseTarget(null);
       setCloseConfirmation('');
       toast({
@@ -275,7 +346,18 @@ export default function Businesses() {
               planName={subscription?.plan.name ?? null}
             />
           </div>
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <Dialog
+            open={isDialogOpen}
+            onOpenChange={(open) => {
+              setIsDialogOpen(open);
+              setTakenRuc(null);
+              // Complaints are notified to the caller's own address unless they
+              // say otherwise, so the field starts filled instead of empty.
+              if (open && !form.getValues('notificationEmail')) {
+                form.setValue('notificationEmail', currentUser?.email ?? '');
+              }
+            }}
+          >
             <PlanLockedAction locked={atBusinessLimit} reason={businessLimitReason}>
               <DialogTrigger asChild>
                 <Button
@@ -289,7 +371,7 @@ export default function Businesses() {
                 </Button>
               </DialogTrigger>
             </PlanLockedAction>
-            <DialogContent className="max-w-2xl">
+            <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
               {takenRuc && (
                 <div
                   role="alert"
@@ -461,6 +543,114 @@ export default function Businesses() {
                       </FormItem>
                     )}
                   />
+                  </div>
+
+                  {/* The Libro de Reclamaciones the company is registered with:
+                      a company without one has nothing to attach its public
+                      portal (or its complaints) to. */}
+                  <div className="space-y-4 rounded-lg border border-dashed p-4">
+                    <div>
+                      <h3 className="font-medium text-gray-900">Libro de Reclamaciones</h3>
+                      <p className="text-xs text-gray-600">
+                        Se crea junto con la empresa. Es el libro que sus clientes verán en la web
+                        pública.
+                      </p>
+                    </div>
+
+                    <FormField
+                      control={form.control}
+                      name="libroName"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Nombre del Libro *</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="Ej.: Wong"
+                              {...field}
+                              data-testid="input-libro-name"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <FormField
+                        control={form.control}
+                        name="urlSlug"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>URL pública</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="mi-empresa"
+                                {...field}
+                                value={field.value ?? ''}
+                                onChange={(event) => {
+                                  // From here on the suggestion stops following
+                                  // the book's name.
+                                  setSlugTouched(true);
+                                  field.onChange(event);
+                                }}
+                                data-testid="input-libro-slug"
+                              />
+                            </FormControl>
+                            <p className="text-xs text-gray-500">
+                              librodigital.pe/{field.value || '…'} — déjela vacía para generarla
+                              automáticamente.
+                            </p>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="businessType"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Tipo de negocio</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-business-type">
+                                  <SelectValue placeholder="Seleccionar tipo" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="local_fisico">Local físico</SelectItem>
+                                <SelectItem value="tienda_virtual">Tienda virtual</SelectItem>
+                                <SelectItem value="servicios">Servicios</SelectItem>
+                                <SelectItem value="mixto">Mixto (físico + virtual)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <FormField
+                      control={form.control}
+                      name="notificationEmail"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Correo de notificaciones</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="email"
+                              placeholder="reclamos@miempresa.com"
+                              {...field}
+                              value={field.value ?? ''}
+                              data-testid="input-libro-notification-email"
+                            />
+                          </FormControl>
+                          <p className="text-xs text-gray-500">
+                            Aquí llegarán las reclamaciones. Por defecto, el correo de su cuenta.
+                          </p>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
                   </div>
 
                   <div className="flex justify-end space-x-2 pt-4">

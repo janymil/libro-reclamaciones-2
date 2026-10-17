@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import { Link } from 'wouter';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { Establishment } from '@shared/schema';
+import type { Establishment, LibroConfiguration } from '@shared/schema';
 import type { BookSummary } from '@/lib/api-types';
 import { downloadBlob, todayStamp } from '@/lib/export';
 import { apiRequest } from '@/lib/queryClient';
@@ -13,11 +14,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Plus, BookOpen, Download, FileText, Calendar, AlertCircle, Save } from 'lucide-react';
+import { Plus, BookOpen, Download, FileText, ExternalLink, Link2, AlertCircle, Save, QrCode } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import LibroQrCard from '@/components/libro/libro-qr-card';
 import { z } from 'zod';
 
 const createBookSchema = z.object({
@@ -32,7 +33,6 @@ export default function Books() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [manageTarget, setManageTarget] = useState<BookSummary | null>(null);
   const [manageDescription, setManageDescription] = useState('');
-  const [manageActive, setManageActive] = useState(true);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -42,6 +42,11 @@ export default function Books() {
 
   const { data: establishments } = useQuery<Establishment[]>({
     queryKey: ['/api/establishments'],
+  });
+
+  // The public side of the book: ONE per company (libro_configuration).
+  const { data: libroConfig } = useQuery<LibroConfiguration | null>({
+    queryKey: ['/api/libro-configuration'],
   });
 
   const form = useForm<CreateBook>({
@@ -108,14 +113,13 @@ export default function Books() {
       if (!manageTarget) return null;
       const response = await apiRequest('PATCH', `/api/books/${manageTarget.id}`, {
         description: manageDescription.trim() || null,
-        isActive: manageActive,
       });
       return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/books'] });
       toast({
-        title: "Libro actualizado",
+        title: "Registro actualizado",
         description: "Los cambios se guardaron correctamente.",
       });
       setManageTarget(null);
@@ -123,7 +127,7 @@ export default function Books() {
     onError: () => {
       toast({
         title: "Error",
-        description: "No se pudo actualizar el libro. Intente nuevamente.",
+        description: "No se pudo actualizar el registro. Intente nuevamente.",
         variant: "destructive",
       });
     },
@@ -132,13 +136,21 @@ export default function Books() {
   const openManage = (book: BookSummary) => {
     setManageTarget(book);
     setManageDescription(book.description ?? '');
-    setManageActive(book.isActive);
   };
 
   const saveManage = () => updateBookMutation.mutate();
 
   const onSubmit = (data: CreateBook) => {
     createBookMutation.mutate(data);
+  };
+
+  /**
+   * Creates the missing register of a local, from the table row itself: the repair
+   * path for a sucursal that predates the automatic register (its complaints are
+   * being received, but they cannot be exported per local until this exists).
+   */
+  const createRegisterFor = (establishmentId: string) => {
+    createBookMutation.mutate({ establishmentId, bookType: 'reclamos', description: '' });
   };
 
   const getBookTypeLabel = (type: string) => {
@@ -154,10 +166,32 @@ export default function Books() {
     switch (type) {
       case 'reclamos': return 'bg-red-100 text-red-800';
       case 'sugerencias': return 'bg-blue-100 text-blue-800';
-      case 'otros': return 'bg-gray-100 text-gray-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
+
+  const registers = books ?? [];
+  const locals = establishments ?? [];
+
+  /**
+   * One row per (local, register), regrouped by the customer's own mental model:
+   * ONE Libro de Reclamaciones for the company, and a register per local inside it.
+   * A local whose register is missing shows a "create" action instead of an empty
+   * card, because that is exactly the legacy shape that made the page look broken.
+   */
+  const rows: Array<{ key: string; local: Establishment; book?: BookSummary }> = locals.flatMap((local) => {
+    const localRegisters = registers
+      .filter((book) => book.establishmentId === local.id)
+      .sort((a, b) => (a.bookType === 'reclamos' ? -1 : b.bookType === 'reclamos' ? 1 : 0));
+
+    if (localRegisters.length === 0) {
+      return [{ key: `${local.id}-none`, local }];
+    }
+
+    return localRegisters.map((book) => ({ key: book.id, local, book }));
+  });
+
+  const totalRecords = registers.reduce((sum, book) => sum + (book.entriesCount || 0), 0);
 
   return (
     <AppLayout>
@@ -165,24 +199,25 @@ export default function Books() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900" data-testid="books-title">
-              Gestión de Libros
+              Libro de Reclamaciones
             </h1>
             <p className="text-gray-600">
-              Administra los libros de reclamaciones y registros oficiales
+              Uno para toda tu empresa: tus clientes entran por el mismo enlace y eligen el local.
             </p>
           </div>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
               <Button className="flex items-center gap-2" data-testid="button-create-book">
                 <Plus className="h-4 w-4" />
-                Crear Nuevo Libro
+                Agregar registro
               </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Crear Nuevo Libro</DialogTitle>
+                <DialogTitle>Agregar registro</DialogTitle>
                 <DialogDescription>
-                  Configure un nuevo libro oficial para su establecimiento.
+                  Cada local recibe su registro de Reclamos automáticamente. Usa esto para un libro
+                  de sugerencias u otro registro, o para reponer el registro de un local.
                 </DialogDescription>
               </DialogHeader>
               <Form {...form}>
@@ -272,6 +307,168 @@ export default function Books() {
           </Dialog>
         </div>
 
+        {/* The public book: ONE per company. The registers below are the internal
+            side (one PDF per local, for an inspection). */}
+        <Card data-testid="public-book">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BookOpen className="h-5 w-5" />
+              {libroConfig?.libroName || 'Tu Libro de Reclamaciones'}
+            </CardTitle>
+            <CardDescription>
+              Un solo enlace y un solo QR para toda la empresa: tus clientes eligen el local al
+              reclamar, y los folios (2026-0001…) son únicos para la empresa.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+              <span className="flex items-center gap-2 font-medium text-gray-900">
+                <Link2 className="h-4 w-4 text-gray-500" aria-hidden="true" />
+                {libroConfig?.urlSlug ? `librodigital.pe/${libroConfig.urlSlug}` : 'Enlace no configurado'}
+              </span>
+              {libroConfig?.urlSlug && (
+                <a
+                  href={`/libro/${libroConfig.urlSlug}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-blue-700 hover:underline"
+                >
+                  Abrir libro público
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                </a>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
+              <span className="flex items-center gap-2">
+                <FileText className="h-4 w-4" aria-hidden="true" />
+                {totalRecords} {totalRecords === 1 ? 'reclamo recibido' : 'reclamos recibidos'} en toda
+                la empresa
+              </span>
+              <span className="flex items-center gap-2">
+                {locals.length} {locals.length === 1 ? 'local' : 'locales'} con su propio registro
+              </span>
+            </div>
+
+            <Button asChild variant="outline" size="sm" data-testid="button-public-book-qr">
+              <Link href="/codigo-qr">
+                <QrCode className="mr-2 h-4 w-4" />
+                Ver enlace, QR y aviso para imprimir
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Per-local registers */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Registros por local</CardTitle>
+            <CardDescription>
+              Cada local tiene su propio registro para que puedas mostrar o exportar sus reclamos por
+              separado (fiscalización por establecimiento, DS 011-2011-PCM).
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <p className="py-6 text-sm text-gray-500">Cargando registros…</p>
+            ) : rows.length === 0 ? (
+              <div className="py-8 text-center">
+                <BookOpen className="mx-auto mb-3 h-10 w-10 text-gray-400" aria-hidden="true" />
+                <h3 className="mb-1 text-lg font-medium text-gray-900">Aún no tienes locales</h3>
+                <p className="mb-4 text-gray-600">
+                  Registra tu primer local y recibirá su registro de Reclamos automáticamente.
+                </p>
+                <Button asChild data-testid="button-first-local">
+                  <Link href="/sucursales">Ir a Sucursales</Link>
+                </Button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table data-testid="registers-table">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Local</TableHead>
+                      <TableHead>Registro</TableHead>
+                      <TableHead>Reclamos</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map(({ key, local, book }) => (
+                      <TableRow key={key} data-testid={`register-row-${key}`}>
+                        <TableCell>
+                          <div className="font-medium text-gray-900">{local.name}</div>
+                          <div className="flex items-center gap-2">
+                            <code className="text-xs text-gray-500">{local.identificationCode}</code>
+                            {!local.isActive && (
+                              <Badge variant="outline" className="text-xs text-gray-500">
+                                Local inactivo
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {book ? (
+                            <div className="flex flex-col gap-1">
+                              <Badge className={getBookTypeColor(book.bookType)}>
+                                {getBookTypeLabel(book.bookType)}
+                              </Badge>
+                              {book.description && (
+                                <span className="text-xs text-gray-500">{book.description}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-sm text-amber-700">Sin registro todavía</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm text-gray-700">
+                          {book ? `${book.entriesCount || 0}` : '—'}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap justify-end gap-2">
+                            {book ? (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => downloadBookMutation.mutate(book.id)}
+                                  disabled={downloadBookMutation.isPending}
+                                  data-testid={`button-download-${book.id}`}
+                                >
+                                  <Download className="mr-2 h-4 w-4" />
+                                  PDF
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openManage(book)}
+                                  data-testid={`button-manage-${book.id}`}
+                                >
+                                  Gestionar
+                                </Button>
+                              </>
+                            ) : (
+                              <Button
+                                size="sm"
+                                onClick={() => createRegisterFor(local.id)}
+                                disabled={createBookMutation.isPending}
+                                data-testid={`button-create-register-${local.id}`}
+                              >
+                                <Plus className="mr-2 h-4 w-4" />
+                                Crear registro
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Legal Requirements Alert */}
         <Card className="border-orange-200 bg-orange-50">
           <CardHeader>
@@ -288,102 +485,12 @@ export default function Books() {
             </p>
           </CardContent>
         </Card>
-
-        {/* Books Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {isLoading ? (
-            Array.from({ length: 3 }).map((_, i) => (
-              <Card key={i} className="animate-pulse">
-                <CardHeader>
-                  <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-                  <div className="h-3 bg-gray-200 rounded w-1/2"></div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    <div className="h-3 bg-gray-200 rounded"></div>
-                    <div className="h-3 bg-gray-200 rounded w-2/3"></div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          ) : books?.length ? (
-            books.map((book: any) => (
-              <Card key={book.id} className="hover:shadow-lg transition-shadow">
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <CardTitle className="text-lg flex items-center gap-2" data-testid={`book-title-${book.id}`}>
-                        <BookOpen className="h-5 w-5" />
-                        {getBookTypeLabel(book.bookType)}
-                      </CardTitle>
-                      <CardDescription>{book.establishmentName}</CardDescription>
-                    </div>
-                    <Badge className={getBookTypeColor(book.bookType)} data-testid={`book-type-${book.id}`}>
-                      {book.bookType}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <Calendar className="h-4 w-4" />
-                    <span>Creado: {new Date(book.createdAt).toLocaleDateString('es-PE')}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <FileText className="h-4 w-4" />
-                    <span>{book.entriesCount || 0} registros</span>
-                  </div>
-                  {book.description && (
-                    <p className="text-sm text-gray-600">{book.description}</p>
-                  )}
-                  <div className="flex justify-between items-center pt-2">
-                    <span className={`text-sm font-medium ${
-                      book.isActive ? 'text-green-600' : 'text-red-600'
-                    }`}>
-                      {book.isActive ? 'Activo' : 'Inactivo'}
-                    </span>
-                    <div className="flex gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={() => downloadBookMutation.mutate(book.id)}
-                        disabled={downloadBookMutation.isPending}
-                        data-testid={`button-download-${book.id}`}
-                      >
-                        <Download className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => openManage(book)}
-                        data-testid={`button-manage-${book.id}`}
-                      >
-                        Gestionar
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          ) : (
-            <div className="col-span-full text-center py-12">
-              <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No hay libros creados</h3>
-              <p className="text-gray-600 mb-4">
-                Cree su primer libro de reclamaciones para cumplir con la normativa legal.
-              </p>
-              <Button onClick={() => setIsDialogOpen(true)} data-testid="button-create-first-book">
-                <Plus className="h-4 w-4 mr-2" />
-                Crear Primer Libro
-              </Button>
-            </div>
-          )}
-        </div>
-        {/* Gestionar libro */}
+        {/* Gestionar registro */}
         <Dialog open={!!manageTarget} onOpenChange={(open) => !open && setManageTarget(null)}>
           <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
-                Gestionar {manageTarget ? getBookTypeLabel(manageTarget.bookType) : 'libro'}
+                Gestionar {manageTarget ? getBookTypeLabel(manageTarget.bookType) : 'registro'}
               </DialogTitle>
               <DialogDescription>
                 {manageTarget?.establishmentName} · {manageTarget?.entriesCount || 0} registros
@@ -393,25 +500,32 @@ export default function Books() {
             {manageTarget && (
               <div className="space-y-4">
                 <div>
-                  <Label htmlFor="manage-book-description">Descripción</Label>
+                  <Label htmlFor="manage-book-description">Descripción interna</Label>
                   <Input
                     id="manage-book-description"
                     value={manageDescription}
                     onChange={(e) => setManageDescription(e.target.value)}
-                    placeholder="Descripción interna del libro"
+                    placeholder="Ej.: libro de la caja 1, local de verano…"
                     data-testid="input-manage-book-description"
                   />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Solo para tu equipo: no se muestra en el libro público.
+                  </p>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <input
-                    id="manage-book-active"
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={manageActive}
-                    onChange={(e) => setManageActive(e.target.checked)}
-                  />
-                  <Label htmlFor="manage-book-active">Libro activo</Label>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                  <p>
+                    El enlace, el QR y los folios son de toda la empresa: este registro separa
+                    únicamente los reclamos de <strong>{manageTarget.establishmentName}</strong> para
+                    que puedas exportarlos o imprimirlos.
+                  </p>
+                  <p className="mt-2">
+                    Para dejar de recibir reclamos en este local, desactívalo en{' '}
+                    <Link href="/sucursales" className="text-blue-700 hover:underline">
+                      Sucursales
+                    </Link>
+                    .
+                  </p>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
@@ -433,9 +547,6 @@ export default function Books() {
                     {updateBookMutation.isPending ? 'Guardando...' : 'Guardar cambios'}
                   </Button>
                 </div>
-
-                {/* Código QR del libro virtual público */}
-                <LibroQrCard />
               </div>
             )}
           </DialogContent>

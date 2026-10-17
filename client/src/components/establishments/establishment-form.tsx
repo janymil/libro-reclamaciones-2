@@ -1,6 +1,7 @@
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useUpgradeToast } from "@/hooks/use-plan-upgrade";
 import { establishmentFormSchema, type EstablishmentFormData } from "@/lib/validation";
 import { apiRequest } from "@/lib/queryClient";
+import { nextIdentificationCode } from "@shared/establishments";
 import type { Establishment } from "@shared/schema";
 
 interface EstablishmentFormProps {
@@ -26,6 +28,15 @@ export default function EstablishmentForm({
   const upgradeToast = useUpgradeToast();
   const queryClient = useQueryClient();
 
+  // The codes already in use, to suggest the next one instead of leaving an
+  // empty required field ("Código de Identificación *") that a chain has to
+  // invent - and that the consolidated registry depends on being unique.
+  const { data: establishments = [] } = useQuery<Establishment[]>({
+    queryKey: ['/api/establishments'],
+  });
+
+  const [codeTouched, setCodeTouched] = useState(false);
+
   const form = useForm<EstablishmentFormData>({
     resolver: zodResolver(establishmentFormSchema),
     defaultValues: {
@@ -37,6 +48,17 @@ export default function EstablishmentForm({
     },
   });
 
+  useEffect(() => {
+    // Only for a NEW sucursal, only while the customer has not typed a code, and
+    // only once the list is known (otherwise we would suggest SUC-001 twice).
+    if (establishment || codeTouched || establishments.length === 0) return;
+
+    form.setValue(
+      'identificationCode',
+      nextIdentificationCode(establishments.map((entry) => entry.identificationCode)),
+    );
+  }, [establishment, codeTouched, establishments, form]);
+
   const createMutation = useMutation({
     mutationFn: async (data: EstablishmentFormData) => {
       const response = await apiRequest('POST', '/api/establishments', data);
@@ -44,9 +66,12 @@ export default function EstablishmentForm({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/establishments'] });
+      // The sucursal is registered together with its Libro de Reclamaciones, so
+      // "Gestión de Libros" has to pick it up too (it lists `books`, not places).
+      queryClient.invalidateQueries({ queryKey: ['/api/books'] });
       toast({
         title: "Establecimiento creado",
-        description: "El establecimiento ha sido registrado exitosamente",
+        description: "El establecimiento y su Libro de Reclamaciones quedaron registrados.",
       });
       form.reset();
       onSuccess?.();
@@ -156,16 +181,39 @@ export default function EstablishmentForm({
             <Input
               id="identificationCode"
               {...form.register("identificationCode")}
-              placeholder="Código único para este establecimiento"
+              onChange={(event) => {
+                // Typed by hand: the suggestion stops following the list.
+                setCodeTouched(true);
+                form.register("identificationCode").onChange(event);
+              }}
+              placeholder="SUC-002"
               data-testid="input-identification-code"
             />
             {form.formState.errors.identificationCode && (
-              <p className="text-sm text-red-600 mt-1">{form.formState.errors.identificationCode.message}</p>
+              <p className="text-sm text-red-600 mt-1">
+                {form.formState.errors.identificationCode.message}
+              </p>
             )}
             <p className="text-xs text-gray-500 mt-1">
-              Este código se usará para correlacionar reclamaciones según DS 011-2011-PCM
+              Se sugiere el siguiente número libre. La casa matriz suele ser SUC-001 y las demás
+              SUC-002, SUC-003… Así se consolidan los registros a nivel nacional (DS 011-2011-PCM).
             </p>
           </div>
+
+          {!establishment && (
+            <div
+              className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900"
+              data-testid="notice-book-auto-created"
+            >
+              <span className="material-icons text-blue-700 text-base" aria-hidden="true">
+                menu_book
+              </span>
+              <p>
+                Al guardar, este local queda con su propio <strong>registro dentro de tu Libro de
+                Reclamaciones</strong>: podrás exportar o imprimir sus reclamos cuando lo fiscalicen.
+              </p>
+            </div>
+          )}
 
           <div className="flex space-x-3 pt-4">
             <Button

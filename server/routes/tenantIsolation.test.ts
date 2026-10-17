@@ -431,6 +431,31 @@ describe("PATCH /api/businesses/:id - cross-tenant writes and plan escalation", 
     expect(updates.subscriptionStatus).toBeUndefined();
     expect(updates.trialEndsAt).toBeUndefined();
   });
+
+  it("lets the admin set (and clear) the number of locales it expects", async () => {
+    // The "Primeros pasos" checklist reads it, and /sucursales edits it through
+    // this same route, so the field must survive the whitelist - including the
+    // "clear it" case.
+    h.calls.updateBusiness = [];
+
+    const set = await call(app.url, `/api/businesses/${A}`, {
+      method: "PATCH",
+      userId: users.adminA.id,
+      body: { expectedEstablishments: 5 },
+    });
+
+    expect(set.status).toBe(200);
+    expect(h.calls.updateBusiness[0][1].expectedEstablishments).toBe(5);
+
+    const cleared = await call(app.url, `/api/businesses/${A}`, {
+      method: "PATCH",
+      userId: users.adminA.id,
+      body: { expectedEstablishments: null },
+    });
+
+    expect(cleared.status).toBe(200);
+    expect(h.calls.updateBusiness[1][1].expectedEstablishments).toBeNull();
+  });
 });
 
 describe("PATCH /api/notifications/:id/read - cross-tenant IDOR", () => {

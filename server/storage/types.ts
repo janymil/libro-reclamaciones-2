@@ -52,6 +52,7 @@ import type { AccessRequestWithBusiness } from "./accessRequest.storage";
 import type { PlatformPaymentSettingsInput } from "./paymentSettings.storage";
 import type { PlatformSettingsInput } from "./platformSettings.storage";
 import type { PlanPricingInput } from "./planPricing.storage";
+import type { MonthlyReport } from "@shared/monthly-reports";
 
 
 
@@ -125,8 +126,19 @@ export interface IStorage {
   
   // Establishment operations
   getEstablishment(id: string): Promise<Establishment | undefined>;
+  /** Active establishments only: public portal, quotas, DS compliance. */
   getEstablishmentsByBusiness(businessId: string): Promise<Establishment[]>;
+  /** Every establishment, inactive included: the admin list must show them to reactivate. */
+  getAllEstablishmentsByBusiness(businessId: string): Promise<Establishment[]>;
   createEstablishment(establishment: InsertEstablishment): Promise<Establishment>;
+  /**
+   * Sucursal + the Libro de Reclamaciones it needs, committed together so a
+   * failure never leaves a book-less sucursal. See
+   * `server/storage/establishment.storage.ts`.
+   */
+  createEstablishmentWithBook(
+    establishment: InsertEstablishment,
+  ): Promise<{ establishment: Establishment; book: Book }>;
   updateEstablishment(id: string, updates: Partial<InsertEstablishment>): Promise<Establishment>;
   
   // Complaint operations
@@ -474,9 +486,5 @@ export interface ReportStats {
   formalComplianceRate: number;
 }
 
-export interface MonthlyReport {
-  month: string;
-  complaints: number;
-  resolved: number;
-  overdue: number;
-}
+/** Built by `@shared/monthly-reports`, which also owns the aggregation. */
+export type { MonthlyReport } from "@shared/monthly-reports";

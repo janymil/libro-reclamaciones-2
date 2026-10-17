@@ -1,6 +1,8 @@
 import nodemailer from 'nodemailer';
 import type { SendMailOptions, Transporter } from 'nodemailer';
 import type { Complaint } from '@shared/schema';
+import type { BusinessEmailIdentity } from '@shared/email-identity';
+import { buildPaymentRecoveryText, paymentRecoverySubject } from '@shared/payment-recovery';
 
 interface EmailConfig {
   host: string;
@@ -24,6 +26,12 @@ export interface EmailCustomization {
   subjectPrefix?: string | null;
   headerText?: string | null;
   footerText?: string | null;
+  /**
+   * Identity of the BUSINESS the complaint was filed with (name, logo, contact
+   * data, reply address). When present, the message is presented as coming from
+   * that business instead of from the platform - see shared/email-identity.ts.
+   */
+  identity?: BusinessEmailIdentity | null;
 }
 
 /**
@@ -112,13 +120,95 @@ function applySubject(subject: string, customization?: EmailCustomization): stri
 /** Renders the custom header block, or an empty string when not configured. */
 function renderHeader(customization?: EmailCustomization): string {
   const text = customization?.headerText?.trim();
-  return text ? `<div class="brand-header">${text}</div>` : '';
+  return text ? `<div class="brand-header">${escapeHtml(text)}</div>` : '';
 }
 
 /** Renders the custom footer line inside the standard footer block. */
 function renderFooter(customization?: EmailCustomization): string {
   const text = customization?.footerText?.trim();
-  return text ? `<p>${text}</p>` : '';
+  return text ? `<p>${escapeHtml(text)}</p>` : '';
+}
+
+/**
+ * `from` for a consumer-facing message.
+ *
+ * The display name is the business's and, when its domain has been verified by
+ * the mail host, so is the address. Undefined keeps nodemailer's platform
+ * default, so calls without an identity behave exactly as before.
+ */
+function mailFrom(
+  customization?: EmailCustomization,
+): { name: string; address: string } | undefined {
+  const identity = customization?.identity;
+  if (!identity?.fromAddress) {
+    return undefined;
+  }
+  // Passed as an object (never interpolated into a header string) so nodemailer
+  // encodes a display name that contains quotes or non-ASCII characters.
+  return { name: identity.fromName, address: identity.fromAddress };
+}
+
+/** Reply-To header: the consumer's answer must reach the business. */
+function replyToAddress(customization?: EmailCustomization): string | undefined {
+  return customization?.identity?.replyTo ?? undefined;
+}
+
+/**
+ * Identity block above the message: the business's logo and name over its brand
+ * colour. Empty without an identity, so platform mail is byte-identical.
+ */
+function renderIdentityHeader(customization?: EmailCustomization): string {
+  const identity = customization?.identity;
+  if (!identity) {
+    return '';
+  }
+
+  const accent = identity.brandColor ?? '#3b82f6';
+  const logo = identity.logoUrl
+    ? `<img src="${escapeHtml(identity.logoUrl)}" alt="${escapeHtml(identity.businessName)}" style="max-height:56px;max-width:220px;margin-bottom:8px;">`
+    : '';
+  const name = identity.businessName
+    ? `<p style="margin:0;font-size:15px;font-weight:600;color:#1e293b;">${escapeHtml(identity.businessName)}</p>`
+    : '';
+
+  return `<div style="padding:20px;text-align:center;background:#ffffff;border-bottom:3px solid ${escapeHtml(accent)};">${logo}${name}</div>`;
+}
+
+/**
+ * Last lines of the footer: the business's own contact data (name, RUC,
+ * address, phone, published contact address) and a discreet line naming the
+ * platform that operates the book - a message must not pretend to be from
+ * nobody. Falls back to the platform's © line when there is no identity.
+ */
+function renderFooterBranding(customization?: EmailCustomization): string {
+  const identity = customization?.identity;
+  if (!identity) {
+    return '<p>© 2024 LibroDigital.pe</p>';
+  }
+
+  const contact = identity.contactLines.map((line) => `<p>${escapeHtml(line)}</p>`).join('');
+  return `${contact}<p style="font-size:12px;color:#94a3b8;">Gestionado con LibroDigital.pe</p>`;
+}
+
+/** Plain-text signature of the message (same data as the HTML footer). */
+function plainSignature(customization?: EmailCustomization): string {
+  const identity = customization?.identity;
+  if (!identity) {
+    return 'LibroDigital.pe';
+  }
+  return [...identity.contactLines, 'Gestionado con LibroDigital.pe'].join('\n');
+}
+
+/** Subject of a consumer-facing message, naming the business it is about. */
+function consumerSubject(
+  subject: string,
+  customization?: EmailCustomization,
+): string {
+  const identity = customization?.identity;
+  return applySubject(
+    identity ? `${subject} - ${identity.businessName}` : `${subject} - LibroDigital.pe`,
+    customization,
+  );
 }
 
 export class EmailService {
@@ -814,9 +904,10 @@ ${verificationText}
    */
   async sendComplaintResponse(email: string, complaint: Complaint, response: string, customization?: EmailCustomization): Promise<void> {
     const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      from: mailFrom(customization) ?? `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      replyTo: replyToAddress(customization),
       to: email,
-      subject: applySubject(`Respuesta a tu ${complaint.complaintType} ${complaint.correlativeNumber} - LibroDigital.pe`, customization),
+      subject: consumerSubject(`Respuesta a tu ${complaint.complaintType} ${complaint.correlativeNumber}`, customization),
       html: `
         <!DOCTYPE html>
         <html>
@@ -831,12 +922,14 @@ ${verificationText}
             .content { padding: 40px 20px; }
             .info-box { background-color: #f1f5f9; border-radius: 8px; padding: 20px; margin: 20px 0; }
             .response-box { background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 20px; margin: 20px 0; white-space: pre-wrap; }
+            .brand-header { padding: 18px 20px 0; color: #334155; font-size: 14px; }
             .footer { background-color: #f1f5f9; padding: 20px; text-align: center; color: #64748b; font-size: 14px; }
           </style>
         </head>
         <body>
           <div class="container">
             ${renderHeader(customization)}
+            ${renderIdentityHeader(customization)}
             <div class="header">
               <h1>📄 Respuesta a tu reclamación</h1>
             </div>
@@ -853,7 +946,7 @@ ${verificationText}
             </div>
             <div class="footer">
               ${renderFooter(customization)}
-              <p>© 2024 LibroDigital.pe</p>
+              ${renderFooterBranding(customization)}
             </div>
           </div>
         </body>
@@ -866,7 +959,7 @@ Respuesta a tu ${complaint.complaintType} ${complaint.correlativeNumber}:
 
 ${response}
 
-LibroDigital.pe
+${plainSignature(customization)}
       `
     };
 
@@ -880,8 +973,11 @@ LibroDigital.pe
 
   /**
    * Send the complaint confirmation together with the generated PDF receipt.
+   *
    * The optional customization applies the business's own subject prefix and
-   * header/footer texts (Phase 2.8).
+   * header/footer texts (Phase 2.8) and, since the consumer filed with the
+   * business and not with the platform, the business's identity (name, logo,
+   * contact data and reply address - Phase 2.8b).
    */
   async sendComplaintConfirmation(
     email: string,
@@ -890,9 +986,10 @@ LibroDigital.pe
     customization?: EmailCustomization,
   ): Promise<void> {
     const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      from: mailFrom(customization) ?? `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      replyTo: replyToAddress(customization),
       to: email,
-      subject: applySubject(`Confirmación de ${complaint.complaintType} ${complaint.correlativeNumber} - LibroDigital.pe`, customization),
+      subject: consumerSubject(`Confirmación de ${complaint.complaintType} ${complaint.correlativeNumber}`, customization),
       html: `
         <!DOCTYPE html>
         <html>
@@ -907,12 +1004,14 @@ LibroDigital.pe
             .content { padding: 40px 20px; }
             .info-box { background-color: #f1f5f9; border-radius: 8px; padding: 20px; margin: 20px 0; }
             .warning { background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 15px; margin: 20px 0; color: #92400e; }
+            .brand-header { padding: 18px 20px 0; color: #334155; font-size: 14px; }
             .footer { background-color: #f1f5f9; padding: 20px; text-align: center; color: #64748b; font-size: 14px; }
           </style>
         </head>
         <body>
           <div class="container">
             ${renderHeader(customization)}
+            ${renderIdentityHeader(customization)}
             <div class="header">
               <h1>✅ Reclamación registrada</h1>
             </div>
@@ -933,7 +1032,7 @@ LibroDigital.pe
             </div>
             <div class="footer">
               ${renderFooter(customization)}
-              <p>© 2024 LibroDigital.pe</p>
+              ${renderFooterBranding(customization)}
             </div>
           </div>
         </body>
@@ -953,7 +1052,7 @@ Conforme al DS 101-2022-PCM la empresa cuenta con 15 días hábiles para respond
 Los datos de esta reclamación se conservan por 24 meses y luego se anonimizan,
 de acuerdo con la Ley N° 29733.
 
-LibroDigital.pe
+${plainSignature(customization)}
       `,
       attachments: pdfBuffer
         ? [{
@@ -1066,6 +1165,63 @@ LibroDigital.pe
   }
 
   /**
+   * "Finish your payment" email (Phase 2.7, step 5).
+   *
+   * Sent automatically the moment a charge is declined, and on demand from the
+   * console: the customer gets the same checkout link they used the first time,
+   * plus the transfer/Yape details for the same reference. A rejected card
+   * therefore does not become a lost sale, and the customer does not have to call
+   * anybody to find out how to pay.
+   *
+   * The body is built by `@shared/payment-recovery`, so the automatic message and
+   * the operator's resend are identical.
+   */
+  async sendPaymentRecovery(params: {
+    email: string;
+    firstName: string;
+    businessName: string;
+    planName: string;
+    periodLabel: string;
+    amountLabel: string;
+    reference: string;
+    /** The provider checkout the customer used, when it is still usable. */
+    checkoutUrl: string | null;
+    /** Our own page that starts the same purchase again. Always present. */
+    resumeUrl: string;
+    /** Rendered transfer/Yape instructions, or null when none are configured. */
+    transferInstructions: string | null;
+    /** Why the first attempt failed, in the customer's words. */
+    reason: string | null;
+    identity?: PlatformIdentityFooter;
+  }): Promise<void> {
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to: params.email,
+      subject: paymentRecoverySubject(params),
+      text: buildPaymentRecoveryText({
+        firstName: params.firstName,
+        businessName: params.businessName,
+        planName: params.planName,
+        periodLabel: params.periodLabel,
+        amountLabel: params.amountLabel,
+        reference: params.reference,
+        checkoutUrl: params.checkoutUrl,
+        resumeUrl: params.resumeUrl,
+        transferInstructions: params.transferInstructions,
+        reason: params.reason,
+        footerLines: identityFooterLines(params.identity),
+      }),
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending the payment recovery email:', error);
+      throw new Error('Failed to send the payment recovery email');
+    }
+  }
+
+  /**
    * Sends a plain "it works" message so an administrator can confirm SMTP
    * delivery end-to-end, not just that the socket and credentials are valid.
    */
@@ -1106,6 +1262,74 @@ Si lo recibiste, el servicio de correo está configurado correctamente.
     } catch (error) {
       console.error('Error sending test email:', error);
       throw new Error('Failed to send test email');
+    }
+  }
+
+  /**
+   * A message sent from the public contact form (`/contacto`).
+   *
+   * Goes to the operator's mailbox with the visitor as Reply-To, so answering
+   * from the inbox continues the same thread. The destination arrives as a
+   * parameter because the route resolves it from the platform identity: this
+   * method stays free of settings lookups and is testable on its own.
+   */
+  async sendContactMessage(params: {
+    to: string;
+    name: string;
+    email: string;
+    phone?: string;
+    subjectLabel: string;
+    message: string;
+  }): Promise<void> {
+    const name = escapeHtml(params.name);
+    const email = escapeHtml(params.email);
+    const phone = params.phone ? escapeHtml(params.phone) : '';
+    const subjectLabel = escapeHtml(params.subjectLabel);
+    const message = escapeHtml(params.message).replace(/\n/g, '<br>');
+
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to: params.to,
+      // Replying from the inbox goes straight back to the visitor.
+      replyTo: params.email,
+      subject: `Contacto web · ${params.subjectLabel} · ${params.name}`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"><title>Contacto web</title></head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 24px;">
+            <h2 style="margin: 0 0 4px;">Mensaje desde el sitio web</h2>
+            <p style="margin: 0 0 16px; color: #64748b;">${subjectLabel}</p>
+            <table style="font-size: 14px; margin-bottom: 16px;">
+              <tr><td style="padding: 2px 12px 2px 0; color: #64748b;">Nombre</td><td>${name}</td></tr>
+              <tr><td style="padding: 2px 12px 2px 0; color: #64748b;">Correo</td><td>${email}</td></tr>
+              ${phone ? `<tr><td style="padding: 2px 12px 2px 0; color: #64748b;">Teléfono</td><td>${phone}</td></tr>` : ''}
+            </table>
+            <div style="border-left: 3px solid #c02b0a; padding: 8px 0 8px 14px; white-space: normal;">
+              ${message}
+            </div>
+            <p style="margin-top: 24px; color: #64748b; font-size: 12px;">
+              Enviado desde el formulario de contacto de LibroDigital.pe. Responda a este correo para escribirle al visitante.
+            </p>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `Mensaje desde el sitio web (${params.subjectLabel})
+
+Nombre: ${params.name}
+Correo: ${params.email}${params.phone ? `\nTeléfono: ${params.phone}` : ''}
+
+${params.message}
+`,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending contact message:', error);
+      throw new Error('Failed to send contact message');
     }
   }
 

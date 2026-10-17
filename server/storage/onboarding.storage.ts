@@ -1,11 +1,13 @@
 import { db } from "../db";
 import { eq } from "drizzle-orm";
 import {
+  type Book,
   type Business,
   type Establishment,
   type InsertBusiness,
   type InsertLibroConfiguration,
   type LibroConfiguration,
+  books,
   businesses,
   establishments,
   libroConfiguration,
@@ -36,12 +38,23 @@ export interface CompleteOnboardingInput {
    * subscription lifecycle are never touched here.
    */
   refreshBusinessProfile?: boolean;
+  /**
+   * Whether this tenant becomes the caller's active company (and the account is
+   * flagged as onboarded). Defaults to true.
+   *
+   * `POST /api/businesses` sets it only for a login that has no company yet:
+   * registering an additional RUC must not steal the switcher's active tenant
+   * nor rewrite the onboarding state of a finished account.
+   */
+  makeActive?: boolean;
 }
 
 export interface CompleteOnboardingResult {
   business: Business;
   config: LibroConfiguration;
   establishment: Establishment;
+  /** The per-local register in `books` (what /libros lists and exports). */
+  book: Book;
   /** true when this call created the tenant (false = resumed an earlier attempt). */
   createdBusiness: boolean;
 }
@@ -59,9 +72,14 @@ export interface CompleteOnboardingResult {
  *   1. business        - the tenant everything else hangs from
  *   2. access grant    - records "this login created it", which is what makes a
  *                        retry recognisable as a resume (and feeds the switcher)
- *   3. libro config    - the book the wizard configures
+ *   3. libro config    - the online book (public URL, branding, notifications)
  *   4. establishment   - the "lugar" the public portal files against
- *   5. users row LAST  - the completed flag is the commit marker for the app
+ *   5. book            - the per-local register in `books`: what /libros lists and
+ *                        exports (one PDF per local) for an inspection. Without
+ *                        it a brand-new tenant had an empty "Libros" page even
+ *                        though its public link existed
+ *   6. users row LAST  - the completed flag is the commit marker for the app
+ *                        (skipped for an additional RUC, see `makeActive`)
  */
 export const onboardingStorage = {
   async completeOnboarding(input: CompleteOnboardingInput): Promise<CompleteOnboardingResult> {
@@ -122,17 +140,40 @@ export const onboardingStorage = {
           .returning();
       }
 
-      await tx
-        .update(users)
-        .set({
-          businessId: business.id,
-          onboardingStep: 2,
-          onboardingCompleted: true,
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, input.userId));
+      // The Libro de Reclamaciones of that establishment: DS 011-2011-PCM
+      // requires one open to the public, and the establishment above is the
+      // "lugar" consumers file against.
+      let book: Book | undefined;
+      [book] = await tx
+        .select()
+        .from(books)
+        .where(eq(books.establishmentId, establishment.id));
 
-      return { business, config, establishment, createdBusiness };
+      if (!book) {
+        [book] = await tx
+          .insert(books)
+          .values({
+            businessId: business.id,
+            establishmentId: establishment.id,
+            bookType: "reclamos",
+            isActive: true,
+          })
+          .returning();
+      }
+
+      if (input.makeActive !== false) {
+        await tx
+          .update(users)
+          .set({
+            businessId: business.id,
+            onboardingStep: 2,
+            onboardingCompleted: true,
+            updatedAt: new Date(),
+          })
+          .where(eq(users.id, input.userId));
+      }
+
+      return { business, config, establishment, book, createdBusiness };
     });
   },
 };

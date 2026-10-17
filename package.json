@@ -18,6 +18,8 @@
     "db:backup": "node scripts/backup-tables.mjs",
     "db:restore": "node scripts/restore-tables.mjs",
     "db:demo": "node scripts/create-demo-account.mjs",
+    "db:delete-business": "node scripts/delete-business.mjs",
+    "db:change-business-ruc": "node scripts/change-business-ruc.mjs",
     "db:admin": "node scripts/setup-platform-admin.mjs",
     "email:diagnose": "node scripts/smtp-diagnose.mjs"
   },

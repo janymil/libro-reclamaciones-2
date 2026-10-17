@@ -1,8 +1,18 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Table,
   TableBody,
@@ -18,12 +28,19 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+import { invalidateTenantQueries } from "@/lib/tenant-queries";
 import EstablishmentForm from "./establishment-form";
+import ExpectedLocales from "./expected-locales";
 import type { Establishment } from "@shared/schema";
 
 export default function EstablishmentList() {
   const [selectedEstablishment, setSelectedEstablishment] = useState<Establishment | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [deactivateTarget, setDeactivateTarget] = useState<Establishment | null>(null);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const { data: establishments = [], isLoading, error } = useQuery({
     queryKey: ['/api/establishments'],
@@ -35,6 +52,35 @@ export default function EstablishmentList() {
         throw new Error('Failed to fetch establishments');
       }
       return response.json() as Promise<Establishment[]>;
+    },
+  });
+
+  /**
+   * Closing a local: deactivating takes it out of the public portal and stops it
+   * accepting complaints, but keeps its records (and its register) intact - the
+   * local can be reactivated with the same code.
+   */
+  const setActive = useMutation({
+    mutationFn: async ({ establishment, isActive }: { establishment: Establishment; isActive: boolean }) => {
+      const response = await apiRequest('PATCH', `/api/establishments/${establishment.id}`, { isActive });
+      return response.json();
+    },
+    onSuccess: (_data, variables) => {
+      invalidateTenantQueries(queryClient);
+      setDeactivateTarget(null);
+      toast({
+        title: variables.isActive ? 'Local reactivado' : 'Local desactivado',
+        description: variables.isActive
+          ? 'Vuelve a aparecer en el libro público y a recibir reclamos.'
+          : 'Ya no aparece en el libro público ni recibe reclamos. Sus registros se conservan.',
+      });
+    },
+    onError: (mutationError) => {
+      toast({
+        title: 'No se pudo cambiar el estado',
+        description: mutationError instanceof Error ? mutationError.message : 'Intente nuevamente.',
+        variant: 'destructive',
+      });
     },
   });
 
@@ -52,6 +98,9 @@ export default function EstablishmentList() {
     setIsFormOpen(false);
     setSelectedEstablishment(null);
   };
+
+  /** How many locals are still open: closing the last one is refused. */
+  const activeCount = establishments.filter((entry) => entry.isActive).length;
 
   if (isLoading) {
     return (
@@ -117,6 +166,10 @@ export default function EstablishmentList() {
         </CardHeader>
 
         <CardContent>
+          <div className="mb-6">
+            <ExpectedLocales />
+          </div>
+
           {establishments.length === 0 ? (
             <div className="text-center py-8">
               <span className="material-icons text-4xl text-gray-400 mb-2">business</span>
@@ -196,6 +249,35 @@ export default function EstablishmentList() {
                           >
                             <span className="material-icons text-sm">edit</span>
                           </Button>
+                          {establishment.isActive ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setDeactivateTarget(establishment)}
+                              disabled={activeCount <= 1}
+                              title={
+                                activeCount <= 1
+                                  ? 'Es tu único local activo: registra otro antes de cerrarlo'
+                                  : 'Cerrar este local (deja de recibir reclamos)'
+                              }
+                              data-testid={`button-deactivate-${establishment.id}`}
+                            >
+                              <span className="material-icons text-sm">power_settings_new</span>
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                setActive.mutate({ establishment, isActive: true })
+                              }
+                              disabled={setActive.isPending}
+                              title="Reactivar este local"
+                              data-testid={`button-reactivate-${establishment.id}`}
+                            >
+                              <span className="material-icons text-sm">restart_alt</span>
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -220,6 +302,49 @@ export default function EstablishmentList() {
           )}
         </CardContent>
       </Card>
+
+      {/* Cerrar un local: reversible, pero deja de recibir reclamos, así que se
+          explica antes del clic. */}
+      <AlertDialog
+        open={!!deactivateTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeactivateTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desactivar {deactivateTarget?.name}</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 leading-relaxed">
+              <span className="block">
+                Este local deja de aparecer en tu libro público y no recibe más reclamos (tampoco
+                desde un QR ya impreso), hasta que lo reactives.
+              </span>
+              <span className="block">
+                <strong>No se borra nada</strong>: su registro en el Libro de Reclamaciones y los
+                reclamos que ya recibió se conservan, y siguen contando para la fiscalización.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-deactivate">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              disabled={setActive.isPending}
+              onClick={(event) => {
+                event.preventDefault();
+                if (deactivateTarget) {
+                  setActive.mutate({ establishment: deactivateTarget, isActive: false });
+                }
+              }}
+              data-testid="button-confirm-deactivate"
+            >
+              {setActive.isPending ? 'Desactivando…' : 'Desactivar local'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Legal Information */}
       <Card className="bg-blue-50 border-blue-200">

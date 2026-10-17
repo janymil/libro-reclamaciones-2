@@ -52,9 +52,16 @@ export const PERUVIAN_HOLIDAYS_2024_2025 = PERU_HOLIDAY_DATES;
 export const LEGAL_RESPONSE_TIME_BUSINESS_DAYS = 15;
 
 export const LEGAL_NOTICES = {
-  COMPLAINT_DISCLAIMER: 'La presentación de esta hoja de reclamación no limita otras vías de solución ni constituye condición previa para denunciar ante las autoridades competentes.',
-  RESPONSE_TIME: 'El proveedor deberá dar respuesta en un plazo no mayor a 15 días hábiles según DS 101-2022-PCM.',
-  DATA_PROTECTION: 'Sus datos personales serán tratados conforme a la Ley N° 29733 de Protección de Datos Personales y su nuevo Reglamento DS 016-2024-JUS.'
+  // Art. 13 del Reglamento (DS 011-2011-PCM): el Libro no limita otras vías ni
+  // es requisito previo para denunciar ante INDECOPI.
+  COMPLAINT_DISCLAIMER:
+    'La formulación de esta queja o reclamo no supone limitación alguna para utilizar otros mecanismos de solución de controversias ni constituye una vía previa necesaria para denunciar ante INDECOPI.',
+  // El plazo nace en el art. 152 del Código, modificado por la Ley N.° 31435
+  // (vigente desde el 21/05/2022); el DS 101-2022-PCM solo adecúa el Reglamento.
+  RESPONSE_TIME:
+    'El proveedor debe dar respuesta por escrito en un plazo no mayor a 15 días hábiles improrrogables (art. 152 del Código de Protección y Defensa del Consumidor, modificado por la Ley N.° 31435).',
+  DATA_PROTECTION:
+    'Sus datos personales serán tratados conforme a la Ley N.° 29733, Ley de Protección de Datos Personales, y su Reglamento aprobado por DS N.° 016-2024-JUS.',
 } as const;
 
 export const CONTACT_INFO = {

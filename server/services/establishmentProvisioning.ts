@@ -1,6 +1,5 @@
-import type { Business, Establishment } from "@shared/schema";
-
-import { storage } from "../storage";
+import type { Business } from "@shared/schema";
+import { firstIdentificationCode, isOnlineChannel } from "@shared/establishments";
 
 /** The fields the establishment provisioning rule decides. */
 export interface DefaultEstablishment {
@@ -11,58 +10,46 @@ export interface DefaultEstablishment {
 }
 
 /**
- * The first establishment a tenant gets, derived from its sales channel.
+ * The first establishment a tenant gets: the place its first Libro belongs to.
  *
- * Extracted so the two places that create a tenant cannot drift apart: the
- * transactional onboarding (`storage.completeOnboarding`) and the multi-RUC
- * registration (`POST /api/businesses`).
+ * The NAME comes from what the user actually typed, in this order:
+ *   1. the name given to the Libro when the company was registered (the wizard's
+ *      "Nombre del libro", or the "Nueva Empresa" form). It is the label the
+ *      customer sees on Libros, Sucursales and the public portal, and ignoring it
+ *      was the reported bug: a tenant that named its book "Wong" kept seeing the
+ *      generic "Casa Matriz" everywhere;
+ *   2. the trading name (`commercialName`) or the razón social;
+ *   3. the sales channel, only for a business that has no name at all.
+ *
+ * The CHANNEL still decides the identification code, which is what the
+ * consolidated registry looks at: a `tienda_virtual` sells over the Internet, so
+ * the book only has to be reachable from that medium (ONLINE-01) instead of a
+ * physical sucursal (SUC-001).
+ *
+ * Used by the one place that creates a tenant: `storage.completeOnboarding`
+ * (both the onboarding wizard and `POST /api/businesses`).
  */
 export function defaultEstablishmentFor(
-  business: Pick<Business, "address" | "phone">,
+  business: {
+    address: string;
+    phone?: string | null;
+    businessName: string;
+    commercialName?: string | null;
+  },
   businessType?: string | null,
+  libroName?: string | null,
 ): DefaultEstablishment {
-  const isOnline = businessType === "tienda_virtual";
+  const isOnline = isOnlineChannel(businessType);
+  const tradingName = business.commercialName?.trim() || business.businessName.trim();
 
   return {
-    name: isOnline ? "Tienda Online" : "Casa Matriz",
+    name: libroName?.trim() || tradingName || (isOnline ? "Tienda Online" : "Casa Matriz"),
     address: business.address,
     phone: business.phone ?? null,
-    // Identifies the establishment for the consolidated national registry.
-    identificationCode: isOnline ? "ONLINE-01" : "SUC-001",
+    // Identifies the establishment for the consolidated national registry
+    // (shared with the onboarding preview client-side).
+    identificationCode: firstIdentificationCode(businessType),
   };
 }
 
-/**
- * Guarantees a business has at least one establishment so it can receive
- * complaints from day one.
- *
- * DS 011-2011-PCM requires one Libro per establishment open to the public, and
- * the public portal files every complaint against an establishment. A tenant
- * created by the onboarding flow (or by multi-RUC registration) starts with
- * none, which left the Libros page empty and, worse, made the public complaint
- * form unreachable.
- *
- * The default establishment also models the sales channel:
- *  - `tienda_virtual` (pure online store): a virtual "Tienda Online" channel,
- *    because selling over the Internet only requires the book to be reachable
- *    from that medium - there is no physical sucursal.
- *  - anything else: a physical "Casa Matriz" at the registered address.
- *
- * Idempotent: returns the first active establishment untouched if one exists.
- */
-export async function provisionDefaultEstablishment(
-  business: Business,
-  businessType?: string | null,
-): Promise<Establishment> {
-  const existing = await storage.getEstablishmentsByBusiness(business.id);
-  if (existing.length > 0) {
-    return existing[0];
-  }
-
-  return await storage.createEstablishment({
-    businessId: business.id,
-    isActive: true,
-    ...defaultEstablishmentFor(business, businessType),
-  });
-}
 

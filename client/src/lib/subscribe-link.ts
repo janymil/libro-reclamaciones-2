@@ -1,5 +1,6 @@
 import { isPlanId, type PlanId } from "@shared/plans";
 import { isPlanPeriod, type PlanPeriod } from "@shared/payments";
+import { PAYMENT_RESUME_PATH } from "@shared/payment-recovery";
 
 /**
  * The shareable subscription link - and why it has to be ours.
@@ -18,7 +19,7 @@ import { isPlanPeriod, type PlanPeriod } from "@shared/payments";
  * Replacement for the `mpago.la/...` links when selling outside the app.
  */
 
-export const SUBSCRIBE_PATH = "/suscribir";
+export const SUBSCRIBE_PATH = PAYMENT_RESUME_PATH;
 
 export interface SubscribeTarget {
   plan: PlanId;

@@ -86,6 +86,14 @@ export const businesses = pgTable("businesses", {
   provincia: varchar("provincia", { length: 100 }).notNull(),
   departamento: varchar("departamento", { length: 100 }).notNull(),
   website: varchar("website", { length: 255 }),
+  /**
+   * How many establishments (locales) the company says it will have, casa matriz
+   * included. Onboarding asks a chain for it, and the "Primeros pasos" checklist
+   * on /panel uses it to say "2 de 5" and to remind the customer which locales are
+   * still missing. Purely guidance: NULL means "not declared", and nothing in the
+   * product (quotas, billing, legality) depends on it.
+   */
+  expectedEstablishments: integer("expected_establishments"),
   isActive: boolean("is_active").notNull().default(true),
   subscriptionPlan: varchar("subscription_plan", { length: 50 }).notNull().default("gratis"),
   // Commercial lifecycle: trial, then the plan's quotas apply.
@@ -364,6 +372,23 @@ export const libroConfiguration = pgTable("libro_configuration", {
   emailFooterText: text("email_footer_text"),
   confirmationMessage: text("confirmation_message"),
 
+  // Sender identity of the consumer-facing emails (confirmation / response).
+  // The consumer filed the complaint with the BUSINESS, so the message carries
+  // the business's name and a reply must travel back to the business instead of
+  // to the platform's inbox (see shared/email-identity.ts). `email_from_address`
+  // is only honored when its domain is verified by the mail host.
+  emailFromName: varchar("email_from_name", { length: 120 }),
+  emailFromAddress: varchar("email_from_address", { length: 255 }),
+  emailReplyTo: varchar("email_reply_to", { length: 255 }),
+
+  // Legal link (Ley 29733): the business's own privacy policy page, rendered in
+  // the consent checkbox of the public complaint form. When empty, that link
+  // falls back to the platform-hosted policy of the book
+  // (/libro/:slug/politica-de-privacidad) instead of the dead "#" it used to
+  // have. Validated with shared/privacy-policy.ts: http(s) only, because the
+  // value ends up as an href on a public page.
+  privacyPolicyUrl: varchar("privacy_policy_url", { length: 500 }),
+
   // AI brand voice: response drafts follow the business's own tone and
   // policies instead of a generic template (see aiService.suggestResponse).
   brandTone: text("brand_tone"),
@@ -512,6 +537,17 @@ export const payments = pgTable("payments", {
   discountCode: varchar("discount_code", { length: 40 }),
   discountCents: integer("discount_cents").notNull().default(0),
   discountCodeId: uuid("discount_code_id"),
+  /**
+   * Payment-link recovery (Phase 2.7, step 5).
+   *
+   * When a charge is declined we email the customer the same checkout link plus
+   * the transfer/Yape details, so a rejected card does not become a lost sale.
+   * `recoveryEmailSentAt` is what makes the automatic send idempotent (providers
+   * retry webhooks), and `recoveryEmailCount` counts every message - automatic or
+   * sent by an operator - so the console can show what the customer has received.
+   */
+  recoveryEmailSentAt: timestamp("recovery_email_sent_at"),
+  recoveryEmailCount: integer("recovery_email_count").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
@@ -881,6 +917,53 @@ export const businessUpdateSchema = businessProfileSchema
   .omit({ ruc: true }) // the RUC is the legal identity; it never changes here
   .partial()
   .extend({ isActive: z.boolean().optional() });
+
+/**
+ * Public URL slug (`librodigital.pe/<slug>`).
+ *
+ * Validated server-side too, not only in the form: the slug becomes a public
+ * address, so anything but lowercase letters, digits and dashes would produce a
+ * broken (or worse, ambiguous) link.
+ */
+export const libroSlugSchema = z
+  .string()
+  .trim()
+  .max(100, "La URL pública no puede superar 100 caracteres")
+  .regex(
+    /^[a-z0-9-]+$/,
+    "La URL pública solo puede contener letras minúsculas, números y guiones",
+  );
+
+/**
+ * The Libro de Reclamaciones a company starts with, as collected by the
+ * "Nueva Empresa" form (the wizard collects the same fields in step 2).
+ *
+ * The name is the one visible thing a tenant recognises its book by, so it is
+ * required; the URL is optional because the server derives it from the name
+ * (`libroSlugFrom`) when the form does not send one - a taken URL must not turn
+ * a registration into a dead end.
+ */
+export const libroRegistrationSchema = z.object({
+  libroName: z.string().trim().min(1, "El nombre del libro es obligatorio").max(200),
+  businessType: z.enum(["tienda_virtual", "local_fisico", "servicios", "mixto"]),
+  urlSlug: libroSlugSchema.optional(),
+  /** Defaults to the caller's own address: that is where complaints are notified. */
+  notificationEmail: z.string().trim().email("Email de notificaciones inválido").optional(),
+  whatsappNumber: z.string().trim().max(20).optional(),
+  websiteUrl: z.string().trim().max(255).optional(),
+});
+
+/**
+ * Body of `POST /api/businesses`: a company plus the Libro it starts with.
+ *
+ * Profile + booking data in one payload because they are written in one
+ * transaction: a tenant used to be created with no Libro at all, which left its
+ * "Libros" page empty and its public book inexistent.
+ */
+export const businessRegistrationSchema = businessProfileSchema.extend({
+  libro: libroRegistrationSchema,
+});
+
 export const insertEstablishmentSchema = createInsertSchema(establishments).omit({
   id: true,
   createdAt: true,
@@ -1128,6 +1211,10 @@ export type InsertBusiness = z.infer<typeof insertBusinessSchema>;
 export type BusinessProfile = z.infer<typeof businessProfileSchema>;
 /** Editable company profile fields (RUC and plan excluded by design). */
 export type BusinessUpdate = z.infer<typeof businessUpdateSchema>;
+/** The Libro fields `POST /api/businesses` accepts next to the company profile. */
+export type LibroRegistration = z.infer<typeof libroRegistrationSchema>;
+/** Full "Nueva Empresa" payload: company profile + the Libro it starts with. */
+export type BusinessRegistration = z.infer<typeof businessRegistrationSchema>;
 
 export type Establishment = typeof establishments.$inferSelect;
 export type InsertEstablishment = z.infer<typeof insertEstablishmentSchema>;
