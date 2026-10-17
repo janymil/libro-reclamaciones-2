@@ -324,15 +324,15 @@ export class EmailService {
               </div>
 
               <p style="color: #64748b; font-size: 14px;">
-                Confirma tu correo para que podamos avisarte de cada nueva reclamación.
-                El enlace vence en 24 horas.
+                Confirma tu correo para publicar tu Libro y recibir el aviso de cada nueva
+                reclamación. El enlace vence en 24 horas.
               </p>
 `
       : '';
 
     const verificationText = verificationUrl
       ? `
-        Confirma tu correo (el enlace vence en 24 horas):
+        Confirma tu correo (obligatorio para publicar tu Libro; el enlace vence en 24 horas):
         ${verificationUrl}
 `
       : '';
@@ -372,7 +372,8 @@ export class EmailService {
               <h2 style="color: #1e293b; margin-bottom: 20px;">¡Hola ${escapeHtml(firstName)}!</h2>
               
               <p style="color: #475569; line-height: 1.6;">
-                Tu cuenta en LibroDigital.pe ha sido creada exitosamente. Para completar tu registro y configurar tu libro de reclamaciones, utiliza los siguientes datos de acceso:
+                Tu cuenta en LibroDigital.pe ha sido creada exitosamente. Para completar tu registro,
+                primero confirma tu correo y luego accede con estos datos:
               </p>
 
               <div class="password-box">
@@ -381,17 +382,20 @@ export class EmailService {
               </div>
 
               <div class="warning">
-                <strong>⚠️ Importante:</strong> Por seguridad, guarda esta contraseña en un lugar seguro. Podrás cambiarla una vez que accedas a tu cuenta.
+                <strong>⚠️ Importante:</strong> guarda esta contraseña en un lugar seguro.
+                <br>
+                <strong>Confirma tu correo con el botón de abajo antes de publicar tu Libro:</strong>
+                sin esa confirmación el registro no se puede completar.
               </div>
+
+              ${verificationHtml}
 
               <p style="color: #475569; line-height: 1.6;">
                 <strong>Próximos pasos:</strong><br>
-                1. Inicia sesión con tu email y la contraseña proporcionada<br>
-                2. Configura los datos de tu empresa y libro de reclamaciones<br>
-                3. ¡Comienza a gestionar tus reclamaciones de forma digital!
+                1. Confirma tu correo con el botón de arriba (obligatorio)<br>
+                2. Inicia sesión con tu email y la contraseña proporcionada<br>
+                3. Configura los datos de tu empresa y publica tu Libro de Reclamaciones
               </p>
-
-              ${verificationHtml}
 
               <div style="text-align: center;">
                 <a href="${process.env.APP_URL || 'https://librodigital.pe'}/panel" class="button">

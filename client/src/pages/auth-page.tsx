@@ -41,7 +41,7 @@ const TITLES: Record<AuthMode, { title: string; subtitle: string }> = {
   },
   "email-sent": {
     title: "Revisa tu correo",
-    subtitle: "Te enviamos la contraseña de acceso.",
+    subtitle: "Te enviamos tu contraseña y el enlace para confirmar tu correo.",
   },
   "forgot-password": {
     title: "Recupera tu acceso",
@@ -711,8 +711,9 @@ export default function AuthPage() {
                   <ol className="mt-5 space-y-2 rounded-xl border border-[#e3d9c6] bg-white/70 p-5 text-left text-sm text-[#5c5246]">
                     {[
                       'Revisa tu bandeja de entrada y la carpeta de spam.',
-                      'Usa tu email y la contraseña recibida para iniciar sesión.',
-                      'Configura los datos de tu empresa.',
+                      'Pulsa "Confirmar mi correo": sin ese paso no podrás publicar tu Libro.',
+                      'Inicia sesión con tu email y la contraseña recibida.',
+                      'Configura los datos de tu empresa y finaliza el registro.',
                     ].map((step, i) => (
                       <li key={step} className="flex gap-3">
                         <span className="font-mono text-xs font-bold text-[#c02b0a]">
@@ -722,6 +723,15 @@ export default function AuthPage() {
                       </li>
                     ))}
                   </ol>
+
+                  <p className="mt-4 flex items-start gap-2 rounded-xl border border-[#c9a227]/40 bg-[#fdf6e3] px-4 py-3 text-left text-sm leading-relaxed text-[#1b1611]">
+                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#8a6d1f]" aria-hidden="true" />
+                    <span>
+                      El enlace de confirmación caduca en 24 horas. Si ya venció, inicia sesión y pulsa
+                      «Reenviar enlace de confirmación» en el aviso que verás en el formulario de
+                      registro.
+                    </span>
+                  </p>
 
                   <Button
                     onClick={() => setMode('login')}

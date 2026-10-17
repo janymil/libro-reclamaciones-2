@@ -12,7 +12,18 @@ import { invalidateTenantQueries } from "@/lib/tenant-queries";
 import { useAuth } from "@/hooks/use-auth";
 import { useAIOnboardingKit } from "@/hooks/use-complaints";
 import { useLocation } from "wouter";
-import { Loader2, Building2, Book, Search } from "lucide-react";
+import {
+  Loader2,
+  Building2,
+  Book,
+  Search,
+  Sparkles,
+  MailCheck,
+  AlertTriangle,
+  Info,
+  HelpCircle,
+  X,
+} from "lucide-react";
 import BackToTop from "@/components/layout/back-to-top";
 import { libroSlugFrom } from "@shared/slug";
 import { firstIdentificationCode, type SalesChannel } from "@shared/establishments";
@@ -24,6 +35,7 @@ import {
   type LocalesScenario,
 } from "@/lib/locales-plan";
 import WhatWillBeCreated from "@/components/onboarding/what-will-be-created";
+import FloatingNotice from "@/components/onboarding/floating-notice";
 import { departments, getProvinces, getDistricts } from '@/data/peru-locations';
 import { resolvePeruLocation } from '@/lib/location-matcher';
 import { safeInternalPath } from "@/lib/subscribe-link";
@@ -157,6 +169,58 @@ export default function OnboardingPage() {
   // confirmed yet. Same idea: a way forward (resend the link) instead of a toast.
   const [verificationRequired, setVerificationRequired] = useState(false);
   const [isResendingVerification, setIsResendingVerification] = useState(false);
+  // The proactive reminder is a dismissible sticky strip; a failed "Finalizar"
+  // brings it back as a floating notice.
+  const [isVerificationNoticeDismissed, setIsVerificationNoticeDismissed] = useState(false);
+
+  // Shown right above the submit buttons, where the user is looking after
+  // pressing "Finalizar". Toasts cover the transient messages; this one stays
+  // until the next attempt so nothing is missed.
+  const [formError, setFormError] = useState<string | null>(null);
+
+  /**
+   * The mailbox is known to be pending confirmation *before* the user fills the
+   * form, because the server refuses to publish the Libro until it is verified.
+   * Saying it up front (not only after the failed submit) turns a dead end into
+   * a step the customer can finish first. Demo accounts are excluded: nobody
+   * answers their mail.
+   */
+  const accountNeedsVerification = Boolean(user && user.isEmailVerified === false && !user.isDemo);
+  /**
+   * Proactive reminder: an in-flow sticky strip inside the form column, shown
+   * before the customer fills everything in. It becomes the floating notice
+   * only when a submit actually fails (see `verificationRequired`).
+   */
+  const showVerificationBanner =
+    accountNeedsVerification && !isVerificationNoticeDismissed && !verificationRequired;
+
+  // The confirmation link is usually opened in another tab (or on the phone).
+  // The identity query is cached with `staleTime: Infinity`, so without this the
+  // wizard would keep claiming the mailbox is unconfirmed after the user has
+  // already confirmed it.
+  useEffect(() => {
+    const refreshIdentity = () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/auth/user'] });
+    };
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') refreshIdentity();
+    };
+
+    window.addEventListener('focus', refreshIdentity);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    return () => {
+      window.removeEventListener('focus', refreshIdentity);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
+  }, [queryClient]);
+
+  // Confirmed meanwhile: the warning has done its job.
+  useEffect(() => {
+    if (user?.isEmailVerified) {
+      setVerificationRequired(false);
+      setIsVerificationNoticeDismissed(false);
+    }
+  }, [user?.isEmailVerified]);
 
   // Prefill from whatever a previous attempt already saved. If the libro itself
   // exists, the user only has to confirm it: jump straight to step 2.
@@ -350,6 +414,7 @@ export default function OnboardingPage() {
         } catch {
           // Body was not our JSON envelope: the generic wording is enough.
         }
+        setFormError(null);
         setAccessRequest({ businessName });
         return;
       }
@@ -362,15 +427,24 @@ export default function OnboardingPage() {
 
       // Unconfirmed mailbox: the wizard cannot publish anything yet
       // (services/verificationService.ts), so it needs the way forward, not a
-      // toast that disappears.
+      // toast that disappears. The notice floats over the form and is brought
+      // back even if the customer had hidden it.
       if (raw.includes('email_not_verified')) {
+        setFormError(
+          'Tu correo aún no está confirmado. Revisa el enlace que te enviamos y vuelve a intentarlo.',
+        );
+        setIsVerificationNoticeDismissed(false);
         setVerificationRequired(true);
         return;
       }
 
+      // Anything else: keep the answer next to the button that produced it, and
+      // repeat it in a toast because toasts are fixed to the viewport.
+      const message = apiErrorMessage(error);
+      setFormError(message);
       toast({
         title: "Error al completar configuración",
-        description: apiErrorMessage(error),
+        description: message,
         variant: "destructive",
       });
     }
@@ -412,13 +486,18 @@ export default function OnboardingPage() {
     e.preventDefault();
     // Validate RUC (11 digits)
     if (businessForm.ruc.length !== 11 || !/^\d+$/.test(businessForm.ruc)) {
+      const message = 'El RUC debe tener exactamente 11 dígitos.';
+      setFormError(message);
       toast({
         title: "RUC inválido",
-        description: "El RUC debe tener exactamente 11 dígitos",
+        description: message,
         variant: "destructive",
       });
+      document.getElementById('ruc')?.focus();
       return;
     }
+
+    setFormError(null);
     
     // Prefill step 2 from step 1, using the rules of the chosen scenario: one
     // local takes the business's name, while a chain gets "Casa Matriz - <marca>"
@@ -462,14 +541,18 @@ export default function OnboardingPage() {
 
   const handleLibroSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
 
     // Validate URL slug
     if (!/^[a-z0-9-]+$/.test(libroForm.urlSlug)) {
+      const message = 'La URL solo puede contener letras minúsculas, números y guiones.';
+      setFormError(message);
       toast({
         title: "URL inválida",
-        description: "La URL solo puede contener letras minúsculas, números y guiones",
+        description: message,
         variant: "destructive",
       });
+      document.getElementById('urlSlug')?.focus();
       return;
     }
 
@@ -504,13 +587,27 @@ export default function OnboardingPage() {
       setIsResendingVerification(false);
     }
   };
+
+  /**
+   * Mobile shortcut for the help column (it follows the form below the fold).
+   * Honours the reduced-motion preference and moves focus so keyboard users
+   * land where the page scrolled.
+   */
+  const scrollToHelp = () => {
+    const target = document.getElementById('onboarding-help');
+    if (!target) return;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    target.focus({ preventScroll: true });
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50">
       <div className="container mx-auto px-4 py-8">
-        <div className="max-w-2xl mx-auto">
+        <div className="mx-auto max-w-6xl">
           
           {/* Progress indicator */}
-          <div className="mb-8">
+          <div className="mx-auto mb-8 max-w-2xl">
             <div className="flex items-center justify-center space-x-4">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${
                 step >= 1 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'
@@ -530,6 +627,65 @@ export default function OnboardingPage() {
             </div>
           </div>
 
+          {/*
+            Form and help side by side. On desktop the help column sticks to the
+            viewport, so the AI assistant and the "esto es lo que se creará"
+            preview stay visible while the (long) form scrolls - they used to sit
+            at the very bottom of step 2, where nobody saw them.
+          */}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start xl:grid-cols-[minmax(0,1fr)_25rem]">
+            <div className="min-w-0 space-y-6">
+
+              {/* Pending mailbox, said up front: the server refuses to publish
+                  the Libro until it is confirmed. Sticky at the top of the form
+                  column (visible at any scroll position) but in-flow, so it
+                  never covers a field the customer is typing in. */}
+              {showVerificationBanner && (
+                <div
+                  role="status"
+                  data-testid="banner-confirm-email"
+                  className="sticky top-2 z-30 rounded-lg border border-amber-300 bg-amber-50/95 p-4 text-sm text-amber-950 shadow-sm backdrop-blur"
+                >
+                  <div className="flex items-start gap-3">
+                    <MailCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold">Confirma tu correo para publicar tu Libro</p>
+                      <p className="mt-1 leading-relaxed">
+                        Enviamos un enlace a <strong>{user?.email ?? 'tu correo'}</strong> al crear la
+                        cuenta (revisa también la carpeta de spam). Es obligatorio: sin confirmar, el
+                        Libro no se publica.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="mt-3 border-amber-400 bg-white/70 text-amber-950 hover:bg-white"
+                        disabled={isResendingVerification}
+                        onClick={resendVerification}
+                        data-testid="button-resend-verification-banner-onboarding"
+                      >
+                        {isResendingVerification ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Enviando…
+                          </>
+                        ) : (
+                          'Reenviar enlace de confirmación'
+                        )}
+                      </Button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsVerificationNoticeDismissed(true)}
+                      aria-label="Ocultar recordatorio de confirmación"
+                      className="-mr-1 -mt-1 shrink-0 rounded-md p-1 text-amber-800 transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
+                    >
+                      <X className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
           {/* Resumed: a previous attempt already saved part of this wizard */}
           {isResumed && (
             <div
@@ -540,66 +696,6 @@ export default function OnboardingPage() {
               <p className="mt-1">
                 Revisa los datos y continúa donde quedaste: al finalizar, tu Libro queda publicado.
               </p>
-            </div>
-          )}
-
-          {/* The book cannot be published from an unconfirmed mailbox: the link is
-              the way forward, not a message the user cannot act on. */}
-          {verificationRequired && (
-            <div
-              className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
-              data-testid="notice-email-not-verified"
-            >
-              <p className="font-medium">Confirma tu correo para publicar tu Libro.</p>
-              <p className="mt-1">
-                Te enviamos un enlace de confirmación cuando creaste tu cuenta. Es la dirección que
-                recibirá el aviso de cada reclamación, así que debe estar confirmada antes de
-                publicar tu Libro de Reclamaciones.
-              </p>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="mt-3"
-                disabled={isResendingVerification}
-                onClick={resendVerification}
-                data-testid="button-resend-verification-onboarding"
-              >
-                {isResendingVerification ? 'Enviando…' : 'Reenviar enlace de confirmación'}
-              </Button>
-            </div>
-          )}
-
-          {/* That RUC belongs to another account: the way forward is asking for access */}
-          {accessRequest && (
-            <div
-              role="alert"
-              className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
-              data-testid="notice-ruc-taken"
-            >
-              <p className="font-medium">
-                El RUC {businessForm.ruc} ya está registrado en {accessRequest.businessName}.
-              </p>
-              <p className="mt-1">
-                Si trabajas en esa empresa, puedes solicitar acceso: el administrador actual recibirá tu
-                pedido y deberá aprobarlo. Mientras tanto, esta empresa no se puede crear de nuevo.
-              </p>
-              <Button
-                type="button"
-                onClick={requestAccess}
-                disabled={isRequestingAccess}
-                className="mt-3"
-                data-testid="button-request-access"
-              >
-                {isRequestingAccess ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Enviando…
-                  </>
-                ) : (
-                  'Solicitar acceso a esta empresa'
-                )}
-              </Button>
             </div>
           )}
 
@@ -750,6 +846,17 @@ export default function OnboardingPage() {
                       </Select>
                     </div>
                   </div>
+
+                  {formError && (
+                    <div
+                      role="alert"
+                      data-testid="notice-business-error"
+                      className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900"
+                    >
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                      <span>{formError}</span>
+                    </div>
+                  )}
 
                   <Button 
                     type="submit" 
@@ -949,120 +1056,29 @@ export default function OnboardingPage() {
                     </div>
                   </div>
 
-                  {/* Optional AI onboarding: describes the business once and
-                      proposes tone, policies and consumer-facing texts. */}
-                  <Card className="border-purple-200 bg-purple-50/40">
-                    <CardHeader>
-                      <CardTitle className="text-base">Personalice con IA (opcional)</CardTitle>
-                      <CardDescription>
-                        Describa su negocio y la IA propondrá su tono de marca, políticas de respuesta
-                        y textos para el consumidor. Podrá editarlos aquí mismo.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <Textarea
-                        rows={3}
-                        value={aiDescription}
-                        onChange={(event) => setAiDescription(event.target.value)}
-                        placeholder="Ej.: Somos una cafetería de barrio en Lima. Atendemos con cercanía, respondemos rápido y cuidamos la experiencia del cliente."
-                        data-testid="textarea-ai-onboarding"
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() =>
-                          aiOnboarding.mutate(
-                            {
-                              description: aiDescription,
-                              businessName: businessForm.businessName,
-                              businessType: libroForm.businessType,
-                            },
-                            {
-                              onSuccess: (kit) =>
-                                setLibroForm((prev) => ({
-                                  ...prev,
-                                  brandTone: kit.brandTone,
-                                  brandPolicies: kit.brandPolicies,
-                                  confirmationMessage: kit.confirmationMessage,
-                                  emailHeaderText: kit.emailHeaderText,
-                                })),
-                              onError: (error: Error) =>
-                                toast({
-                                  title: "No se pudo generar la propuesta",
-                                  description: error.message,
-                                  variant: "destructive",
-                                }),
-                            },
-                          )
-                        }
-                        disabled={aiOnboarding.isPending || aiDescription.trim().length < 20}
-                        data-testid="button-ai-onboarding"
-                      >
-                        <span className="material-icons mr-1 text-sm">auto_awesome</span>
-                        {aiOnboarding.isPending ? "Generando..." : "Preparar mi tono con IA"}
-                      </Button>
-
-                      {libroForm.brandTone && (
-                        <div className="space-y-3 rounded-lg border border-purple-200 bg-white p-3">
-                          <div>
-                            <Label htmlFor="brandTone">Tono de marca</Label>
-                            <Textarea
-                              id="brandTone"
-                              rows={2}
-                              value={libroForm.brandTone}
-                              onChange={(event) =>
-                                setLibroForm((prev) => ({ ...prev, brandTone: event.target.value }))
-                              }
-                              data-testid="textarea-brand-tone"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="brandPolicies">Políticas de respuesta</Label>
-                            <Textarea
-                              id="brandPolicies"
-                              rows={4}
-                              value={libroForm.brandPolicies}
-                              onChange={(event) =>
-                                setLibroForm((prev) => ({ ...prev, brandPolicies: event.target.value }))
-                              }
-                              data-testid="textarea-brand-policies"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="confirmationMessage">Mensaje de confirmación</Label>
-                            <Textarea
-                              id="confirmationMessage"
-                              rows={2}
-                              value={libroForm.confirmationMessage}
-                              onChange={(event) =>
-                                setLibroForm((prev) => ({
-                                  ...prev,
-                                  confirmationMessage: event.target.value,
-                                }))
-                              }
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  <WhatWillBeCreated
-                    ruc={businessForm.ruc}
-                    businessName={businessForm.businessName}
-                    establishmentName={libroForm.libroName}
-                    businessType={libroForm.businessType}
-                    slug={libroForm.urlSlug}
-                    notificationEmail={libroForm.notificationEmail}
-                    scenario={scenario}
-                    extraLocales={expectedLocales(scenario, Number(totalLocales))}
-                  />
+                  {/* The AI assistant and the preview live in the help column
+                      (they were here, at the very bottom, where nobody saw
+                      them). Only the answer to a failed attempt stays next to
+                      the button that produced it. */}
+                  {formError && (
+                    <div
+                      role="alert"
+                      data-testid="notice-submit-error"
+                      className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900"
+                    >
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                      <span>{formError}</span>
+                    </div>
+                  )}
 
                   <div className="flex space-x-4">
                     <Button 
                       type="button" 
                       variant="outline" 
-                      onClick={() => setStep(1)}
+                      onClick={() => {
+                        setFormError(null);
+                        setStep(1);
+                      }}
                       className="flex-1"
                       data-testid="button-back"
                     >
@@ -1084,12 +1100,281 @@ export default function OnboardingPage() {
                       )}
                     </Button>
                   </div>
+
+                  {accountNeedsVerification && !formError && (
+                    <p
+                      className="flex items-start gap-2 text-xs text-amber-800"
+                      data-testid="hint-confirm-email"
+                    >
+                      <MailCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      Confirma tu correo antes de finalizar: sin ese paso tu Libro no se publica.
+                    </p>
+                  )}
                 </form>
               </CardContent>
             </Card>
           )}
+            </div>
+
+            {/*
+              Help column. On desktop it sticks next to the form, so the AI
+              assistant and the preview of what will be created are visible
+              without scrolling to the end. On mobile it follows the form (the
+              floating "Ayuda y vista previa" button jumps here).
+            */}
+            <aside
+              id="onboarding-help"
+              tabIndex={-1}
+              aria-label="Ayuda para completar el registro"
+              className="min-w-0 scroll-mt-6 space-y-4 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:overscroll-contain lg:pb-2 lg:pr-1"
+            >
+              {step === 1 && (
+                <Card className="border-blue-200 bg-white/90 shadow-sm">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Info className="h-4 w-4 text-blue-700" aria-hidden="true" />
+                      Cómo completar estos datos
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm text-gray-700">
+                    <p>
+                      Escribe el <strong>RUC de 11 dígitos</strong>: completamos la razón social y la
+                      dirección desde SUNAT, y puedes corregirlas.
+                    </p>
+                    <p>
+                      El <strong>teléfono</strong> y el <strong>correo</strong> son los que usarás para
+                      atender los reclamos.
+                    </p>
+                    <p>
+                      Al continuar eliges cómo opera tu negocio y el enlace público de tu Libro.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Optional AI onboarding: describes the business once and
+                  proposes tone, policies and consumer-facing texts. */}
+              {step === 2 && (
+                <Card className="border-purple-200 bg-purple-50/40 shadow-sm">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Sparkles className="h-4 w-4 text-purple-700" aria-hidden="true" />
+                      Personalice con IA (opcional)
+                    </CardTitle>
+                    <CardDescription>
+                      Describa su negocio y la IA propondrá su tono de marca, políticas de respuesta y
+                      textos para el consumidor. Podrá editarlos aquí mismo.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <Textarea
+                      rows={3}
+                      value={aiDescription}
+                      onChange={(event) => setAiDescription(event.target.value)}
+                      placeholder="Ej.: Somos una cafetería de barrio en Lima. Atendemos con cercanía, respondemos rápido y cuidamos la experiencia del cliente."
+                      data-testid="textarea-ai-onboarding"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full border-purple-300 bg-white/70 text-purple-900 hover:bg-white"
+                      onClick={() =>
+                        aiOnboarding.mutate(
+                          {
+                            description: aiDescription,
+                            businessName: businessForm.businessName,
+                            businessType: libroForm.businessType,
+                          },
+                          {
+                            onSuccess: (kit) =>
+                              setLibroForm((prev) => ({
+                                ...prev,
+                                brandTone: kit.brandTone,
+                                brandPolicies: kit.brandPolicies,
+                                confirmationMessage: kit.confirmationMessage,
+                                emailHeaderText: kit.emailHeaderText,
+                              })),
+                            onError: (error: Error) =>
+                              toast({
+                                title: "No se pudo generar la propuesta",
+                                description: error.message,
+                                variant: "destructive",
+                              }),
+                          },
+                        )
+                      }
+                      disabled={aiOnboarding.isPending || aiDescription.trim().length < 20}
+                      data-testid="button-ai-onboarding"
+                    >
+                      {aiOnboarding.isPending ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                          Generando...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="mr-2 h-4 w-4" aria-hidden="true" />
+                          Preparar mi tono con IA
+                        </>
+                      )}
+                    </Button>
+                    {aiDescription.trim().length > 0 && aiDescription.trim().length < 20 && (
+                      <p className="text-xs text-purple-900/80">
+                        Escribe al menos 20 caracteres para que la IA tenga contexto.
+                      </p>
+                    )}
+
+                    {libroForm.brandTone && (
+                      <div className="space-y-3 rounded-lg border border-purple-200 bg-white p-3">
+                        <div>
+                          <Label htmlFor="brandTone">Tono de marca</Label>
+                          <Textarea
+                            id="brandTone"
+                            rows={2}
+                            value={libroForm.brandTone}
+                            onChange={(event) =>
+                              setLibroForm((prev) => ({ ...prev, brandTone: event.target.value }))
+                            }
+                            data-testid="textarea-brand-tone"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="brandPolicies">Políticas de respuesta</Label>
+                          <Textarea
+                            id="brandPolicies"
+                            rows={4}
+                            value={libroForm.brandPolicies}
+                            onChange={(event) =>
+                              setLibroForm((prev) => ({ ...prev, brandPolicies: event.target.value }))
+                            }
+                            data-testid="textarea-brand-policies"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="confirmationMessage">Mensaje de confirmación</Label>
+                          <Textarea
+                            id="confirmationMessage"
+                            rows={2}
+                            value={libroForm.confirmationMessage}
+                            onChange={(event) =>
+                              setLibroForm((prev) => ({
+                                ...prev,
+                                confirmationMessage: event.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              <WhatWillBeCreated
+                ruc={businessForm.ruc}
+                businessName={businessForm.businessName}
+                establishmentName={libroForm.libroName}
+                businessType={libroForm.businessType}
+                slug={libroForm.urlSlug}
+                notificationEmail={libroForm.notificationEmail}
+                scenario={scenario}
+                extraLocales={expectedLocales(scenario, Number(totalLocales))}
+              />
+            </aside>
+          </div>
         </div>
       </div>
+
+      {/*
+        Everything that blocks the registration floats over the wizard: the
+        customer submits at the bottom of a long form, so an explanation
+        rendered at the top of the page was, in practice, invisible.
+      */}
+      <FloatingNotice
+        open={verificationRequired}
+        tone="warning"
+        icon={MailCheck}
+        title="Confirma tu correo para publicar tu Libro"
+        testId="notice-email-not-verified"
+        focusOnOpen={verificationRequired}
+        onDismiss={() => {
+          setVerificationRequired(false);
+          setIsVerificationNoticeDismissed(true);
+        }}
+        action={
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="border-amber-400 bg-white/70 text-amber-950 hover:bg-white"
+            disabled={isResendingVerification}
+            onClick={resendVerification}
+            data-testid="button-resend-verification-onboarding"
+          >
+            {isResendingVerification ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Enviando…
+              </>
+            ) : (
+              'Reenviar enlace de confirmación'
+            )}
+          </Button>
+        }
+      >
+        Te enviamos un enlace a <strong>{user?.email ?? 'tu correo'}</strong> al crear la cuenta (revisa
+        también la carpeta de spam). Es la dirección que recibirá el aviso de cada reclamación, así que
+        debe estar confirmada antes de publicar tu Libro de Reclamaciones.
+        {verificationRequired && ' Sin confirmar, el Libro no se publica.'}
+      </FloatingNotice>
+
+      <FloatingNotice
+        open={Boolean(accessRequest)}
+        tone="error"
+        icon={AlertTriangle}
+        title="Ese RUC ya está registrado"
+        testId="notice-ruc-taken"
+        focusOnOpen
+        onDismiss={() => setAccessRequest(null)}
+        action={
+          <Button
+            type="button"
+            size="sm"
+            onClick={requestAccess}
+            disabled={isRequestingAccess}
+            data-testid="button-request-access"
+          >
+            {isRequestingAccess ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Enviando…
+              </>
+            ) : (
+              'Solicitar acceso a esta empresa'
+            )}
+          </Button>
+        }
+      >
+        El RUC <strong>{businessForm.ruc}</strong> ya está registrado en{' '}
+        <strong>{accessRequest?.businessName}</strong>. Si trabajas en esa empresa, solicita acceso: el
+        administrador actual recibirá tu pedido y deberá aprobarlo. Mientras tanto, esta empresa no se
+        puede crear de nuevo.
+      </FloatingNotice>
+
+      {/* On mobile the help column sits below the form: this floating button
+          takes the customer there without scrolling through the whole step. */}
+      {step === 2 && !verificationRequired && !accessRequest && (
+        <button
+          type="button"
+          onClick={scrollToHelp}
+          className="fixed bottom-36 left-4 z-40 inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-900 shadow-lg transition-colors hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 lg:hidden"
+          data-testid="button-onboarding-help"
+        >
+          <HelpCircle className="h-4 w-4" aria-hidden="true" />
+          Ayuda y vista previa
+        </button>
+      )}
+
       <BackToTop />
     </div>
   );
