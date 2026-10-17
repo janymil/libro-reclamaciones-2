@@ -259,8 +259,9 @@ Implemented AI services (`server/services/aiService.ts`,
   and feature (`ai_usage`), and thumbs up/down plus draft acceptance are stored
   in `ai_feedback` (`GET /api/ai/usage`, `POST /api/ai/feedback`).
 - **Provider fallback and real health**: optional second OpenAI-compatible
-  provider (`AI_FALLBACK_*`); `/api/status` probes `GET /models` (cached) instead
-  of trusting key presence.
+  provider (`AI_FALLBACK_*`; Cloudflare Workers AI's free GPT-OSS endpoint is the
+  recommended one). `/api/status` probes the provider (cached) instead of
+  trusting key presence; `AI_FORCE_FALLBACK=true` validates the fallback.
 - **Privacy**: bulk analysis and SLA prompts redact e-mails, phones, documents
   and long numbers (`shared/pii.ts`); the case-summary prompt no longer includes
   the consumer's name.

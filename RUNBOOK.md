@@ -28,7 +28,59 @@ documents every variable.
 | `AI_MODEL_FAST`, `AI_AGENT_MODEL` | optional | Fast model for classification/assistance (`openai/gpt-oss-20b` by default) and the model for the compliance co-pilot (defaults to `AI_MODEL`). |
 | `AI_EMBEDDINGS_MODEL` | optional | Enables embeddings-based similar-complaint detection. Groq has no `/embeddings` endpoint; leave unset to use the local TF-IDF fallback. |
 | `AI_FALLBACK_BASE_URL`, `AI_FALLBACK_API_KEY`, `AI_FALLBACK_MODEL` | optional | Second OpenAI-compatible provider. It is used only when the primary call fails; `AI_FALLBACK_MODEL` defaults to the primary model. Leave unset for a single provider. |
+| `AI_FORCE_FALLBACK` | test only | `true` sends every model call to the fallback, to validate the second provider without failing the primary. Never leave it on in production. |
 | `AI_PRICE_INPUT_PER_MTOK`, `AI_PRICE_OUTPUT_PER_MTOK` | optional | Price per million tokens in USD, used only to show an estimated cost in the per-tenant AI usage meter. Unset ⇒ cost is shown as "—", tokens are still counted. |
+
+### Free fallback provider: Cloudflare Workers AI
+
+The production primary is Groq's free tier: **30 RPM, 1,000 RPD, 8,000 TPM and
+200,000 TPD per model**, measured at the organization level. That is enough for
+a pilot and a small tenant base, but a burst of agent + drafting calls can reach
+the TPM ceiling (the verification script did), so a fallback is worthwhile.
+
+Cloudflare Workers AI is the recommended free fallback for this app:
+
+- same open-weight **GPT-OSS 120B / 20B** models, so Spanish writing and JSON
+  behavior stay close to the primary;
+- OpenAI-compatible endpoint at
+  `https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1`;
+- **10,000 free neurons per day** (then paid at $0.011 / 1,000 neurons);
+- **zero data retention and no training** for standard inference (Cloudflare
+  Workers AI data-usage policy), unlike the Gemini free tier, whose free tier
+  explicitly uses content to improve Google products.
+
+To enable it:
+
+1. In the Cloudflare dashboard create an API token with **Workers AI** access,
+   and copy the account id.
+2. Write the token without echoing it:
+   ```bash
+   sudo install -m 600 -o root -g root /dev/null /opt/libro-de-reclamaciones/secrets/AI_FALLBACK_API_KEY.txt
+   sudo sh -c 'printf "%s" "YOUR_TOKEN" > /opt/libro-de-reclamaciones/secrets/AI_FALLBACK_API_KEY.txt'
+   ```
+3. Set the base URL in `/opt/libro-de-reclamaciones/.env` (read by Compose):
+   ```bash
+   AI_FALLBACK_BASE_URL=https://api.cloudflare.com/client/v4/accounts/YOUR_ACCOUNT_ID/ai/v1
+   AI_FALLBACK_MODEL=@cf/openai/gpt-oss-120b
+   ```
+4. Recreate and verify:
+   ```bash
+   cd /opt/libro-de-reclamaciones
+   docker compose up -d --force-recreate app
+   curl -s https://librodigital.pe/api/ai/status
+   ```
+   `fallbackConfigured` must be `true`. To exercise it without waiting for a
+   Groq failure, run a one-off verification with `AI_FORCE_FALLBACK=true` in the
+   container environment, or point `AI_FORCE_FALLBACK` at `true` temporarily.
+5. Remove `AI_FORCE_FALLBACK` when finished.
+
+If Cloudflare is not available, **OpenRouter free models** (Gemma 4 31B,
+Nemotron 3 Super 120B) are a second free option. OpenRouter itself labels free
+models as not suitable for production and free-model request limits are low
+(50/day without credits; 1,000/day after a one-time $10 credit purchase), so use
+it only as an emergency fallback and review its provider logging/training
+settings. **Avoid the Gemini free tier for complaints with personal data**:
+Google documents that free-tier content is used to improve its products.
 | `RUC_API_PROVIDER`, `APISNET_API_TOKEN`, `DECOLECTA_API_TOKEN` | optional | Auto-fills the razón social on the registration form. Defaults to the anonymous apis.net.pe endpoint; a token raises the quota. Absent/down ⇒ the user types the razón social manually (the endpoint answers `provider_unreachable` / `provider_rate_limited`, never "RUC not found"). |
 | `PORT` | optional | Defaults to 5000. |
 

@@ -98,12 +98,15 @@ export interface AIStatus {
 
 /** Reported by GET /api/ai/status so the UI can show whether AI is active. */
 export function getAIStatus(): AIStatus {
+  const fallbackConfigured = Boolean(AI_FALLBACK_BASE_URL && AI_FALLBACK_API_KEY);
   return {
-    enabled: Boolean(AI_API_KEY),
-    provider: AI_BASE_URL,
-    model: AI_MODEL,
-    fastModel: AI_MODEL_FAST,
-    fallbackConfigured: Boolean(AI_FALLBACK_BASE_URL && AI_FALLBACK_API_KEY),
+    // The fallback can also be the only provider (useful while testing it or
+    // when the primary key was revoked).
+    enabled: Boolean(AI_API_KEY) || fallbackConfigured,
+    provider: AI_API_KEY ? AI_BASE_URL : AI_FALLBACK_BASE_URL,
+    model: AI_API_KEY ? AI_MODEL : AI_FALLBACK_MODEL || AI_MODEL,
+    fastModel: AI_API_KEY ? AI_MODEL_FAST : AI_FALLBACK_MODEL || AI_MODEL_FAST,
+    fallbackConfigured,
   };
 }
 
@@ -138,15 +141,42 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
+ * Proves a provider is usable.
+ *
+ * `GET /models` is the cheapest check, but not every OpenAI-compatible gateway
+ * implements it (Cloudflare Workers AI, for example). In that case a one-token
+ * chat completion is the honest fallback: it proves the credentials and the
+ * model actually work.
+ */
+async function probeProvider(client: OpenAI, model: string): Promise<number> {
+  const startedAt = Date.now();
+  try {
+    await withTimeout(client.models.list(), HEALTH_PROBE_TIMEOUT_MS);
+  } catch {
+    await withTimeout(
+      client.chat.completions.create({
+        model,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+        temperature: 0,
+      }),
+      HEALTH_PROBE_TIMEOUT_MS,
+    );
+  }
+  return Date.now() - startedAt;
+}
+
+/**
  * A REAL provider probe, cached for two minutes.
  *
  * `/api/status` used to report "operational" from key presence alone, so a
  * revoked key or a provider outage still showed green. This performs the
- * cheapest authenticated call (`GET /models`), tries the fallback when the
- * primary fails, and reports latency.
+ * cheapest authenticated call, tries the fallback when the primary fails, and
+ * reports latency.
  */
 export async function getAIHealth(force = false): Promise<AIHealth> {
-  if (!AI_API_KEY) {
+  const fallbackConfigured = Boolean(AI_FALLBACK_BASE_URL && AI_FALLBACK_API_KEY);
+  if (!AI_API_KEY && !fallbackConfigured) {
     return {
       status: 'disabled',
       enabled: false,
@@ -164,7 +194,7 @@ export async function getAIHealth(force = false): Promise<AIHealth> {
 
   const primary = getAIClient();
   const fallback = getFallbackAIClient();
-  let provider = AI_BASE_URL;
+  let provider = AI_API_KEY ? AI_BASE_URL : AI_FALLBACK_BASE_URL;
   let lastError = '';
 
   for (const [source, candidate] of [
@@ -172,17 +202,17 @@ export async function getAIHealth(force = false): Promise<AIHealth> {
     ['fallback', fallback],
   ] as const) {
     if (!candidate) continue;
-    const startedAt = Date.now();
     try {
-      await withTimeout(candidate.models.list(), HEALTH_PROBE_TIMEOUT_MS);
+      const model = source === 'fallback' ? AI_FALLBACK_MODEL || AI_MODEL : AI_MODEL;
+      const latencyMs = await probeProvider(candidate, model);
       const health: AIHealth = {
         status: 'operational',
         enabled: true,
         provider: source === 'fallback' ? AI_FALLBACK_BASE_URL : AI_BASE_URL,
-        model: AI_MODEL,
+        model,
         checkedAt: new Date().toISOString(),
-        latencyMs: Date.now() - startedAt,
-        fallbackConfigured: Boolean(AI_FALLBACK_BASE_URL && AI_FALLBACK_API_KEY),
+        latencyMs,
+        fallbackConfigured,
         ...(source === 'fallback' && lastError ? { error: `primary: ${lastError}` } : {}),
       };
       healthCache = { expiresAt: Date.now() + HEALTH_CACHE_MS, value: health };
@@ -197,10 +227,10 @@ export async function getAIHealth(force = false): Promise<AIHealth> {
     status: 'degraded',
     enabled: true,
     provider,
-    model: AI_MODEL,
+    model: AI_API_KEY ? AI_MODEL : AI_FALLBACK_MODEL || AI_MODEL,
     checkedAt: new Date().toISOString(),
     latencyMs: null,
-    fallbackConfigured: Boolean(AI_FALLBACK_BASE_URL && AI_FALLBACK_API_KEY),
+    fallbackConfigured,
     error: lastError || 'provider unreachable',
   };
   // Shorter cache while degraded: recovery should be visible quickly.
@@ -324,13 +354,13 @@ export async function chatCompletion(
   params: OpenAI.ChatCompletionCreateParamsNonStreaming,
   options: { usage?: AIUsageContext; model?: string } = {},
 ): Promise<OpenAI.ChatCompletion> {
-  const ai = getAIClient();
-  if (!ai) {
+  const primary = getAIClient();
+  const fallback = getFallbackAIClient();
+  if (!primary && !fallback) {
     throw new Error('AI provider not configured');
   }
 
   let model = options.model ?? (params.model as string);
-  let provider = `primary:${AI_BASE_URL}`;
 
   const call = async (client: OpenAI, modelName: string) => {
     try {
@@ -352,22 +382,38 @@ export async function chatCompletion(
     }
   };
 
-  try {
-    const response = await call(ai, model);
-    recordAIUsage(response, { model, provider }, options.usage);
-    return response;
-  } catch (error) {
-    const fallback = getFallbackAIClient();
+  const useFallback = async (primaryError?: unknown) => {
     if (!fallback) {
-      throw error;
+      throw primaryError ?? new Error('AI fallback provider not configured');
     }
-
-    console.error('Primary AI provider failed, trying the fallback provider:', error);
+    if (primaryError) {
+      console.error('Primary AI provider failed, trying the fallback provider:', primaryError);
+    }
     model = AI_FALLBACK_MODEL || model;
-    provider = `fallback:${AI_FALLBACK_BASE_URL}`;
+    const provider = `fallback:${AI_FALLBACK_BASE_URL}`;
     const response = await call(fallback, model);
     recordAIUsage(response, { model, provider }, options.usage);
     return response;
+  };
+
+  // `AI_FORCE_FALLBACK=true` is a deployment/test switch: it exercises the
+  // fallback without touching the primary provider, and is how a Cloudflare
+  // key can be validated before Groq is ever needed.
+  if (process.env.AI_FORCE_FALLBACK === 'true' && fallback) {
+    return useFallback();
+  }
+
+  // Fallback-only configuration (no primary key at all).
+  if (!primary) {
+    return useFallback();
+  }
+
+  try {
+    const response = await call(primary, model);
+    recordAIUsage(response, { model, provider: `primary:${AI_BASE_URL}` }, options.usage);
+    return response;
+  } catch (error) {
+    return useFallback(error);
   }
 }
 

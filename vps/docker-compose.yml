@@ -67,6 +67,11 @@ services:
       AI_BASE_URL: https://api.groq.com/openai/v1
       AI_MODEL: openai/gpt-oss-120b
       AI_MODEL_FAST: openai/gpt-oss-20b
+      # Optional free fallback: Cloudflare Workers AI (zero retention, no
+      # training, same GPT-OSS models). Set the URL with your account id and
+      # write the token to secrets/AI_FALLBACK_API_KEY.txt. Empty = disabled.
+      AI_FALLBACK_BASE_URL: ${AI_FALLBACK_BASE_URL:-}
+      AI_FALLBACK_MODEL: ${AI_FALLBACK_MODEL:-@cf/openai/gpt-oss-120b}
 
       # --- Payments. The access token is a secret. ----------------------------
       MERCADOPAGO_SANDBOX: "false"
@@ -86,6 +91,7 @@ services:
       - SESSION_SECRET
       - SMTP_PASSWORD
       - AI_API_KEY
+      - AI_FALLBACK_API_KEY
       - MERCADOPAGO_ACCESS_TOKEN
       - DECOLECTA_API_TOKEN
 
@@ -124,6 +130,8 @@ secrets:
     file: ${SECRETS_DIR:-../secrets}/SMTP_PASSWORD.txt
   AI_API_KEY:
     file: ${SECRETS_DIR:-../secrets}/AI_API_KEY.txt
+  AI_FALLBACK_API_KEY:
+    file: ${SECRETS_DIR:-../secrets}/AI_FALLBACK_API_KEY.txt
   MERCADOPAGO_ACCESS_TOKEN:
     file: ${SECRETS_DIR:-../secrets}/MERCADOPAGO_ACCESS_TOKEN.txt
   DECOLECTA_API_TOKEN:

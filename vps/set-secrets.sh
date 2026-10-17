@@ -30,7 +30,7 @@ require_root() {
   [ "$(id -u)" -eq 0 ] || die "run as root: sudo $0"
 }
 
-names=(DATABASE_URL SESSION_SECRET SMTP_PASSWORD AI_API_KEY MERCADOPAGO_ACCESS_TOKEN DECOLECTA_API_TOKEN)
+names=(DATABASE_URL SESSION_SECRET SMTP_PASSWORD AI_API_KEY AI_FALLBACK_API_KEY MERCADOPAGO_ACCESS_TOKEN DECOLECTA_API_TOKEN)
 
 show_status() {
   printf '%-30s %-6s %s\n' "FILE" "MODE" "BYTES"
@@ -119,6 +119,20 @@ write_secret SMTP_PASSWORD
 prompt_secret "AI API key" \
   "Groq / OpenAI-compatible key (gsk_...)"
 write_secret AI_API_KEY
+
+# Optional: the free fallback provider (Cloudflare Workers AI). Enter to skip;
+# compose still mounts an empty file, and getFallbackAIClient() ignores it.
+printf '\nCloudflare Workers AI token for the free fallback (optional, Enter to skip)\n  > '
+IFS= read -rs VALUE || true
+printf '\n'
+if [ -n "$VALUE" ]; then
+  write_secret AI_FALLBACK_API_KEY
+else
+  : > "$SECRETS_DIR/AI_FALLBACK_API_KEY.txt"
+  chmod 600 "$SECRETS_DIR/AI_FALLBACK_API_KEY.txt"
+  chown root:root "$SECRETS_DIR/AI_FALLBACK_API_KEY.txt"
+  printf 'left AI_FALLBACK_API_KEY.txt empty (fallback disabled)\n'
+fi
 
 prompt_secret "Mercado Pago access token" \
   "Production credentials: APP_USR-... (TEST- only for sandbox)"
