@@ -80,9 +80,68 @@ async function main() {
   );
   console.log(JSON.stringify(summary, null, 2));
 
-  const ok = [classification, draft, trends, assistance, clauses, summary].every(
-    (result) => result.source === "ai",
+  console.log("\n--- 7. Public-form autofill ---");
+  const extracted = await aiService.extractComplaintFields(
+    "El 10 de octubre de 2026 compré una licuadora Oster por S/ 249.90 con boleta B001-12345. " +
+      "A los dos días dejó de encender y solicito el cambio por otra igual.",
   );
+  console.log(JSON.stringify(extracted, null, 2));
+
+  console.log("\n--- 8. Onboarding kit ---");
+  const onboarding = await aiService.generateOnboardingKit({
+    description:
+      "Somos una cafetería de barrio en Lima. Atendemos con cercanía, respondemos rápido y cuidamos la experiencia del cliente.",
+    businessName: "Café Demo",
+    businessType: "local_fisico",
+  });
+  console.log(JSON.stringify(onboarding, null, 2));
+
+  console.log("\n--- 9. Monthly executive report ---");
+  const executive = await aiService.generateExecutiveReport({
+    periodLabel: "octubre de 2026",
+    stats: {
+      total: 12,
+      open: 3,
+      overdue: 1,
+      resolved: 8,
+      answered: 9,
+      slaOnTimeRate: 89,
+      averageResponseTime: 3.4,
+    },
+    previousMonth: { complaints: 9, resolved: 6, overdue: 0 },
+    topProducts: [
+      { name: "Licuadora Oster", total: 4, overdue: 1 },
+      { name: "Delivery", total: 3, overdue: 0 },
+    ],
+    complaints: [
+      "La licuadora dejó de encender a los dos días; el cliente pide el cambio.",
+      "El pedido llegó tarde y la comida estaba fría; pide reembolso.",
+    ],
+  });
+  console.log(JSON.stringify(executive, null, 2));
+
+  console.log("\n--- 10. SLA follow-up message ---");
+  const followUp = await aiService.generateSlaFollowUp({
+    correlativeNumber: "2026-0001",
+    productServiceName: "Licuadora Oster",
+    daysRemaining: 2,
+    status: "in_progress",
+    consumerRequest: "cambio del producto",
+  });
+  console.log(JSON.stringify(followUp, null, 2));
+
+  const ok = [
+    classification,
+    draft,
+    trends,
+    assistance,
+    clauses,
+    summary,
+    extracted,
+    onboarding,
+    executive,
+    followUp,
+  ].every((result) => result.source === "ai");
   console.log(`\n${ok ? "✓ All AI features verified against the live provider." : "✗ Some features fell back to heuristics - check the errors above."}`);
   process.exit(ok ? 0 : 1);
 }

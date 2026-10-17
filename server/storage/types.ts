@@ -43,6 +43,10 @@ import type {
   InsertDiscountCode,
   PlatformConfigAudit,
   InsertPlatformConfigAudit,
+  AIUsage,
+  InsertAIUsage,
+  AIFeedback,
+  InsertAIFeedback,
 } from "@shared/schema";
 import type {
   CompleteOnboardingInput,
@@ -58,6 +62,34 @@ import type { MonthlyReport } from "@shared/monthly-reports";
 
 // Application version reported alongside the derived system-change entries.
 export const APP_VERSION = "1.2.0";
+
+export interface AIUsageSummary {
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  byFeature: Array<{
+    feature: string;
+    calls: number;
+    totalTokens: number;
+    estimatedCostUsd: number;
+  }>;
+}
+
+export interface AIFeedbackSummary {
+  total: number;
+  positive: number;
+  negative: number;
+  /** positive / (positive + negative); null when there is no feedback yet. */
+  acceptanceRate: number | null;
+  byFeature: Array<{
+    feature: string;
+    total: number;
+    positive: number;
+    negative: number;
+  }>;
+}
 
 export interface IStorage {
   // User operations
@@ -182,6 +214,12 @@ export interface IStorage {
   getApiKeyByKeyHash(keyHash: string): Promise<ApiKeyPublic & { businessId: string } | undefined>;
   markApiKeyUsed(id: string): Promise<void>;
   revokeApiKey(id: string, businessId: string): Promise<ApiKeyPublic | undefined>;
+
+  // AI usage meter + draft feedback (append-only)
+  recordAIUsage(data: InsertAIUsage): Promise<AIUsage>;
+  getAIUsageSummary(businessId: string, since: Date): Promise<AIUsageSummary>;
+  createAIFeedback(data: InsertAIFeedback): Promise<AIFeedback>;
+  getAIFeedbackSummary(businessId: string, since: Date): Promise<AIFeedbackSummary>;
 
   // Webhooks (Phase 3.12)
   createWebhook(data: InsertWebhook): Promise<Webhook>;

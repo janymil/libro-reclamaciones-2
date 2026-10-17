@@ -744,6 +744,56 @@ export const platformConfigAudit = pgTable("platform_config_audit", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [index("idx_platform_config_audit_created").on(table.createdAt)]);
 
+/**
+ * AI usage meter (per tenant, per feature).
+ *
+ * Every model call records its token usage here so a customer can see what the
+ * AI is doing and the platform can watch cost. `business_id` is nullable on
+ * purpose: the public complaint assistant is platform-funded and has no tenant
+ * session. No prompt or completion text is stored - only counts and the model.
+ */
+export const aiUsage = pgTable("ai_usage", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessId: uuid("business_id"),
+  userId: uuid("user_id"),
+  /** classification | draft | trends | case_summary | abusive_clauses | public_assist | agent | ... */
+  feature: varchar("feature", { length: 50 }).notNull(),
+  model: varchar("model", { length: 120 }).notNull(),
+  /** Base URL of the provider that answered (primary or fallback). */
+  provider: varchar("provider", { length: 200 }),
+  promptTokens: integer("prompt_tokens").notNull().default(0),
+  completionTokens: integer("completion_tokens").notNull().default(0),
+  totalTokens: integer("total_tokens").notNull().default(0),
+  /** Computed with AI_PRICE_* env vars; 0 when the operator has not set prices. */
+  estimatedCostUsd: decimal("estimated_cost_usd", { precision: 12, scale: 6 }).notNull().default("0"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_ai_usage_business_created").on(table.businessId, table.createdAt),
+  index("idx_ai_usage_feature").on(table.feature),
+]);
+
+/**
+ * Draft quality feedback (thumbs up/down and one-click acceptance).
+ *
+ * `rating` is 1 (useful/accepted) or -1 (not useful). `feature` identifies the
+ * surface (draft, case_summary, trends, ...), so the acceptance rate can be
+ * computed per feature. Deliberately small and append-only.
+ */
+export const aiFeedback = pgTable("ai_feedback", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessId: uuid("business_id").notNull(),
+  userId: uuid("user_id"),
+  feature: varchar("feature", { length: 50 }).notNull(),
+  rating: integer("rating").notNull(),
+  comment: text("comment"),
+  complaintId: uuid("complaint_id"),
+  model: varchar("model", { length: 120 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_ai_feedback_business_created").on(table.businessId, table.createdAt),
+  index("idx_ai_feedback_feature").on(table.feature),
+]);
+
 // Relations
 export const usersRelations = relations(users, ({ one, many }) => ({
   business: one(businesses, {
@@ -1292,6 +1342,12 @@ export type InsertDiscountCode = typeof discountCodes.$inferInsert;
 /** One entry of the console's change history. */
 export type PlatformConfigAudit = typeof platformConfigAudit.$inferSelect;
 export type InsertPlatformConfigAudit = typeof platformConfigAudit.$inferInsert;
+
+export type AIUsage = typeof aiUsage.$inferSelect;
+export type InsertAIUsage = typeof aiUsage.$inferInsert;
+
+export type AIFeedback = typeof aiFeedback.$inferSelect;
+export type InsertAIFeedback = typeof aiFeedback.$inferInsert;
 
 
 /** Public (safe) projection of an API key - never exposes the hash. */

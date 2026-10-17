@@ -74,7 +74,16 @@ export function registerComplaintsRoutes(app: Express): void {
       }
 
       const businessComplaints = await storage.getComplaintsByBusiness(req.user.businessId);
-      const similar = await similarityService.findSimilarComplaints(complaint, businessComplaints);
+      const similar = await similarityService.findSimilarComplaints(
+        complaint,
+        businessComplaints,
+        5,
+        {
+          businessId: req.user.businessId,
+          userId: req.user.id,
+          feature: 'similar',
+        },
+      );
       res.json(similar);
     } catch (error) {
       console.error('Error finding similar complaints:', error);

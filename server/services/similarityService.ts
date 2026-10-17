@@ -1,5 +1,5 @@
 import type { Complaint } from "@shared/schema";
-import { getAIClient } from "./aiService";
+import { getAIClient, recordEmbeddingUsage, type AIUsageContext } from "./aiService";
 
 /**
  * Similar-complaint detection.
@@ -98,13 +98,21 @@ function cosineDense(a: number[], b: number[]): number {
 }
 
 /** Uses the provider's /embeddings endpoint when AI_EMBEDDINGS_MODEL is set. */
-async function embedTexts(texts: string[]): Promise<number[][] | null> {
+async function embedTexts(
+  texts: string[],
+  usage?: AIUsageContext,
+): Promise<number[][] | null> {
   const model = process.env.AI_EMBEDDINGS_MODEL;
   const ai = getAIClient();
   if (!model || !ai) return null;
 
   try {
     const response = await ai.embeddings.create({ model, input: texts });
+    recordEmbeddingUsage(
+      response.usage,
+      { model, provider: `primary:${process.env.AI_BASE_URL || 'https://api.groq.com/openai/v1'}` },
+      usage,
+    );
     return response.data.map((item) => item.embedding);
   } catch (error) {
     console.error('Embeddings request failed, falling back to local TF-IDF:', error);
@@ -132,7 +140,8 @@ export const similarityService = {
   async findSimilarComplaints(
     target: Complaint,
     candidates: Complaint[],
-    limit = 5
+    limit = 5,
+    usage?: AIUsageContext,
   ): Promise<SimilarComplaintMatch[]> {
     const pool = candidates.filter(
       (complaint) => complaint.id !== target.id && Boolean(complaint.complaintDetail)
@@ -141,7 +150,7 @@ export const similarityService = {
 
     const texts = [complaintText(target), ...pool.map(complaintText)];
 
-    const embeddings = await embedTexts(texts);
+    const embeddings = await embedTexts(texts, usage);
     let scores: number[];
     if (embeddings) {
       const [targetVector, ...rest] = embeddings;

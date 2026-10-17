@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 
 import { db } from "../db";
 import { jobStatus } from "../services/scheduler";
-import { getAIStatus } from "../services/aiService";
+import { getAIHealth } from "../services/aiService";
 
 /**
  * Public status page endpoint (Phase 3.13): shows the health of the system
@@ -11,7 +11,8 @@ import { getAIStatus } from "../services/aiService";
  */
 export function registerStatusRoutes(app: Express): void {
   app.get('/api/status', async (_req, res) => {
-    const ai = getAIStatus();
+    // Real, cached provider probe instead of "the key exists, so it must work".
+    const ai = await getAIHealth();
     const emailConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASSWORD);
 
     // A REAL probe. The previous version hard-coded `database: 'operational'`,
@@ -32,9 +33,12 @@ export function registerStatusRoutes(app: Express): void {
         api: { status: 'operational' },
         database: { status: databaseUp ? 'operational' : 'degraded' },
         ai: {
-          status: ai.enabled ? 'operational' : 'degraded',
+          status: ai.status === 'operational' ? 'operational' : 'degraded',
           enabled: ai.enabled,
           model: ai.model,
+          latencyMs: ai.latencyMs,
+          checkedAt: ai.checkedAt,
+          ...(ai.error ? { error: ai.error } : {}),
         },
         email: {
           status: emailConfigured ? 'operational' : 'degraded',

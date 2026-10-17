@@ -199,7 +199,7 @@ closes the question. Cover, per role (admin / user / viewer) and per plan tier:
 | Reports `/reportes` | Charts + expediente ZIP download (`sirec.csv`, `MANIFIESTO.txt` inside) |
 | Establishments / Books / Users / Businesses | CRUD + role restrictions (viewer cannot mutate) |
 | Plan `/plan`, multi-RUC switch, customization | Quota messages, plan change, brand color applied |
-| AI | Classification/triage (all plans); response drafting, trends, SLA prediction, case summary and abusive-clause review (Pro+); public draft assistant (CAPTCHA); compliance co-pilot with citations; heuristic fallback when no key is set |
+| AI | Classification/triage (all plans); response drafting with tone/length presets, trends, SLA prediction, case summary, abusive-clause review and monthly executive report (Pro+); public draft assistant + form autofill (CAPTCHA); onboarding assistant; streaming compliance co-pilot with citations; per-tenant usage meter and feedback loop; provider fallback and real health probe; heuristic fallback when no key is set |
 | QR `/codigo-qr`, widget `widget.js`, `/estado`, `/accesibilidad` | Render, accessible landmarks, no console errors |
 | Cross-cutting | **Assert zero console errors and no failed network requests on every page** |
 

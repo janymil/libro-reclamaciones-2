@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 import type { SendMailOptions, Transporter } from 'nodemailer';
 import type { Complaint } from '@shared/schema';
 import type { BusinessEmailIdentity } from '@shared/email-identity';
+import type { ExecutiveReport } from './aiService';
 import { buildPaymentRecoveryText, paymentRecoverySubject } from '@shared/payment-recovery';
 
 interface EmailConfig {
@@ -1071,6 +1072,32 @@ ${plainSignature(customization)}
     }
   }
 
+  /** SLA reminder for the assignee (before the escalation threshold). */
+  async sendSlaReminder(email: string, businessName: string, correlativeNumber: string, message: string): Promise<void> {
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to: email,
+      subject: `Recordatorio SLA: ${correlativeNumber} - ${businessName}`,
+      text: `
+Recordatorio de plazo - ${businessName}
+
+${message}
+
+El plazo legal de respuesta es de 15 días hábiles (DS 101-2022-PCM).
+Revise la reclamación en el panel de gestión: /reclamos
+
+LibroDigital.pe
+      `,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending SLA reminder:', error);
+      throw new Error('Failed to send SLA reminder');
+    }
+  }
+
   /**
    * SLA escalation notice for the responsible staff member (Phase 2.9).
    * Fire-and-forget: failures are logged by the caller, never the complaint flow.
@@ -1097,6 +1124,70 @@ LibroDigital.pe
     } catch (error) {
       console.error('Error sending SLA escalation:', error);
       throw new Error('Failed to send SLA escalation');
+    }
+  }
+
+  /**
+   * Monthly executive report (AI) as a PDF attachment.
+   *
+   * Sent only when the customer clicks "generar y enviar", never automatically:
+   * an AI report per tenant per month would be both costly and noisy.
+   */
+  async sendExecutiveReport(
+    email: string,
+    businessName: string,
+    periodLabel: string,
+    pdfBuffer: Buffer,
+    report: ExecutiveReport,
+  ): Promise<void> {
+    const list = (items: string[]): string =>
+      items.length > 0 ? items.map((item) => `• ${item}`).join('\n') : '• Sin observaciones.';
+
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to: email,
+      subject: `Reporte ejecutivo IA — ${periodLabel} — ${businessName}`,
+      text: `
+Reporte ejecutivo — ${businessName}
+Periodo: ${periodLabel}
+
+${report.headline}
+
+${report.summary}
+
+Hallazgos
+${list(report.highlights)}
+
+Riesgos
+${list(report.risks)}
+
+Acciones recomendadas
+${list(report.actions)}
+
+Indicadores
+${list(report.kpiNotes)}
+
+Adjuntamos el PDF con el mismo contenido.
+
+Reporte generado con asistencia de IA a partir de los datos del Libro de Reclamaciones.
+Es una herramienta de apoyo: revise las cifras antes de tomar decisiones.
+
+LibroDigital.pe
+      `,
+      attachments: [
+        {
+          filename: `reporte-ejecutivo-${periodLabel.replace(/\s+/g, '-')}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf',
+        },
+      ],
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending executive report:', error);
+      throw new Error('Failed to send executive report');
     }
   }
 

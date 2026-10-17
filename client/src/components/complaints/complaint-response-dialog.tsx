@@ -14,8 +14,18 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useUpgradeToast } from "@/hooks/use-plan-upgrade";
-import { useUpdateComplaint, useAISuggestResponse, useSimilarComplaints, useCaseSummary, type CaseSummaryResult } from "@/hooks/use-complaints";
+import {
+  useUpdateComplaint,
+  useAISuggestResponse,
+  useSimilarComplaints,
+  useCaseSummary,
+  useAIFeedback,
+  type CaseSummaryResult,
+  type ResponseLength,
+  type ResponseTone,
+} from "@/hooks/use-complaints";
 import { useSubscription } from "@/hooks/use-subscription";
+import AIFeedbackButtons from "@/components/ai/ai-feedback-buttons";
 import { useBusinessDays } from "@/hooks/use-business-days";
 import type { Complaint } from "@shared/schema";
 
@@ -48,6 +58,9 @@ export default function ComplaintResponseDialog({ complaint, open, onOpenChange 
   const [providerActions, setProviderActions] = useState("");
   const [providerResponse, setProviderResponse] = useState("");
   const [responseMethod, setResponseMethod] = useState("email");
+  const [tone, setTone] = useState<ResponseTone | "auto">("auto");
+  const [length, setLength] = useState<ResponseLength | "auto">("auto");
+  const feedback = useAIFeedback();
   const [caseSummary, setCaseSummary] = useState<CaseSummaryResult | null>(null);
 
   const caseSummaryMutation = useCaseSummary();
@@ -76,6 +89,8 @@ export default function ComplaintResponseDialog({ complaint, open, onOpenChange 
       const result = await suggestResponse.mutateAsync({
         complaintText: `${complaint.complaintDetail}\n\nPedido del consumidor: ${complaint.consumerRequest ?? 'No especificado'}`,
         complaintType: complaint.complaintType,
+        tone: tone === "auto" ? undefined : tone,
+        length: length === "auto" ? undefined : length,
       });
       setProviderResponse(result.suggestion);
       toast({
@@ -178,7 +193,16 @@ export default function ComplaintResponseDialog({ complaint, open, onOpenChange 
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={() => setProviderResponse(similar.providerResponse as string)}
+                            onClick={() => {
+                              setProviderResponse(similar.providerResponse as string);
+                              // Acceptance signal: a reused draft is the strongest
+                              // evidence that detecting similar cases pays off.
+                              feedback.mutate({
+                                feature: "draft_reuse",
+                                rating: 1,
+                                complaintId: complaint.id,
+                              });
+                            }}
                             data-testid={`button-reuse-${similar.complaintId}`}
                           >
                             Reutilizar respuesta
@@ -235,6 +259,35 @@ export default function ComplaintResponseDialog({ complaint, open, onOpenChange 
                   {suggestResponse.isPending ? "Generando..." : "Sugerir con IA"}
                 </Button>
               </div>
+
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Select value={tone} onValueChange={(value) => setTone(value as ResponseTone | "auto")}>
+                  <SelectTrigger className="h-8 w-[150px]" aria-label="Tono de la respuesta">
+                    <SelectValue placeholder="Tono" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Tono automático</SelectItem>
+                    <SelectItem value="empatico">Empático</SelectItem>
+                    <SelectItem value="formal">Formal</SelectItem>
+                    <SelectItem value="firme">Firme</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={length}
+                  onValueChange={(value) => setLength(value as ResponseLength | "auto")}
+                >
+                  <SelectTrigger className="h-8 w-[150px]" aria-label="Extensión de la respuesta">
+                    <SelectValue placeholder="Extensión" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Extensión automática</SelectItem>
+                    <SelectItem value="breve">Breve</SelectItem>
+                    <SelectItem value="estandar">Estándar</SelectItem>
+                    <SelectItem value="detallada">Detallada</SelectItem>
+                  </SelectContent>
+                </Select>
+                <AIFeedbackButtons feature="draft" complaintId={complaint.id} />
+              </div>
             </div>
 
             {caseSummary && (
@@ -266,6 +319,11 @@ export default function ComplaintResponseDialog({ complaint, open, onOpenChange 
                     Siguiente paso: {caseSummary.recommendedAction}
                   </p>
                 )}
+                <AIFeedbackButtons
+                  feature="case_summary"
+                  complaintId={complaint.id}
+                  className="mt-2"
+                />
               </div>
             )}
 

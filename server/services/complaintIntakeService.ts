@@ -1,4 +1,5 @@
 import { getPeruYear } from "@shared/peru-time";
+import { redactPII } from "@shared/pii";
 import type { Complaint, ComplaintSubmission } from "@shared/schema";
 import { storage } from "../storage";
 import { aiService } from "./aiService";
@@ -138,7 +139,10 @@ export async function intakeComplaint(data: ComplaintSubmission): Promise<Intake
 
   // Background AI enrichment with the business's brand voice (Phase 3.10)
   void aiService
-    .classifyComplaint(data.complaintDetail)
+    .classifyComplaint(redactPII(data.complaintDetail), {
+      businessId: data.businessId,
+      feature: 'intake_classification',
+    })
     .then(async (aiAnalysis) => {
       const current = await storage.getComplaint(complaint.id);
       if (!current || current.status !== 'new' || current.assignedToUserId) {
@@ -151,9 +155,11 @@ export async function intakeComplaint(data: ComplaintSubmission): Promise<Intake
         let suggestedResponse = aiAnalysis.suggestedResponse ?? null;
         if (suggestedResponse && (brandContext?.brandTone || brandContext?.brandPolicies)) {
           const branded = await aiService.suggestResponse(
-            `${data.complaintDetail}\n\nPedido del consumidor: ${data.consumerRequest ?? 'No especificado'}`,
+            `${redactPII(data.complaintDetail)}\n\nPedido del consumidor: ${data.consumerRequest ?? 'No especificado'}`,
             data.complaintType as 'reclamo' | 'queja',
             brandContext,
+            undefined,
+            { businessId: data.businessId, feature: 'intake_draft' },
           );
           if (branded.source === 'ai') {
             suggestedResponse = branded.suggestion;

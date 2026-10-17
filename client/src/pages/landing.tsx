@@ -561,11 +561,11 @@ function AiShowcase() {
         <Reveal className="max-w-2xl">
           <Eyebrow dark>Inteligencia artificial incluida</Eyebrow>
           <h2 className="mt-4 text-balance font-display text-4xl font-medium tracking-tight md:text-5xl">
-            El único libro de reclamaciones que <span className="italic text-amber-300">piensa</span>
+            Un libro que le ayuda a <span className="italic text-amber-300">responder a tiempo</span>
           </h2>
           <p className="mt-4 text-pretty text-lg text-[#f7f2e8]/70">
-            Ninguna otra plataforma del mercado redacta con IA. La nuestra lee cada reclamo,
-            lo clasifica y prepara la respuesta legal antes de que usted abra el panel.
+            Nuestra IA lee cada reclamo, lo clasifica y prepara un borrador de respuesta con su tono
+            y sus políticas, antes de que usted abra el panel.
           </p>
         </Reveal>
 

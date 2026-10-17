@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import {
   useAgentCapabilities,
-  useAgentChat,
+  useAgentChatStream,
   type AgentCitation,
   type AgentMessage,
 } from "@/hooks/use-agent";
@@ -37,7 +37,7 @@ const WELCOME =
 export default function ComplianceAgentChat({ className = "" }: { className?: string }) {
   const { toast } = useToast();
   const { data: capabilities } = useAgentCapabilities();
-  const chat = useAgentChat();
+  const chat = useAgentChatStream();
   const [input, setInput] = useState("");
   const [entries, setEntries] = useState<ChatEntry[]>([{ role: "assistant", content: WELCOME }]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -123,7 +123,11 @@ export default function ComplianceAgentChat({ className = "" }: { className?: st
             </div>
           </div>
         ))}
-        {chat.isPending && <p className="text-sm text-gray-500">El asistente está escribiendo…</p>}
+        {chat.isPending && (
+          <p className="text-sm text-gray-500" data-testid="agent-progress">
+            {chat.progress ?? "El asistente está escribiendo…"}
+          </p>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-1.5 border-t border-[#e3d9c6] px-3 pt-2">

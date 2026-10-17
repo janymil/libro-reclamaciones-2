@@ -2,6 +2,7 @@ import type { Complaint, User } from "@shared/schema";
 import { storage } from "../storage";
 import { rankSlaRisk } from "./slaPredictionService";
 import { emailService } from "./emailService";
+import { aiService } from "./aiService";
 
 /**
  * Internal SLA reminders + auto-escalation (Phase 2.9).
@@ -20,6 +21,22 @@ import { emailService } from "./emailService";
 
 const REMINDER_THRESHOLD_DAYS = 5;
 const ESCALATION_THRESHOLD_DAYS = 2;
+
+/**
+ * One notification per complaint + level + day. The sweep runs hourly; without
+ * this, the same reminder would e-mail the assignee every hour. In-memory is
+ * enough (a restart at worst re-sends once), and it keeps the job stateless.
+ */
+const notifiedToday = new Set<string>();
+
+function claimNotification(complaintId: string, level: 'reminder' | 'escalation'): boolean {
+  const key = `${complaintId}:${level}:${new Date().toISOString().slice(0, 10)}`;
+  if (notifiedToday.has(key)) {
+    return false;
+  }
+  notifiedToday.add(key);
+  return true;
+}
 
 export interface SlaSweepResult {
   businessesSwept: number;
@@ -62,10 +79,12 @@ export async function runSlaMonitoringSweep(): Promise<SlaSweepResult> {
         (assessment.riskLevel === 'medium' || assessment.businessDaysRemaining <= REMINDER_THRESHOLD_DAYS);
 
       if (needsEscalation) {
+        if (!claimNotification(complaint.id, 'escalation')) continue;
         await escalate(business.id, business.businessName, complaint, assessment.businessDaysRemaining);
         result.escalationsSent += 1;
       } else if (needsReminder) {
-        await remind(business.id, complaint, assessment.businessDaysRemaining);
+        if (!claimNotification(complaint.id, 'reminder')) continue;
+        await remind(business.id, business.businessName, complaint, assessment.businessDaysRemaining);
         result.remindersSent += 1;
       }
     }
@@ -102,12 +121,33 @@ async function notifyAssignee(
   return assignee;
 }
 
-async function remind(businessId: string, complaint: Complaint, remainingDays: number): Promise<void> {
-  const message =
-    `${complaint.correlativeNumber} vence en ${remainingDays} día(s) hábil(es). ` +
-    `Priorice la respuesta para cumplir el plazo legal de 15 días hábiles improrrogables (art. 152 del Código, Ley N.° 31435).`;
+async function remind(
+  businessId: string,
+  businessName: string,
+  complaint: Complaint,
+  remainingDays: number,
+): Promise<void> {
+  const followUp = await aiService.generateSlaFollowUp(
+    {
+      correlativeNumber: complaint.correlativeNumber,
+      productServiceName: complaint.productServiceName,
+      daysRemaining: remainingDays,
+      status: complaint.status,
+      consumerRequest: complaint.consumerRequest,
+    },
+    { businessId, feature: 'sla_followup' },
+  );
 
-  await notifyAssignee(businessId, complaint, 'Recordatorio de plazo SLA', message);
+  const message =
+    `${followUp.message} ` +
+    `Plazo legal: 15 días hábiles improrrogables (art. 152 del Código, Ley N.° 31435).`;
+
+  const assignee = await notifyAssignee(businessId, complaint, 'Recordatorio de plazo SLA', message);
+  if (assignee) {
+    void emailService
+      .sendSlaReminder(assignee.email, businessName, complaint.correlativeNumber, message)
+      .catch(() => {});
+  }
 
   await storage.createNotification({
     businessId,
@@ -120,15 +160,22 @@ async function remind(businessId: string, complaint: Complaint, remainingDays: n
 }
 
 async function escalate(businessId: string, businessName: string, complaint: Complaint, remainingDays: number): Promise<void> {
-  const overdueText = remainingDays <= 0
-    ? 'El plazo legal YA VENCIÓ - riesgo de sanción por INDECOPI.'
-    : `Vence en apenas ${remainingDays} día(s) hábil(es).`;
+  const followUp = await aiService.generateSlaFollowUp(
+    {
+      correlativeNumber: complaint.correlativeNumber,
+      productServiceName: complaint.productServiceName,
+      daysRemaining: remainingDays,
+      status: complaint.status,
+      consumerRequest: complaint.consumerRequest,
+    },
+    { businessId, feature: 'sla_followup' },
+  );
 
   const whatsapp = complaint.consumerPhone
     ? ` Contacto del consumidor: https://wa.me/51${complaint.consumerPhone.replace(/\D/g, '').replace(/^0+/, '')}`
     : '';
 
-  const message = `${complaint.correlativeNumber} (${complaint.productServiceName}): ${overdueText}${whatsapp}`;
+  const message = `${followUp.message}${whatsapp}`;
 
   // 1. Assignee (if any) - in-app + email
   const assignee = await notifyAssignee(businessId, complaint, 'ESCALADO SLA - riesgo de vencimiento', message);

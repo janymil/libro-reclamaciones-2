@@ -3,11 +3,22 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useUpgradeToast } from "@/hooks/use-plan-upgrade";
-import { useAIClassification, useAISuggestResponse, useAIStatus, useAITrends, useSlaPrediction } from "@/hooks/use-complaints";
+import {
+  useAIClassification,
+  useAIFeedback,
+  useAISuggestResponse,
+  useAIStatus,
+  useAITrends,
+  useSlaPrediction,
+  type ResponseLength,
+  type ResponseTone,
+} from "@/hooks/use-complaints";
 import { useSubscription } from "@/hooks/use-subscription";
 import PlanGate from "@/components/plan/plan-gate";
+import AIFeedbackButtons from "@/components/ai/ai-feedback-buttons";
 import { COMPLAINT_TYPES } from "@/lib/constants";
 
 interface AIAssistantProps {
@@ -18,6 +29,9 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
   const [analysisText, setAnalysisText] = useState("");
   const [responseText, setResponseText] = useState("");
   const [responseType, setResponseType] = useState<"reclamo" | "queja">("reclamo");
+  const [tone, setTone] = useState<ResponseTone | "auto">("auto");
+  const [length, setLength] = useState<ResponseLength | "auto">("auto");
+  const feedback = useAIFeedback();
   
   const { toast } = useToast();
   const upgradeToast = useUpgradeToast();
@@ -74,6 +88,8 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
       const result = await suggestResponseMutation.mutateAsync({
         complaintText: responseText,
         complaintType: responseType,
+        tone: tone === "auto" ? undefined : tone,
+        length: length === "auto" ? undefined : length,
       });
       
       if (onSuggestionAccept) {
@@ -295,7 +311,35 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
               data-testid="textarea-response-text"
             />
           </div>
-          
+
+          <div className="flex flex-wrap gap-2">
+            <Select value={tone} onValueChange={(value) => setTone(value as ResponseTone | "auto")}>
+              <SelectTrigger className="h-9 w-[170px]" aria-label="Tono de la respuesta">
+                <SelectValue placeholder="Tono" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Tono automático</SelectItem>
+                <SelectItem value="empatico">Empático</SelectItem>
+                <SelectItem value="formal">Formal</SelectItem>
+                <SelectItem value="firme">Firme</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={length}
+              onValueChange={(value) => setLength(value as ResponseLength | "auto")}
+            >
+              <SelectTrigger className="h-9 w-[170px]" aria-label="Extensión de la respuesta">
+                <SelectValue placeholder="Extensión" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Extensión automática</SelectItem>
+                <SelectItem value="breve">Breve</SelectItem>
+                <SelectItem value="estandar">Estándar</SelectItem>
+                <SelectItem value="detallada">Detallada</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <Button
             onClick={handleResponseSuggestion}
             disabled={suggestResponseMutation.isPending}
@@ -332,11 +376,16 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
                 <div className="mt-3 flex space-x-2">
                   <Button
                     size="sm"
-                    onClick={() => onSuggestionAccept?.(suggestResponseMutation.data.suggestion)}
+                    onClick={() => {
+                      onSuggestionAccept?.(suggestResponseMutation.data.suggestion);
+                      // Acceptance signal for the feedback loop.
+                      feedback.mutate({ feature: "draft_accepted", rating: 1 });
+                    }}
                     data-testid="button-accept-suggestion"
                   >
                     Usar esta respuesta
                   </Button>
+                  <AIFeedbackButtons feature="draft" />
                   <Button
                     variant="outline"
                     size="sm"

@@ -240,11 +240,34 @@ Implemented AI services (`server/services/aiService.ts`,
 - **Similar-complaint retrieval**: real embeddings when `AI_EMBEDDINGS_MODEL` is
   configured, otherwise local TF-IDF + cosine similarity (no external call).
 - **Compliance co-pilot**: tool-calling agent grounded in the curated legal
-  corpus and hard-scoped to the authenticated tenant.
+  corpus and hard-scoped to the authenticated tenant, with streaming progress
+  (`POST /api/agent/chat/stream`, SSE) for perceived speed.
+- **Public-form autofill**: extracts product, amount, purchase date, receipt,
+  request and reclamo/queja from the consumer's free text
+  (`POST /api/ai/public/extract`, CAPTCHA-gated).
+- **Onboarding assistant**: one paragraph about the business produces its brand
+  tone, policies, confirmation message and email header (`POST /api/ai/onboarding`).
+- **Monthly executive report**: aggregates + redacted narratives → manager brief
+  → PDF, optionally e-mailed (`POST /api/ai/executive-report`).
+- **AI SLA follow-ups**: personalised internal reminder/escalation text, with an
+  e-mail to the assignee and a daily de-duplication guard.
+- **Tone and length presets** for response drafting (empático/formal/firme;
+  breve/estándar/detallada).
+- **Multilingual answers**: Spanish, English and Quechua detection
+  (`shared/language.ts`), so the draft/assistant answers in the consumer's language.
+- **Usage meter and feedback loop**: every model call records tokens per tenant
+  and feature (`ai_usage`), and thumbs up/down plus draft acceptance are stored
+  in `ai_feedback` (`GET /api/ai/usage`, `POST /api/ai/feedback`).
+- **Provider fallback and real health**: optional second OpenAI-compatible
+  provider (`AI_FALLBACK_*`); `/api/status` probes `GET /models` (cached) instead
+  of trusting key presence.
+- **Privacy**: bulk analysis and SLA prompts redact e-mails, phones, documents
+  and long numbers (`shared/pii.ts`); the case-summary prompt no longer includes
+  the consumer's name.
 
 The configured provider/models are reported by `GET /api/ai/status` and
 `GET /api/status`. `scripts/verify-ai.ts` and `scripts/verify-agent.ts` exercise
-the live provider end to end.
+the live provider end to end (all ten aiService features).
 
 ### Business Logic
 Core business rules enforce Peruvian legal requirements:

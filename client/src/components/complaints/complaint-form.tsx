@@ -14,10 +14,11 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { complaintFormSchema, type ComplaintFormData } from "@/lib/validation";
 import { DOCUMENT_TYPES, LEGAL_NOTICES } from "@/lib/constants";
-import { useCreateComplaint, useAIPublicAssist } from "@/hooks/use-complaints";
+import { useCreateComplaint, useAIPublicAssist, useAIPublicExtract } from "@/hooks/use-complaints";
 import { useCaptchaChallenge } from "@/hooks/use-captcha";
 import { requestSolvedCaptcha } from "@/lib/pow";
 import { buildConsumerDraftContext } from "@shared/consumer-draft-context";
+import { languageName } from "@shared/language";
 
 const MAX_FILE_SIZE_MB = 5;
 const MAX_FILES = 5;
@@ -87,6 +88,8 @@ export default function ComplaintForm({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const createComplaint = useCreateComplaint();
   const aiAssist = useAIPublicAssist();
+  const aiExtract = useAIPublicExtract();
+  const [isExtractPreparing, setIsExtractPreparing] = useState(false);
 
   // CAPTCHA (Phase 1.5): a proof-of-work challenge is fetched when the form
   // renders and solved in the background, so the visitor has nothing to read or
@@ -134,6 +137,75 @@ export default function ComplaintForm({
         description: rejected.join(" · "),
         variant: "destructive",
       });
+    }
+  };
+
+  /**
+   * Autofill from the narrative. Only empty fields are written (never the
+   * visitor's own text), and the type is only changed when the visitor has not
+   * touched it yet. One CAPTCHA challenge per click, like the AI review.
+   */
+  const handleAutofill = async () => {
+    const text = (form.watch("complaintDetail") || "").trim();
+    if (text.length < 20) {
+      toast({
+        title: "Escriba un poco más",
+        description: "Describa su caso con al menos 20 caracteres para que la IA pueda completar el formulario.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsExtractPreparing(true);
+    try {
+      const solved = await requestSolvedCaptcha();
+      const extracted = await aiExtract.mutateAsync({
+        text,
+        captchaToken: solved.token,
+        captchaAnswer: solved.solution,
+      });
+
+      const current = form.getValues();
+      let filled = 0;
+      const fill = (field: keyof ComplaintFormData, value: unknown) => {
+        if (value === undefined || value === null || value === "") return;
+        const existing = current[field];
+        const isEmpty =
+          existing === undefined ||
+          existing === null ||
+          (typeof existing === "number" && Number.isNaN(existing)) ||
+          String(existing).trim() === "";
+        if (!isEmpty) return;
+        form.setValue(field, value as never, { shouldValidate: true, shouldDirty: true });
+        filled += 1;
+      };
+
+      fill("productServiceName", extracted.productServiceName);
+      fill("purchaseAmount", extracted.purchaseAmount ? Number(extracted.purchaseAmount) : undefined);
+      fill("purchaseDate", extracted.purchaseDate);
+      fill("receiptNumber", extracted.receiptNumber);
+      fill("consumerRequest", extracted.consumerRequest);
+      if (extracted.complaintType && !form.formState.dirtyFields.complaintType) {
+        form.setValue("complaintType", extracted.complaintType, { shouldValidate: true, shouldDirty: true });
+        filled += 1;
+      }
+
+      toast({
+        title: filled > 0 ? "Formulario completado con IA" : "No encontramos datos nuevos",
+        description:
+          filled > 0
+            ? `${filled} campo(s) completados. Revíselos antes de enviar.`
+            : "Su formulario ya tenía esos datos o el texto no los menciona.",
+      });
+    } catch (error) {
+      toast({
+        title: "No se pudo autocompletar",
+        description:
+          parseApiError(error, "Intente nuevamente en unos segundos."),
+        variant: "destructive",
+      });
+    } finally {
+      setIsExtractPreparing(false);
     }
   };
 
@@ -570,6 +642,7 @@ export default function ComplaintForm({
 
             {/* AI draft assistant: helps consumers write complete complaints */}
             <div className="mt-3 space-y-3" data-testid="ai-draft-assistant">
+              <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
                 variant="outline"
@@ -627,6 +700,23 @@ export default function ComplaintForm({
                 {aiAssist.isPending || isAssistPreparing ? "Revisando..." : "Revisar mi borrador con IA"}
               </Button>
 
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleAutofill}
+                disabled={
+                  aiExtract.isPending ||
+                  isExtractPreparing ||
+                  (form.watch("complaintDetail") || "").trim().length < 20
+                }
+                data-testid="button-ai-autofill"
+              >
+                <span className="material-icons mr-1 text-sm">auto_fix_high</span>
+                {aiExtract.isPending || isExtractPreparing ? "Completando..." : "Autocompletar con IA"}
+              </Button>
+              </div>
+
               {aiAssist.data && (
                 <div className="rounded-lg border p-3 bg-gray-50 space-y-2">
                   <div className="flex items-center gap-2">
@@ -635,6 +725,11 @@ export default function ComplaintForm({
                     </Badge>
                     {aiAssist.data.source === 'fallback' && (
                       <Badge className="bg-gray-100 text-gray-600">Asistente básico</Badge>
+                    )}
+                    {aiAssist.data.language && aiAssist.data.language !== "es" && (
+                      <Badge className="bg-blue-100 text-blue-800">
+                        Idioma detectado: {languageName(aiAssist.data.language)}
+                      </Badge>
                     )}
                   </div>
                   {aiAssist.variables?.context && (

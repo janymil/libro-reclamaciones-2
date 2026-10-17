@@ -23,6 +23,7 @@ import { historyStorage } from "./storage/history.storage";
 import { onboardingStorage } from "./storage/onboarding.storage";
 import { accessRequestStorage } from "./storage/accessRequest.storage";
 import { purgeStorage } from "./storage/purge.storage";
+import { aiStorage } from "./storage/ai.storage";
 
 export * from "./storage/types";
 
@@ -59,6 +60,7 @@ export const storage: IStorage = {
   ...onboardingStorage,
   ...accessRequestStorage,
   ...purgeStorage,
+  ...aiStorage,
 };
 
 export type DatabaseStorage = typeof storage;

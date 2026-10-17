@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 
 import { storage } from "../storage";
-import { getAIClient, getAIStatus, aiService, AI_MODEL } from "./aiService";
+import { getAIClient, getAIStatus, aiService, chatCompletion, AI_MODEL, type AIUsageContext } from "./aiService";
 import { businessDayCalculator } from "./businessDayCalculator";
 import { legalComplianceService } from "./legalComplianceService";
 import { LEGAL_KNOWLEDGE, searchLegalKnowledge, type LegalCitation } from "@shared/legal-knowledge";
@@ -45,6 +45,11 @@ export interface AgentContext {
 export interface AgentMessage {
   role: "user" | "assistant";
   content: string;
+}
+
+export interface AgentProgressEvent {
+  type: 'status' | 'tool';
+  message: string;
 }
 
 export interface AgentReply {
@@ -559,7 +564,16 @@ function fallbackReply(history: AgentMessage[]): AgentReply {
  * The function never throws: on any provider error it returns an explanatory
  * `fallback` reply so the UI always has something to show.
  */
-export async function runAgent(context: AgentContext, messages: AgentMessage[]): Promise<AgentReply> {
+export async function runAgent(
+  context: AgentContext,
+  messages: AgentMessage[],
+  onProgress?: (event: AgentProgressEvent) => void,
+): Promise<AgentReply> {
+  const usage: AIUsageContext = {
+    businessId: context.businessId,
+    userId: context.userId,
+    feature: 'agent',
+  };
   const history: AgentMessage[] = messages
     .filter(
       (message) =>
@@ -595,13 +609,18 @@ export async function runAgent(context: AgentContext, messages: AgentMessage[]):
 
   try {
     for (let step = 0; step < MAX_AGENT_STEPS; step += 1) {
-      const response = await ai.chat.completions.create({
+      onProgress?.({
+        type: 'status',
+        message: step === 0 ? 'Analizando la consulta…' : 'Revisando los resultados…',
+      });
+
+      const response = await chatCompletion({
         model: AGENT_MODEL,
         messages: conversation,
         tools: AGENT_TOOLS,
         tool_choice: "auto",
         temperature: 0.2,
-      });
+      }, { usage, model: AGENT_MODEL });
 
       const message = response.choices[0]?.message;
       if (!message) break;
@@ -618,6 +637,13 @@ export async function runAgent(context: AgentContext, messages: AgentMessage[]):
       }
 
       for (const call of toolCalls) {
+        onProgress?.({
+          type: 'tool',
+          message:
+            call.function.name === 'buscar_normativa'
+              ? 'Buscando en la normativa…'
+              : 'Consultando los datos de su empresa…',
+        });
         const args = safeParseArguments(call.function.arguments);
         const outcome = await safetyRunTool(call.function.name, args, context);
         toolsUsed.push(outcome.toolName);
@@ -631,11 +657,12 @@ export async function runAgent(context: AgentContext, messages: AgentMessage[]):
     }
 
     // Step budget exhausted: force a final answer without offering tools again.
-    const finalResponse = await ai.chat.completions.create({
+    onProgress?.({ type: 'status', message: 'Redactando la respuesta…' });
+    const finalResponse = await chatCompletion({
       model: AGENT_MODEL,
       messages: conversation,
       temperature: 0.2,
-    });
+    }, { usage, model: AGENT_MODEL });
     return finalizeReply(finalResponse.choices[0]?.message?.content, toolsUsed, citations);
   } catch (error) {
     console.error("Error running compliance agent:", error);
@@ -666,7 +693,11 @@ export function agentCapabilities() {
 }
 
 export const agentService = {
-  chat: (context: AgentContext, messages: AgentMessage[]) => runAgent(context, messages),
+  chat: (
+    context: AgentContext,
+    messages: AgentMessage[],
+    onProgress?: (event: AgentProgressEvent) => void,
+  ) => runAgent(context, messages, onProgress),
   capabilities: agentCapabilities,
 };
 

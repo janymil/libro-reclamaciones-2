@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { MonthlyReport, ReportStats } from '@/lib/api-types';
 import { downloadCsv, todayStamp } from '@/lib/export';
 import { downloadSirecReport } from '@/lib/sirec';
-import { useReincidenceReport, useAbusiveClauses } from '@/hooks/use-complaints';
+import { useReincidenceReport, useAbusiveClauses, useExecutiveReport } from '@/hooks/use-complaints';
 import type { Complaint, Establishment } from '@shared/schema';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
@@ -14,6 +14,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import PlanGate from '@/components/plan/plan-gate';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -41,6 +42,26 @@ export default function Reports() {
   // Phase 3.11: reincidence panel + abusive-clause detector
   const reincidence = useReincidenceReport();
   const abusiveClauses = useAbusiveClauses();
+  const executiveReport = useExecutiveReport();
+  const [reportMonth, setReportMonth] = useState(
+    new Date().toLocaleDateString("en-CA", { timeZone: "America/Lima" }).slice(0, 7),
+  );
+  const [emailReport, setEmailReport] = useState(true);
+
+  const downloadExecutivePdf = () => {
+    const base64 = executiveReport.data?.pdfBase64;
+    if (!base64) return;
+    const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `reporte-ejecutivo-${reportMonth}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   const downloadExpediente = async () => {
     try {
@@ -504,6 +525,114 @@ export default function Reports() {
           </TabsContent>
 
           <TabsContent value="analitica" className="space-y-4">
+            {/* Monthly executive report (AI) */}
+            <PlanGate
+              feature="aiDrafting"
+              title="Reporte ejecutivo IA"
+              description="El reporte ejecutivo mensual con IA está incluido desde el plan Pro."
+            >
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Reporte ejecutivo IA
+                </CardTitle>
+                <CardDescription>
+                  Un resumen mensual para gerencia: hallazgos, riesgos, acciones y cumplimiento del
+                  plazo. Se genera con IA a partir de sus datos y puede descargarse o enviarse por correo.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="w-[180px]">
+                    <Label htmlFor="executive-month">Mes</Label>
+                    <Input
+                      id="executive-month"
+                      type="month"
+                      value={reportMonth}
+                      onChange={(event) => setReportMonth(event.target.value)}
+                      data-testid="input-executive-month"
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={emailReport}
+                      onChange={(event) => setEmailReport(event.target.checked)}
+                      data-testid="checkbox-executive-email"
+                    />
+                    Enviar por correo
+                  </label>
+                  <Button
+                    onClick={() =>
+                      executiveReport.mutate(
+                        { month: reportMonth, sendEmail: emailReport },
+                        {
+                          onError: (error: Error) =>
+                            toast({
+                              title: "No se pudo generar el reporte",
+                              description: error.message,
+                              variant: "destructive",
+                            }),
+                        },
+                      )
+                    }
+                    disabled={executiveReport.isPending || !reportMonth}
+                    data-testid="button-executive-report"
+                  >
+                    {executiveReport.isPending ? "Generando..." : "Generar reporte"}
+                  </Button>
+                </div>
+
+                {executiveReport.data && (
+                  <div
+                    className="space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-4"
+                    data-testid="executive-report-result"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        {executiveReport.data.report.headline}
+                      </h3>
+                      <Badge variant="outline">{executiveReport.data.periodLabel}</Badge>
+                      {executiveReport.data.report.source === "fallback" && (
+                        <Badge className="bg-gray-100 text-gray-600">IA no disponible</Badge>
+                      )}
+                      {executiveReport.data.emailedTo && (
+                        <Badge className="bg-green-100 text-green-800">
+                          Enviado a {executiveReport.data.emailedTo}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-800">{executiveReport.data.report.summary}</p>
+                    {[
+                      ["Hallazgos", executiveReport.data.report.highlights],
+                      ["Riesgos", executiveReport.data.report.risks],
+                      ["Acciones", executiveReport.data.report.actions],
+                      ["Indicadores", executiveReport.data.report.kpiNotes],
+                    ].map(([title, items]) =>
+                      Array.isArray(items) && items.length > 0 ? (
+                        <div key={String(title)}>
+                          <p className="text-sm font-medium text-gray-900">{title}</p>
+                          <ul className="list-disc list-inside text-sm text-gray-700">
+                            {items.map((item, index) => (
+                              <li key={index}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null,
+                    )}
+                    {executiveReport.data.pdfBase64 && (
+                      <Button variant="outline" size="sm" onClick={downloadExecutivePdf}>
+                        <Download className="mr-2 h-4 w-4" />
+                        Descargar PDF
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            </PlanGate>
+
             {/* Reincidence panel (Phase 3.11) */}
             <Card>
               <CardHeader>

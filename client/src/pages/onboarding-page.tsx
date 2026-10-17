@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
@@ -9,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, apiErrorMessage } from "@/lib/queryClient";
 import { invalidateTenantQueries } from "@/lib/tenant-queries";
 import { useAuth } from "@/hooks/use-auth";
+import { useAIOnboardingKit } from "@/hooks/use-complaints";
 import { useLocation } from "wouter";
 import { Loader2, Building2, Book, Search } from "lucide-react";
 import BackToTop from "@/components/layout/back-to-top";
@@ -51,6 +53,11 @@ interface LibroData {
   notificationEmail: string;
   whatsappNumber?: string;
   websiteUrl?: string;
+  /** Optional AI-generated brand voice/templates (editable before submitting). */
+  brandTone?: string;
+  brandPolicies?: string;
+  confirmationMessage?: string;
+  emailHeaderText?: string;
 }
 
 export default function OnboardingPage() {
@@ -101,6 +108,10 @@ export default function OnboardingPage() {
     whatsappNumber: '',
     websiteUrl: ''
   });
+
+  // Optional AI onboarding: one paragraph -> tone, policies and consumer texts.
+  const aiOnboarding = useAIOnboardingKit();
+  const [aiDescription, setAiDescription] = useState('');
 
   /**
    * "¿Cómo opera tu negocio?" - one local, a casa matriz with sucursales, or
@@ -937,6 +948,104 @@ export default function OnboardingPage() {
                       />
                     </div>
                   </div>
+
+                  {/* Optional AI onboarding: describes the business once and
+                      proposes tone, policies and consumer-facing texts. */}
+                  <Card className="border-purple-200 bg-purple-50/40">
+                    <CardHeader>
+                      <CardTitle className="text-base">Personalice con IA (opcional)</CardTitle>
+                      <CardDescription>
+                        Describa su negocio y la IA propondrá su tono de marca, políticas de respuesta
+                        y textos para el consumidor. Podrá editarlos aquí mismo.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <Textarea
+                        rows={3}
+                        value={aiDescription}
+                        onChange={(event) => setAiDescription(event.target.value)}
+                        placeholder="Ej.: Somos una cafetería de barrio en Lima. Atendemos con cercanía, respondemos rápido y cuidamos la experiencia del cliente."
+                        data-testid="textarea-ai-onboarding"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() =>
+                          aiOnboarding.mutate(
+                            {
+                              description: aiDescription,
+                              businessName: businessForm.businessName,
+                              businessType: libroForm.businessType,
+                            },
+                            {
+                              onSuccess: (kit) =>
+                                setLibroForm((prev) => ({
+                                  ...prev,
+                                  brandTone: kit.brandTone,
+                                  brandPolicies: kit.brandPolicies,
+                                  confirmationMessage: kit.confirmationMessage,
+                                  emailHeaderText: kit.emailHeaderText,
+                                })),
+                              onError: (error: Error) =>
+                                toast({
+                                  title: "No se pudo generar la propuesta",
+                                  description: error.message,
+                                  variant: "destructive",
+                                }),
+                            },
+                          )
+                        }
+                        disabled={aiOnboarding.isPending || aiDescription.trim().length < 20}
+                        data-testid="button-ai-onboarding"
+                      >
+                        <span className="material-icons mr-1 text-sm">auto_awesome</span>
+                        {aiOnboarding.isPending ? "Generando..." : "Preparar mi tono con IA"}
+                      </Button>
+
+                      {libroForm.brandTone && (
+                        <div className="space-y-3 rounded-lg border border-purple-200 bg-white p-3">
+                          <div>
+                            <Label htmlFor="brandTone">Tono de marca</Label>
+                            <Textarea
+                              id="brandTone"
+                              rows={2}
+                              value={libroForm.brandTone}
+                              onChange={(event) =>
+                                setLibroForm((prev) => ({ ...prev, brandTone: event.target.value }))
+                              }
+                              data-testid="textarea-brand-tone"
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="brandPolicies">Políticas de respuesta</Label>
+                            <Textarea
+                              id="brandPolicies"
+                              rows={4}
+                              value={libroForm.brandPolicies}
+                              onChange={(event) =>
+                                setLibroForm((prev) => ({ ...prev, brandPolicies: event.target.value }))
+                              }
+                              data-testid="textarea-brand-policies"
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="confirmationMessage">Mensaje de confirmación</Label>
+                            <Textarea
+                              id="confirmationMessage"
+                              rows={2}
+                              value={libroForm.confirmationMessage}
+                              onChange={(event) =>
+                                setLibroForm((prev) => ({
+                                  ...prev,
+                                  confirmationMessage: event.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
 
                   <WhatWillBeCreated
                     ruc={businessForm.ruc}

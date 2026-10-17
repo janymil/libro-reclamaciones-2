@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { Complaint, ComplaintSubmission } from "@shared/schema";
 import type { ConsumerDraftContext } from "@shared/consumer-draft-context";
+import type { SupportedLanguage } from "@shared/language";
 
 interface ComplaintFilters {
   status?: string;
@@ -228,6 +229,19 @@ export interface ConsumerAssistanceResult {
   missingFields: string[];
   suggestions: string[];
   improvedText?: string;
+  language?: SupportedLanguage;
+  source: 'ai' | 'fallback';
+}
+
+/** Structured fields returned by the public form autofill. */
+export interface ExtractedComplaintFieldsResult {
+  productServiceName?: string;
+  purchaseAmount?: string;
+  purchaseDate?: string;
+  receiptNumber?: string;
+  consumerRequest?: string;
+  complaintType?: 'reclamo' | 'queja';
+  language?: SupportedLanguage;
   source: 'ai' | 'fallback';
 }
 
@@ -265,6 +279,31 @@ export function useAIPublicAssist() {
   });
 }
 
+/**
+ * Public-form autofill: the visitor describes the problem and the model fills
+ * the structured fields. Same one-challenge-per-click rule as the review.
+ */
+export function useAIPublicExtract() {
+  return useMutation({
+    mutationFn: async ({
+      text,
+      captchaToken,
+      captchaAnswer,
+    }: {
+      text: string;
+      captchaToken: string;
+      captchaAnswer: string;
+    }) => {
+      const response = await apiRequest('POST', '/api/ai/public/extract', {
+        text,
+        captchaToken,
+        captchaAnswer,
+      });
+      return response.json() as Promise<ExtractedComplaintFieldsResult>;
+    },
+  });
+}
+
 export function useAIClassification() {
   return useMutation({
     mutationFn: async (text: string) => {
@@ -274,14 +313,31 @@ export function useAIClassification() {
   });
 }
 
+export type ResponseTone = 'empatico' | 'formal' | 'firme';
+export type ResponseLength = 'breve' | 'estandar' | 'detallada';
+
+export interface AISuggestResponseInput {
+  complaintText: string;
+  complaintType: string;
+  tone?: ResponseTone | null;
+  length?: ResponseLength | null;
+}
+
 export function useAISuggestResponse() {
   return useMutation({
-    mutationFn: async ({ complaintText, complaintType }: { complaintText: string; complaintType: string }) => {
+    mutationFn: async ({ complaintText, complaintType, tone, length }: AISuggestResponseInput) => {
       const response = await apiRequest('POST', '/api/ai/suggest-response', {
         complaintText,
         complaintType,
+        tone: tone ?? undefined,
+        length: length ?? undefined,
       });
-      return response.json();
+      return response.json() as Promise<{
+        suggestion: string;
+        source: 'ai' | 'fallback';
+        tone: ResponseTone | null;
+        length: ResponseLength | null;
+      }>;
     },
   });
 }
@@ -381,6 +437,104 @@ export function useReincidenceReport() {
         throw new Error('Failed to fetch reincidence report');
       }
       return response.json() as Promise<ReincidenceReport>;
+    },
+  });
+}
+
+// ---- AI usage meter, feedback loop, executive report, onboarding assistant ----
+
+export interface AIUsageSummary {
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  byFeature: Array<{ feature: string; calls: number; totalTokens: number; estimatedCostUsd: number }>;
+}
+
+export interface AIFeedbackSummary {
+  total: number;
+  positive: number;
+  negative: number;
+  acceptanceRate: number | null;
+  byFeature: Array<{ feature: string; total: number; positive: number; negative: number }>;
+}
+
+export interface AIUsageResponse {
+  days: number;
+  since: string;
+  usage: AIUsageSummary;
+  feedback: AIFeedbackSummary;
+}
+
+export function useAIUsage(days = 30) {
+  return useQuery({
+    queryKey: ['/api/ai/usage', days],
+    queryFn: async () => {
+      const response = await fetch(`/api/ai/usage?days=${days}`, { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error('Failed to fetch AI usage');
+      }
+      return response.json() as Promise<AIUsageResponse>;
+    },
+  });
+}
+
+export function useAIFeedback() {
+  return useMutation({
+    mutationFn: async (input: {
+      feature: string;
+      rating: 1 | -1;
+      comment?: string;
+      complaintId?: string;
+    }) => {
+      const response = await apiRequest('POST', '/api/ai/feedback', input);
+      return response.json() as Promise<{ ok: boolean }>;
+    },
+  });
+}
+
+export interface ExecutiveReportResult {
+  report: {
+    headline: string;
+    summary: string;
+    highlights: string[];
+    risks: string[];
+    actions: string[];
+    kpiNotes: string[];
+    source: 'ai' | 'fallback';
+  };
+  periodLabel: string;
+  pdfBase64: string | null;
+  emailedTo: string | null;
+}
+
+export function useExecutiveReport() {
+  return useMutation({
+    mutationFn: async (input: { month?: string; sendEmail?: boolean }) => {
+      const response = await apiRequest('POST', '/api/ai/executive-report', input);
+      return response.json() as Promise<ExecutiveReportResult>;
+    },
+  });
+}
+
+export interface AIOnboardingKit {
+  brandTone: string;
+  brandPolicies: string;
+  confirmationMessage: string;
+  emailHeaderText: string;
+  source: 'ai' | 'fallback';
+}
+
+export function useAIOnboardingKit() {
+  return useMutation({
+    mutationFn: async (input: {
+      description: string;
+      businessName?: string;
+      businessType?: string;
+    }) => {
+      const response = await apiRequest('POST', '/api/ai/onboarding', input);
+      return response.json() as Promise<AIOnboardingKit>;
     },
   });
 }

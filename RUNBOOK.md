@@ -27,6 +27,8 @@ documents every variable.
 | `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL` | optional | Absent ⇒ AI falls back to local heuristics. The provider is any OpenAI-compatible endpoint; production defaults to Groq with `openai/gpt-oss-120b`. |
 | `AI_MODEL_FAST`, `AI_AGENT_MODEL` | optional | Fast model for classification/assistance (`openai/gpt-oss-20b` by default) and the model for the compliance co-pilot (defaults to `AI_MODEL`). |
 | `AI_EMBEDDINGS_MODEL` | optional | Enables embeddings-based similar-complaint detection. Groq has no `/embeddings` endpoint; leave unset to use the local TF-IDF fallback. |
+| `AI_FALLBACK_BASE_URL`, `AI_FALLBACK_API_KEY`, `AI_FALLBACK_MODEL` | optional | Second OpenAI-compatible provider. It is used only when the primary call fails; `AI_FALLBACK_MODEL` defaults to the primary model. Leave unset for a single provider. |
+| `AI_PRICE_INPUT_PER_MTOK`, `AI_PRICE_OUTPUT_PER_MTOK` | optional | Price per million tokens in USD, used only to show an estimated cost in the per-tenant AI usage meter. Unset ⇒ cost is shown as "—", tokens are still counted. |
 | `RUC_API_PROVIDER`, `APISNET_API_TOKEN`, `DECOLECTA_API_TOKEN` | optional | Auto-fills the razón social on the registration form. Defaults to the anonymous apis.net.pe endpoint; a token raises the quota. Absent/down ⇒ the user types the razón social manually (the endpoint answers `provider_unreachable` / `provider_rate_limited`, never "RUC not found"). |
 | `PORT` | optional | Defaults to 5000. |
 

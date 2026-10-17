@@ -374,11 +374,15 @@ describe("CAPTCHA gate on the public endpoints", () => {
       });
 
       expect(res.status).toBe(200);
-      expect(h.assistConsumerDraft).toHaveBeenCalledWith("El televisor comenzó a fallar a los pocos días de uso.", {
-        productServiceName: "TV Sony 50",
-        purchaseDate: "2026-10-10",
-        receiptNumber: "4565548786654",
-      });
+      expect(h.assistConsumerDraft).toHaveBeenCalledWith(
+        "El televisor comenzó a fallar a los pocos días de uso.",
+        {
+          productServiceName: "TV Sony 50",
+          purchaseDate: "2026-10-10",
+          receiptNumber: "4565548786654",
+        },
+        { businessId: null, feature: "public_assist" },
+      );
     });
 
     it("burns the challenge, so a solved puzzle cannot be replayed", async () => {

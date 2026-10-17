@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
 import type { Complaint, Business, Establishment } from '@shared/schema';
+import type { ExecutiveReport } from './aiService';
 
 export interface ComplianceReportData {
   ds011Status: boolean;
@@ -632,6 +633,59 @@ class PDFService {
       } catch (error) {
         reject(error);
       }
+    });
+  }
+
+  /**
+   * Monthly executive report (AI). A one-page manager brief generated from
+   * aggregates, so it can be e-mailed as an attachment and kept as evidence of
+   * the monthly review. The AI disclaimer is printed at the bottom.
+   */
+  async generateExecutiveReportPdf(
+    report: ExecutiveReport,
+    business: Business,
+    periodLabel: string,
+    start: Date,
+    end: Date,
+  ): Promise<Buffer> {
+    return this.render((doc) => {
+      const range = `${start.toLocaleDateString('es-PE')} — ${new Date(end.getTime() - 1).toLocaleDateString('es-PE')}`;
+
+      doc.fontSize(20).font('Helvetica-Bold').fillColor('#1b1611').text('Reporte Ejecutivo');
+      doc.moveDown(0.2);
+      doc.fontSize(10).font('Helvetica').fillColor('#5c5246');
+      doc.text(`${business.businessName} · RUC ${business.ruc}`);
+      doc.text(`Periodo: ${periodLabel} (${range})`);
+      doc.moveDown(0.8);
+
+      doc.fillColor('#1b1611').fontSize(14).font('Helvetica-Bold').text(report.headline);
+      doc.moveDown(0.4);
+      doc.fontSize(10).font('Helvetica').fillColor('#333333').text(report.summary, { align: 'justify' });
+
+      const section = (title: string, items: string[]) => {
+        if (items.length === 0) return;
+        doc.moveDown(0.8);
+        doc.fontSize(12).font('Helvetica-Bold').fillColor('#1e6b4a').text(title);
+        doc.fillColor('#333333').fontSize(10).font('Helvetica');
+        for (const item of items) {
+          doc.text(`• ${item}`, { indent: 10 });
+        }
+      };
+
+      section('Hallazgos', report.highlights);
+      section('Riesgos', report.risks);
+      section('Acciones recomendadas', report.actions);
+      section('Indicadores', report.kpiNotes);
+
+      doc.moveDown(1.5);
+      doc
+        .fontSize(8)
+        .fillColor('#777777')
+        .text(
+          'Reporte generado con asistencia de IA a partir de los datos del Libro de Reclamaciones. ' +
+            'Es una herramienta de apoyo: revise las cifras y las recomendaciones antes de tomar decisiones.',
+          { align: 'center' },
+        );
     });
   }
 }

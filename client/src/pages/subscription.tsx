@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import CheckoutDialog from "@/components/payments/checkout-dialog";
 import { UsageMeter } from "@/components/subscription/usage-meter";
+import AIUsageCard from "@/components/ai/ai-usage-card";
 import { useToast } from "@/hooks/use-toast";
 import { usePlans, useSubscription, useTrialDays } from "@/hooks/use-subscription";
 import { resolvePlanCardState, type PlanCardState } from "@/lib/plan-card-state";
@@ -208,6 +209,8 @@ export default function SubscriptionPage() {
                 <UsageMeter label="Empresas (RUCs)" used={subscription.usage.businesses} limit={subscription.plan.limits.businesses} />
               </CardContent>
             </Card>
+
+            <AIUsageCard />
 
             {/* Billing period toggle */}
             <div className="flex items-center justify-center gap-2">
