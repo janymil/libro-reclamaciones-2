@@ -23,6 +23,14 @@ import { computeOverallStatus, readAppVersion, toJobHealth } from "../services/s
 const VERSION = readAppVersion();
 
 export function registerStatusRoutes(app: Express): void {
+  // Liveness probe for Docker. Deliberately does NOT touch the database, the AI
+  // provider or SMTP: those are dependencies of the product, not of the process.
+  // Probing them every 30s kept the Neon database awake around the clock.
+  app.get('/api/health', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ status: 'ok' });
+  });
+
   app.get('/api/status', async (_req, res) => {
     // Real, cached provider probe instead of "the key exists, so it must work".
     const ai = await getAIHealth();
