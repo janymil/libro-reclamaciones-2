@@ -77,6 +77,7 @@ function PlanCard({
               <span className="text-sm font-normal text-gray-500"> /{period === 'annual' ? 'año' : 'mes'}</span>
             )}
           </p>
+          {!isFree && <p className="text-xs text-gray-500 mt-1">IGV incluido</p>}
           {isFree ? (
             <p className="text-xs text-gray-500 mt-1">
               Para siempre · sin tarjeta · 5 reclamos al mes

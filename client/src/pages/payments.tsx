@@ -4,6 +4,14 @@ import AppLayout from "@/components/layout/app-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -16,6 +24,20 @@ import {
   type AgreementRecord,
   type PaymentRecord,
 } from "@/hooks/use-payments";
+import {
+  useBillingProfile,
+  useMyComprobantes,
+  useSaveBillingProfile,
+  type BillingProfile,
+} from "@/hooks/use-comprobantes";
+import { BillingFields } from "@/components/payments/checkout-dialog";
+import {
+  COMPROBANTE_DOC_TYPES,
+  validateBilling,
+  type BillingData,
+  type PublicComprobante,
+} from "@shared/comprobantes";
+import { PRICES_INCLUDE_IGV_NOTE } from "@shared/tax";
 import {
   PAYMENT_CURRENCY_SYMBOL,
   getPaymentProvider,
@@ -153,12 +175,15 @@ function AgreementCard({
 
 function PaymentRow({
   payment,
+  comprobante,
   canConfirm,
   onConfirm,
   onRefresh,
   busy,
 }: {
   payment: PaymentRecord;
+  /** The document this charge produced, once the comprobante flow recorded it. */
+  comprobante?: PublicComprobante;
   canConfirm: boolean;
   onConfirm: () => void;
   onRefresh: () => void;
@@ -185,6 +210,46 @@ function PaymentRow({
         </p>
         {payment.failureReason && (
           <p className="text-xs text-red-700">{payment.failureReason}</p>
+        )}
+
+        {comprobante && (
+          <p className="text-xs" data-testid={`payment-comprobante-${payment.reference}`}>
+            {comprobante.status === "emitido" ? (
+              <span className="text-green-700">
+                {comprobante.docTypeLabel} <strong>{comprobante.fullNumber}</strong>
+                {comprobante.hasPdf && (
+                  <>
+                    {" · "}
+                    <a
+                      className="underline"
+                      href={`/api/comprobantes/${comprobante.id}/file/pdf`}
+                    >
+                      PDF
+                    </a>
+                  </>
+                )}
+                {comprobante.hasXml && (
+                  <>
+                    {" · "}
+                    <a
+                      className="underline"
+                      href={`/api/comprobantes/${comprobante.id}/file/xml`}
+                    >
+                      XML
+                    </a>
+                  </>
+                )}
+              </span>
+            ) : comprobante.status === "pendiente" ? (
+              <span className="text-amber-700">
+                {comprobante.docTypeLabel}: pendiente de emisión (hasta 3 días hábiles)
+              </span>
+            ) : (
+              <span className="text-gray-500">
+                {comprobante.docTypeLabel} anulado
+              </span>
+            )}
+          </p>
         )}
       </div>
 
@@ -213,6 +278,133 @@ function PaymentRow({
   );
 }
 
+/**
+ * The billing profile: what the next factura will say.
+ *
+ * Kept on this page because it is where a customer comes after paying when
+ * their accountant asks for the invoice: the document itself, the data it was
+ * issued to and the mailbox it went to all live together.
+ */
+function BillingCard({ profile, canEdit }: { profile?: BillingProfile; canEdit: boolean }) {
+  const { toast } = useToast();
+  const save = useSaveBillingProfile();
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState<BillingData>({
+    docType: "factura",
+    docNumber: "",
+    name: "",
+    address: "",
+    email: "",
+  });
+  const [errors, setErrors] = useState<string[]>([]);
+
+  const openDialog = () => {
+    setValue({
+      docType: profile?.docType ?? "factura",
+      docNumber: profile?.docNumber ?? "",
+      name: profile?.name ?? "",
+      address: profile?.address ?? "",
+      email: profile?.email ?? "",
+    });
+    setErrors([]);
+    setOpen(true);
+  };
+
+  const submit = async () => {
+    const found = validateBilling(value);
+    if (found.length > 0) {
+      setErrors(found);
+      return;
+    }
+    try {
+      const result = await save.mutateAsync(value);
+      toast({ title: "Datos de facturación guardados", description: result.message });
+      setOpen(false);
+    } catch (error) {
+      toast({
+        title: "No se pudieron guardar los datos",
+        description: error instanceof Error ? error.message.replace(/^\d{3}:\s*/, "") : undefined,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const doc = COMPROBANTE_DOC_TYPES[profile?.docType ?? "factura"];
+  const documentLine = profile
+    ? `${doc.label} · ${doc.requiresRuc ? "RUC" : "DNI"} ${profile.docNumber || "consumidor final"}`
+    : "Sin datos de facturación";
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Datos de facturación</CardTitle>
+        <CardDescription>
+          {PRICES_INCLUDE_IGV_NOTE} Emitimos factura o boleta electrónica por cada pago; el
+          comprobante se envía al correo indicado dentro de los 3 días hábiles.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <p className="text-sm font-medium" data-testid="billing-summary">
+          {documentLine}
+        </p>
+        {profile && (
+          <p className="text-sm text-gray-700">
+            {profile.name}
+            {profile.email ? ` · ${profile.email}` : ""}
+          </p>
+        )}
+        {profile && profile.docType === "factura" && profile.docNumber !== profile.ruc && (
+          <p className="text-xs text-amber-700">
+            La factura se emite al RUC {profile.docNumber}. El RUC de su empresa es {profile.ruc}.
+          </p>
+        )}
+
+        {canEdit ? (
+          <Button variant="outline" size="sm" onClick={openDialog} data-testid="button-edit-billing">
+            Cambiar datos de facturación
+          </Button>
+        ) : (
+          <p className="text-xs text-gray-500">
+            Solo un administrador puede cambiar los datos de facturación.
+          </p>
+        )}
+      </CardContent>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Datos de facturación</DialogTitle>
+            <DialogDescription>
+              Se usarán en su próxima compra. El comprobante de un pago ya realizado no cambia.
+            </DialogDescription>
+          </DialogHeader>
+
+          <BillingFields
+            value={value}
+            profile={profile}
+            errors={errors}
+            onChange={(next) => {
+              setValue(next);
+              if (errors.length > 0) {
+                setErrors(validateBilling(next));
+              }
+            }}
+          />
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={save.isPending}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void submit()} disabled={save.isPending} data-testid="button-save-billing">
+              {save.isPending ? "Guardando..." : "Guardar datos"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
 export default function PaymentsPage() {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -230,6 +422,13 @@ export default function PaymentsPage() {
   const agreement = useAgreement();
   const refreshAgreement = useRefreshAgreement();
   const cancelAgreement = useCancelAgreement();
+  const billing = useBillingProfile();
+  const comprobantes = useMyComprobantes();
+
+  /** One document per payment; the history row shows its state inline. */
+  const comprobanteByPayment = new Map(
+    (comprobantes.data ?? []).map((row) => [row.paymentId, row]),
+  );
 
   const [checkedReturn, setCheckedReturn] = useState(false);
 
@@ -406,13 +605,15 @@ export default function PaymentsPage() {
           />
         )}
 
+        <BillingCard profile={billing.data} canEdit={isAdmin} />
+
         <Card>
           <CardHeader>
             <CardTitle>Historial de pagos</CardTitle>
             <CardDescription>
               Cada intento y cada cobro automático quedan registrados con su referencia para que
               pueda conciliarlos con su banco. El plan se activa únicamente cuando el pago queda
-              confirmado.
+              confirmado. El comprobante electrónico de cada pago aparece junto a su referencia.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -428,6 +629,7 @@ export default function PaymentsPage() {
               <PaymentRow
                 key={payment.id}
                 payment={payment}
+                comprobante={comprobanteByPayment.get(payment.id)}
                 canConfirm={Boolean(user?.isPlatformAdmin)}
                 busy={
                   (refresh.isPending && refresh.variables === payment.id) ||

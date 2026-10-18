@@ -21,6 +21,7 @@ import PublicPortal from "@/pages/public-portal";
 import PrivacyPolicyPage from "@/pages/privacy-policy";
 import PrivacidadPage from "@/pages/privacidad";
 import TerminosPage from "@/pages/terminos";
+import ComprobantesPage from "@/pages/comprobantes";
 import AvisoLegalPage from "@/pages/aviso-legal";
 import NormativaPage from "@/pages/normativa";
 import EncargadoPage from "@/pages/encargado";
@@ -35,6 +36,7 @@ import AdminOverviewPage from "@/pages/admin/overview";
 import AdminCustomersPage from "@/pages/admin/customers";
 import AdminCustomerDetailPage from "@/pages/admin/customer-detail";
 import AdminPaymentsPage from "@/pages/admin/payments";
+import AdminComprobantesPage from "@/pages/admin/comprobantes";
 import AdminSubscriptionsPage from "@/pages/admin/subscriptions";
 import AdminSettingsPage from "@/pages/admin/settings";
 import AdminPlansPage from "@/pages/admin/planes";
@@ -102,6 +104,7 @@ function Router() {
         <Route path={`${ADMIN_PATH}/clientes`} component={AdminCustomersPage} />
         <Route path={`${ADMIN_PATH}/clientes/:businessId`} component={AdminCustomerDetailPage} />
         <Route path={`${ADMIN_PATH}/pagos`} component={AdminPaymentsPage} />
+        <Route path={`${ADMIN_PATH}/comprobantes`} component={AdminComprobantesPage} />
         <Route path={`${ADMIN_PATH}/suscripciones`} component={AdminSubscriptionsPage} />
         <Route path={`${ADMIN_PATH}/configuracion`} component={AdminSettingsPage} />
         <Route path={`${ADMIN_PATH}/planes`} component={AdminPlansPage} />
@@ -121,6 +124,7 @@ function Router() {
           la política de LibroDigital.pe como prestador del servicio; la segunda
           es la del banco de datos de cada empresa cliente. */}
       <Route path="/terminos" component={TerminosPage} />
+      <Route path="/comprobantes" component={ComprobantesPage} />
       <Route path="/privacidad" component={PrivacidadPage} />
       <Route path="/aviso-legal" component={AvisoLegalPage} />
 

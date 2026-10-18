@@ -4,6 +4,11 @@ import type { Complaint } from '@shared/schema';
 import type { BusinessEmailIdentity } from '@shared/email-identity';
 import type { ExecutiveReport } from './aiService';
 import { buildPaymentRecoveryText, paymentRecoverySubject } from '@shared/payment-recovery';
+import { formatIgvRate } from '@shared/tax';
+import {
+  COMPROBANTE_LEGAL_NOTE,
+  COMPROBANTE_VERIFICATION_NOTE,
+} from '@shared/comprobantes';
 
 interface EmailConfig {
   host: string;
@@ -1296,6 +1301,18 @@ LibroDigital.pe
      * the fiscal footer a customer may need for their own accounting.
      */
     identity?: PlatformIdentityFooter;
+    /**
+     * What the comprobante will be, and the IGV breakdown of the amount paid.
+     *
+     * All optional so older callers keep working; when present they turn the
+     * receipt into a document the customer's accountant can already reconcile,
+     * even though the factura/boleta itself arrives separately (Phase 1 is manual).
+     */
+    billingDocLabel?: string;
+    subtotalLabel?: string;
+    igvLabel?: string;
+    igvRateLabel?: string;
+    comprobanteNote?: string;
   }): Promise<void> {
     const mailOptions = {
       from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
@@ -1309,11 +1326,17 @@ LibroDigital.pe
         'Confirmamos la recepción de su pago y la activación de su plan:',
         '',
         `  Plan:          ${params.planName} (${params.periodLabel})`,
+        ...(params.subtotalLabel ? [`  Valor de venta: ${params.subtotalLabel}`] : []),
+        ...(params.igvLabel
+          ? [`  IGV${params.igvRateLabel ? ` (${params.igvRateLabel})` : ''}:          ${params.igvLabel}`]
+          : []),
         `  Monto:         ${params.amountLabel}`,
         `  Medio de pago: ${params.methodName}`,
         `  Referencia:    ${params.reference}`,
+        ...(params.billingDocLabel ? [`  Comprobante:   ${params.billingDocLabel}`] : []),
         ...(params.validUntilLabel ? [`  Válido hasta:  ${params.validUntilLabel}`] : []),
         '',
+        ...(params.comprobanteNote ? [params.comprobanteNote, ''] : []),
         'Puede consultar el detalle en cualquier momento en la sección Pagos: /pagos',
         '',
         'Conserve este mensaje como constancia de su pago.',
@@ -1327,6 +1350,74 @@ LibroDigital.pe
     } catch (error) {
       console.error('Error sending payment receipt:', error);
       throw new Error('Failed to send payment receipt');
+    }
+  }
+
+  /**
+   * The issued factura/boleta, with its PDF and XML attached (Phase 1).
+   *
+   * Sending the XML is not optional politeness: it is the document the buyer's
+   * accountant books. The PDF is only the printed representation, and the
+   * message says so, exactly as SUNAT expects a representation impresa to be
+   * labelled.
+   */
+  async sendComprobanteIssued(params: {
+    email: string;
+    customerName: string;
+    /** "Factura electrónica" / "Boleta de venta electrónica". */
+    docLabel: string;
+    /** F001-00000123 */
+    fullNumber: string;
+    issueDateLabel: string;
+    subtotalCents: number;
+    igvCents: number;
+    totalCents: number;
+    rateBps: number;
+    description: string;
+    paymentMethod: string | null;
+    attachments: Array<{ filename: string; path: string }>;
+    identity?: PlatformIdentityFooter;
+  }): Promise<void> {
+    const soles = (cents: number) => `S/ ${(cents / 100).toFixed(2)}`;
+    const method = (params.paymentMethod ?? '').trim();
+    const hasFiles = params.attachments.length > 0;
+
+    const mailOptions: SendMailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME || 'LibroDigital.pe'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to: params.email,
+      subject: `${params.docLabel} ${params.fullNumber} - LibroDigital.pe`,
+      text: [
+        `${params.docLabel} ${params.fullNumber}`,
+        '',
+        `Hola ${params.customerName || 'cliente'},`,
+        '',
+        hasFiles
+          ? 'Adjuntamos su comprobante electrónico en PDF (representación impresa) y XML (documento válido ante SUNAT).'
+          : 'Su comprobante electrónico ya fue emitido. Responda este correo si necesita que le reenviemos el PDF y el XML.',
+        '',
+        ...(params.issueDateLabel ? [`  Fecha de emisión: ${params.issueDateLabel}`] : []),
+        `  Comprobante:      ${params.fullNumber}`,
+        `  Descripción:      ${params.description}`,
+        `  Valor de venta:   ${soles(params.subtotalCents)}`,
+        `  IGV (${formatIgvRate(params.rateBps)}):        ${soles(params.igvCents)}`,
+        `  Total:            ${soles(params.totalCents)}`,
+        ...(method ? [`  Medio de pago:    ${method}`] : []),
+        '',
+        COMPROBANTE_LEGAL_NOTE,
+        COMPROBANTE_VERIFICATION_NOTE,
+        '',
+        'Si necesita una corrección, escríbanos y emitiremos la nota de crédito que corresponda.',
+        '',
+        ...identityFooterLines(params.identity),
+      ].join('\n'),
+      ...(hasFiles ? { attachments: params.attachments } : {}),
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      console.error('Error sending the issued comprobante:', error);
+      throw new Error('Failed to send the issued comprobante');
     }
   }
 

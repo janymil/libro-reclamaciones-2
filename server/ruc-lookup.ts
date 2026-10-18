@@ -319,6 +319,75 @@ function respondWithFailure(res: Response, failure: FailureKind, upstreamStatus:
   });
 }
 
+export type RucLookupResult =
+  | { ok: true; record: RucLookupRecord; cached: boolean }
+  | { ok: false; failure: FailureKind; upstreamStatus: number };
+
+/**
+ * Looks up one RUC, cache first, then the configured providers.
+ *
+ * Extracted from the HTTP route so the checkout can verify a factura's RUC
+ * server-side with the same cache and the same provider chain. The browser
+ * cannot be the authority on "SUNAT says this company exists": it could skip
+ * the check entirely.
+ */
+export async function lookupRucRecord(ruc: string): Promise<RucLookupResult> {
+  const cached = readCache(ruc);
+  if (cached) {
+    return { ok: true, record: cached, cached: true };
+  }
+
+  const timeoutMs = readPositiveInt(process.env.RUC_API_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
+  const ttlMs = readPositiveInt(process.env.RUC_API_CACHE_TTL_MS, DEFAULT_CACHE_TTL_MS);
+
+  let failure: FailureKind = "unreachable";
+  let lastStatus = 0;
+
+  for (const provider of resolveProviderChain()) {
+    try {
+      const answer = await askProvider(provider, ruc, timeoutMs);
+      lastStatus = answer.status;
+
+      const record = normalizeRucRecord(answer.payload, provider.id);
+      if (answer.status >= 200 && answer.status < 300 && record) {
+        writeCache(ruc, record, ttlMs);
+        return { ok: true, record, cached: false };
+      }
+
+      // "There is no such RUC": a 404, a 422 (apis.net.pe: `{"message":"ruc no
+      // valido"}`), a 400 that blames the document, or a 2xx carrying no
+      // record. Asking the next provider would only burn its quota.
+      const answeredWithoutRecord =
+        answer.status === 404 ||
+        answer.status === 422 ||
+        (answer.status === 400 && mentionsInvalidRuc(answer.payload)) ||
+        (answer.status >= 200 && answer.status < 300);
+
+      if (answeredWithoutRecord) {
+        return { ok: false, failure: "not_found", upstreamStatus: answer.status };
+      }
+
+      if (answer.status === 429) {
+        failure = "rate_limited";
+      } else if (answer.status === 401 || answer.status === 403) {
+        // 401 with no token configured is a setup problem, not a bad token.
+        failure = provider.token ? "auth" : "not_configured";
+      } else {
+        failure = "provider_error";
+      }
+
+      console.warn(`RUC lookup: provider ${provider.id} answered ${answer.status} (${failure})`);
+    } catch (error) {
+      // Network failure or timeout: the provider is the problem, not the RUC.
+      failure = "unreachable";
+      const name = error instanceof Error ? error.name : "unknown";
+      console.warn(`RUC lookup: provider ${provider.id} failed (${name})`);
+    }
+  }
+
+  return { ok: false, failure, upstreamStatus: lastStatus };
+}
+
 export function setupRUCLookup(app: Express) {
   // RUC lookup proxy endpoint (to avoid CORS issues). Unauthenticated by
   // design (it is used on the public registration form) but rate-limited so
@@ -335,64 +404,14 @@ export function setupRUCLookup(app: Express) {
       });
     }
 
-    const cached = readCache(ruc);
-    if (cached) {
-      res.setHeader("x-ruc-cache", "hit");
-      res.setHeader("x-ruc-source", cached.source);
-      return res.json(cached);
+    const result = await lookupRucRecord(ruc);
+
+    if (result.ok) {
+      res.setHeader("x-ruc-cache", result.cached ? "hit" : "miss");
+      res.setHeader("x-ruc-source", result.record.source);
+      return res.json(result.record);
     }
 
-    const timeoutMs = readPositiveInt(process.env.RUC_API_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
-    const ttlMs = readPositiveInt(process.env.RUC_API_CACHE_TTL_MS, DEFAULT_CACHE_TTL_MS);
-
-    let failure: FailureKind = "unreachable";
-    let lastStatus = 0;
-
-    for (const provider of resolveProviderChain()) {
-      try {
-        const answer = await askProvider(provider, ruc, timeoutMs);
-        lastStatus = answer.status;
-
-        const record = normalizeRucRecord(answer.payload, provider.id);
-        if (answer.status >= 200 && answer.status < 300 && record) {
-          writeCache(ruc, record, ttlMs);
-          res.setHeader("x-ruc-cache", "miss");
-          res.setHeader("x-ruc-source", provider.id);
-          return res.json(record);
-        }
-
-        // "There is no such RUC": a 404, a 422 (apis.net.pe: `{"message":"ruc no
-        // valido"}`), a 400 that blames the document, or a 2xx carrying no
-        // record. Asking the next provider would only burn its quota.
-        const answeredWithoutRecord =
-          answer.status === 404 ||
-          answer.status === 422 ||
-          (answer.status === 400 && mentionsInvalidRuc(answer.payload)) ||
-          (answer.status >= 200 && answer.status < 300);
-
-        if (answeredWithoutRecord) {
-          failure = "not_found";
-          break;
-        }
-
-        if (answer.status === 429) {
-          failure = "rate_limited";
-        } else if (answer.status === 401 || answer.status === 403) {
-          // 401 with no token configured is a setup problem, not a bad token.
-          failure = provider.token ? "auth" : "not_configured";
-        } else {
-          failure = "provider_error";
-        }
-
-        console.warn(`RUC lookup: provider ${provider.id} answered ${answer.status} (${failure})`);
-      } catch (error) {
-        // Network failure or timeout: the provider is the problem, not the RUC.
-        failure = "unreachable";
-        const name = error instanceof Error ? error.name : "unknown";
-        console.warn(`RUC lookup: provider ${provider.id} failed (${name})`);
-      }
-    }
-
-    return respondWithFailure(res, failure, lastStatus);
+    return respondWithFailure(res, result.failure, result.upstreamStatus);
   });
 }

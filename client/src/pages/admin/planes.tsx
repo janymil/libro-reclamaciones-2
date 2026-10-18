@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { useAdminPlanPricing, useIsOperator, useUpdatePlanPricing } from '@/hooks/use-admin';
 import { PAYMENT_CURRENCY_SYMBOL } from '@shared/payments';
+import { formatIgvRate } from '@shared/tax';
 
 /**
  * Planes: lo que cobramos hoy.
@@ -155,11 +156,13 @@ export default function AdminPlansPage() {
       <div className="space-y-6">
         <Card className="border-slate-800 bg-slate-900">
           <CardHeader>
-            <CardTitle className="text-slate-50">Precios (en soles)</CardTitle>
+            <CardTitle className="text-slate-50">Precios (en soles, IGV incluido)</CardTitle>
             <CardDescription className="text-slate-400">
-              Es lo que se cobra en el pago y lo que aparece en la página de planes. El plan Gratis
-              siempre es gratis. Debajo de cada plan está el precio que trae el código, como
-              referencia: si escribe ese mismo importe, la fila deja de ser una excepción.
+              Es lo que se cobra en el pago y lo que aparece en la página de planes. Los importes son
+              precios finales con IGV ({formatIgvRate()}) incluido: el comprobante los desglosa en
+              valor de venta e IGV. El plan Gratis siempre es gratis. Debajo de cada plan está el
+              precio que trae el código, como referencia: si escribe ese mismo importe, la fila deja
+              de ser una excepción.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

@@ -72,7 +72,7 @@ export const LIBRO_DE_RECLAMACIONES_URL: string =
 export const LIBRO_DE_RECLAMACIONES_PENDING = LIBRO_DE_RECLAMACIONES_URL === '#';
 
 /** Fecha de la última revisión de los documentos legales (texto ya formateado). */
-export const LEGAL_LAST_UPDATED = '17 de octubre de 2026';
+export const LEGAL_LAST_UPDATED = '18 de octubre de 2026';
 
 export interface LegalDocumentLink {
   href: string;
@@ -90,6 +90,7 @@ export const LEGAL_DOCUMENTS: LegalDocumentLink[] = [
   { href: '/terminos', label: 'Términos y condiciones', testId: 'link-terminos' },
   { href: '/privacidad', label: 'Política de privacidad', testId: 'link-privacidad' },
   { href: '/aviso-legal', label: 'Aviso legal', testId: 'link-aviso-legal' },
+  { href: '/comprobantes', label: 'Boletas y facturas electrónicas', testId: 'link-comprobantes' },
   { href: '/normativa', label: 'Marco normativo', testId: 'link-normativa' },
   { href: '/encargado', label: 'Ficha del encargado', testId: 'link-encargado' },
   { href: '/accesibilidad', label: 'Accesibilidad y cookies', testId: 'link-accesibilidad' },

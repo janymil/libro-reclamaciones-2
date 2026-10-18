@@ -9,6 +9,7 @@ import { attachmentStorage } from "./storage/attachment.storage";
 import { accessStorage } from "./storage/access.storage";
 import { integrationStorage } from "./storage/integration.storage";
 import { paymentStorage } from "./storage/payment.storage";
+import { comprobanteStorage } from "./storage/comprobante.storage";
 import { paymentSettingsStorage } from "./storage/paymentSettings.storage";
 import { platformSettingsStorage } from "./storage/platformSettings.storage";
 import { planPricingStorage } from "./storage/planPricing.storage";
@@ -45,6 +46,7 @@ export const storage: IStorage = {
   ...accessStorage,
   ...integrationStorage,
   ...paymentStorage,
+  ...comprobanteStorage,
   ...paymentSettingsStorage,
   ...platformSettingsStorage,
   ...planPricingStorage,

@@ -36,6 +36,8 @@ import type {
   InsertPayment,
   Subscription,
   InsertSubscription,
+  Comprobante,
+  InsertComprobante,
   PlatformPaymentSettings,
   PlatformSettings,
   PlanPricing,
@@ -55,6 +57,7 @@ import type {
 } from "./onboarding.storage";
 import type { AccessRequestWithBusiness } from "./accessRequest.storage";
 import type { PlatformPaymentSettingsInput } from "./paymentSettings.storage";
+import type { ComprobanteWithBusiness } from "./comprobante.storage";
 import type { PlatformSettingsInput } from "./platformSettings.storage";
 import type { PlanPricingInput } from "./planPricing.storage";
 import type { MonthlyReport } from "@shared/monthly-reports";
@@ -242,6 +245,31 @@ export interface IStorage {
   /** Operator view: every recurring agreement of every tenant. */
   listAllSubscriptions(limit?: number): Promise<Subscription[]>;
   updatePayment(id: string, updates: Partial<InsertPayment>): Promise<Payment | undefined>;
+
+  // Comprobantes (Phase 1: emisión manual)
+  createComprobante(data: InsertComprobante): Promise<Comprobante>;
+  getComprobante(id: string): Promise<Comprobante | undefined>;
+  getComprobanteByPaymentId(paymentId: string): Promise<Comprobante | undefined>;
+  /** Duplicate guard: a correlativo cannot repeat inside a serie. */
+  getComprobanteByNumber(
+    docType: string,
+    serie: string,
+    number: string,
+  ): Promise<Comprobante | undefined>;
+  getComprobantesByBusiness(businessId: string): Promise<Comprobante[]>;
+  /** Operator queue: every tenant's comprobantes, newest first. */
+  listAllComprobantes(limit?: number): Promise<Comprobante[]>;
+  /** Same list with the buyer's name/RUC, for the console table. */
+  listAllComprobantesWithBusiness(limit?: number): Promise<ComprobanteWithBusiness[]>;
+  updateComprobante(
+    id: string,
+    updates: Partial<InsertComprobante>,
+  ): Promise<Comprobante | undefined>;
+  /** Highest correlativo already used in a serie (0 when the serie is new). */
+  maxComprobanteNumber(docType: string, serie: string): Promise<number>;
+  countComprobantesByStatus(): Promise<Record<string, number>>;
+  /** Paid charges with no comprobante row yet (backfill queue). */
+  listPaymentsWithoutComprobante(limit?: number): Promise<Payment[]>;
 
   // Recurring agreements (Phase 2.7, step 2)
   createSubscription(data: InsertSubscription): Promise<Subscription>;

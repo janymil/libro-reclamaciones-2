@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { PaymentProviderDefinition } from "@shared/payments";
+import type { BillingData } from "@shared/comprobantes";
 
 /**
  * Payments (Phase 2.7) hooks.
@@ -142,6 +143,8 @@ export function useStartCheckout() {
        * it against the price it is about to charge.
        */
       discountCode?: string;
+      /** To whom the factura/boleta is issued; validated on the server. */
+      billing?: BillingData;
     }) => {
       const response = await apiRequest('POST', '/api/payments/checkout', input);
       return response.json() as Promise<CheckoutResponse>;

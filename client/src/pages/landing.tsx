@@ -30,6 +30,7 @@ import {
   OPERATOR,
 } from '@/lib/platform-legal';
 import { FINE_CAPS, FOOTER_NORMS, UIT_2026 } from '@/lib/legal-norms';
+import { formatIgvRate } from '@shared/tax';
 import {
   ArrowRight,
   Sparkles,
@@ -138,6 +139,10 @@ const faqItems = (trialDays: number) => [
   {
     q: '¿La prueba gratis tiene compromiso?',
     a: `No. Todos los planes incluyen ${trialDays} días de prueba con las funciones del plan Pro, sin tarjeta de crédito. Si no continúa, sus datos se eliminan según la política de retención.`,
+  },
+  {
+    q: '¿Emiten factura o boleta electrónica?',
+    a: `Sí. Todos los precios incluyen IGV (${formatIgvRate()}) y por cada pago emitimos factura o boleta electrónica válida ante SUNAT. La eliges antes de pagar —la factura requiere RUC— y el PDF y el XML llegan a tu correo dentro de los 3 días hábiles; también quedan disponibles en Pagos.`,
   },
   {
     q: '¿Qué pasa con los datos personales de mis clientes?',
@@ -1022,7 +1027,9 @@ function Pricing() {
                       {soles(period === 'annual' ? plan.priceAnnual : plan.priceMonthly)}
                     </span>
                     <span className={`ml-2 text-sm ${popular ? 'text-[#f7f2e8]/65' : 'text-[#5c5246]'}`}>
-                      {isFree ? 'siempre' : period === 'annual' ? 'al año' : 'al mes'}
+                      {isFree
+                        ? 'siempre'
+                        : `${period === 'annual' ? 'al año' : 'al mes'} · IGV incluido`}
                     </span>
                   </p>
                   <p className={`mt-1 font-mono text-xs ${popular ? 'text-amber-300' : 'text-[#c02b0a]'}`}>
@@ -1064,8 +1071,13 @@ function Pricing() {
 
         <Reveal delay={200}>
           <p className="mt-10 text-center text-sm text-[#5c5246]">
-            Precios en soles (S/). Puede pagar mes a mes o al año, y cancelar cuando quiera.
-            El pago anual se muestra por defecto porque sale {maxAnnualSavingPct}% más barato que pagar mes a mes.
+            Precios finales en soles (S/), IGV ({formatIgvRate()}) incluido. Puede pagar mes a mes o
+            al año, y cancelar cuando quiera. El pago anual se muestra por defecto porque sale{' '}
+            {maxAnnualSavingPct}% más barato que pagar mes a mes. Emitimos{' '}
+            <Link href="/comprobantes" className="underline underline-offset-2">
+              boleta y factura electrónica
+            </Link>{' '}
+            por cada pago.
           </p>
         </Reveal>
 

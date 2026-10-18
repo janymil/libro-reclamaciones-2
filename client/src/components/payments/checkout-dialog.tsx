@@ -17,12 +17,21 @@ import {
   useStartCheckout,
   type PaymentProviderOption,
 } from "@/hooks/use-payments";
+import { useBillingProfile, useRucVerification, type BillingProfile } from "@/hooks/use-comprobantes";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   PAYMENT_CURRENCY_SYMBOL,
   PAYMENT_METHODS,
 } from "@shared/payments";
+import {
+  COMPROBANTE_DOC_TYPES,
+  validateBilling,
+  type BillingData,
+  type ComprobanteDocType,
+} from "@shared/comprobantes";
+import { PRICES_INCLUDE_IGV_NOTE, formatIgvRate, igvBreakdown } from "@shared/tax";
+import { companyNamesMatch, isRucActive } from "@shared/ruc";
 import type { PlanDefinition } from "@shared/plans";
 
 /**
@@ -111,6 +120,243 @@ function ProviderCard({
   );
 }
 
+/**
+ * The factura/boleta decision, taken BEFORE paying.
+ *
+ * This ordering is the whole point: a comprobante cannot be re-issued to another
+ * RUC afterwards (it would take a nota de crédito), so the buyer identifies the
+ * document here, while a typo is still fixable. Prices are already gross, so the
+ * choice never changes the amount.
+ */
+export function BillingFields({
+  value,
+  profile,
+  errors,
+  onChange,
+}: {
+  value: BillingData;
+  profile?: BillingProfile;
+  errors: string[];
+  onChange: (next: BillingData) => void;
+}) {
+  const doc = COMPROBANTE_DOC_TYPES[value.docType];
+  const update = (patch: Partial<BillingData>) => onChange({ ...value, ...patch });
+
+  // Debounced so typing "20131312955" produces one SUNAT lookup, not eleven.
+  const [debouncedRuc, setDebouncedRuc] = useState(value.docNumber);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedRuc(value.docNumber), 450);
+    return () => clearTimeout(timer);
+  }, [value.docNumber]);
+
+  const verification = useRucVerification(debouncedRuc, value.docType === "factura");
+  const sunat = verification.data?.available ? verification.data : null;
+  const nameMatches =
+    sunat && value.name.trim() ? companyNamesMatch(value.name, sunat.razonSocial) : null;
+  const sunatUsable = sunat ? isRucActive(sunat.estado, sunat.condicion) : true;
+
+  const useSunatData = () => {
+    if (!sunat) {
+      return;
+    }
+    update({
+      name: sunat.razonSocial,
+      address: value.address.trim() || sunat.suggestedAddress,
+    });
+  };
+
+  const switchType = (next: ComprobanteDocType) => {
+    if (next === value.docType) {
+      return;
+    }
+    if (next === "factura") {
+      onChange({
+        ...value,
+        docType: "factura",
+        docNumber: profile?.ruc ?? "",
+        name: profile?.businessName ?? value.name,
+        address: profile?.address ?? value.address,
+      });
+      return;
+    }
+    // A boleta is for a person: the company's RUC and razón social do not apply.
+    onChange({ ...value, docType: "boleta", docNumber: "", name: "" });
+  };
+
+  return (
+    <div className="rounded-lg border p-3" data-testid="checkout-billing">
+      <p className="text-sm font-medium">Comprobante electrónico</p>
+      <p className="mt-0.5 text-xs text-gray-600">
+        Elige factura si necesitas sustentar el gasto; boleta si pagas como persona natural.
+      </p>
+
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {(Object.keys(COMPROBANTE_DOC_TYPES) as ComprobanteDocType[]).map((id) => {
+          const option = COMPROBANTE_DOC_TYPES[id];
+          const selected = value.docType === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => switchType(id)}
+              data-testid={`checkout-doctype-${id}`}
+              className={[
+                "rounded-lg border p-3 text-left text-sm transition-colors",
+                selected ? "border-primary ring-2 ring-primary/30 bg-primary/5" : "hover:bg-gray-50",
+              ].join(" ")}
+            >
+              <span className="font-medium">{option.shortLabel}</span>
+              <span className="mt-0.5 block text-xs text-gray-600">{option.hint}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div>
+          <Label htmlFor="billing-doc" className="text-xs font-medium">
+            {doc.requiresRuc ? "RUC" : "DNI (opcional)"}
+          </Label>
+          <Input
+            id="billing-doc"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={doc.requiresRuc ? 11 : 8}
+            placeholder={doc.requiresRuc ? "20123456789" : "Consumidor final"}
+            value={value.docNumber}
+            onChange={(event) =>
+              update({ docNumber: event.target.value.replace(/\D/g, "") })
+            }
+            data-testid="checkout-billing-doc"
+            className="mt-1"
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="billing-email" className="text-xs font-medium">
+            Correo para el comprobante
+          </Label>
+          <Input
+            id="billing-email"
+            type="email"
+            autoComplete="email"
+            placeholder="facturacion@empresa.pe"
+            value={value.email}
+            onChange={(event) => update({ email: event.target.value })}
+            data-testid="checkout-billing-email"
+            className="mt-1"
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <Label htmlFor="billing-name" className="text-xs font-medium">
+            {doc.requiresRuc ? "Razón social" : "Nombres y apellidos (opcional)"}
+          </Label>
+          <Input
+            id="billing-name"
+            autoComplete={doc.requiresRuc ? "organization" : "name"}
+            placeholder={doc.requiresRuc ? "Mi Empresa S.A.C." : "Consumidor final"}
+            value={value.name}
+            onChange={(event) => update({ name: event.target.value })}
+            data-testid="checkout-billing-name"
+            className="mt-1"
+          />
+        </div>
+
+        {doc.requiresRuc && (
+          <div className="sm:col-span-2">
+            <Label htmlFor="billing-address" className="text-xs font-medium">
+              Domicilio fiscal
+            </Label>
+            <Input
+              id="billing-address"
+              autoComplete="street-address"
+              placeholder="Av. Ejemplo 123, Lima"
+              value={value.address}
+              onChange={(event) => update({ address: event.target.value })}
+              data-testid="checkout-billing-address"
+              className="mt-1"
+            />
+          </div>
+        )}
+      </div>
+
+      {doc.requiresRuc && value.docNumber.length === 11 && (
+        <div className="mt-2 text-xs" data-testid="ruc-verification">
+          {verification.isFetching && <p className="text-gray-500">Verificando RUC en SUNAT…</p>}
+
+          {!verification.isFetching &&
+            sunat &&
+            (!sunatUsable ? (
+              <p className="text-red-600">
+                SUNAT: {sunat.estado ?? "—"} / {sunat.condicion ?? "—"}. No se puede emitir
+                factura a este RUC.
+              </p>
+            ) : nameMatches === false ? (
+              <div className="text-amber-700">
+                <p>
+                  La razón social no coincide con SUNAT: <strong>{sunat.razonSocial}</strong>
+                </p>
+                <button
+                  type="button"
+                  className="mt-1 underline"
+                  onClick={useSunatData}
+                  data-testid="button-use-sunat-name"
+                >
+                  Usar la razón social y el domicilio de SUNAT
+                </button>
+              </div>
+            ) : nameMatches === null ? (
+              <div className="text-gray-600">
+                <p>
+                  SUNAT: {sunat.razonSocial} · {sunat.condicion ?? sunat.estado ?? "verificado"}
+                </p>
+                <button
+                  type="button"
+                  className="mt-1 underline"
+                  onClick={useSunatData}
+                  data-testid="button-use-sunat-name"
+                >
+                  Usar la razón social y el domicilio de SUNAT
+                </button>
+              </div>
+            ) : (
+              <p className="text-green-700">
+                SUNAT: {sunat.razonSocial} · {sunat.condicion ?? sunat.estado ?? "verificado"}
+              </p>
+            ))}
+
+          {!verification.isFetching &&
+            !sunat &&
+            verification.data &&
+            !verification.data.available && (
+              <p
+                className={
+                  verification.data.code === "ruc_not_found" ? "text-red-600" : "text-gray-500"
+                }
+              >
+                {verification.data.message}
+              </p>
+            )}
+        </div>
+      )}
+
+      {errors.length > 0 && (
+        <ul className="mt-2 space-y-0.5 text-xs text-red-600" data-testid="checkout-billing-errors">
+          {errors.map((error) => (
+            <li key={error}>{error}</li>
+          ))}
+        </ul>
+      )}
+
+      <p className="mt-2 text-xs text-gray-500">
+        El comprobante se emite a estos datos y no puede cambiarse después del pago. Se envía a su
+        correo dentro de los 3 días hábiles. Si algo está mal, corrígelo ahora.
+      </p>
+    </div>
+  );
+}
+
 export default function CheckoutDialog({
   open,
   onOpenChange,
@@ -122,8 +368,20 @@ export default function CheckoutDialog({
   const providers = usePaymentProviders();
   const checkout = useStartCheckout();
   const discountPreview = useDiscountPreview();
+  const billingProfile = useBillingProfile(open);
 
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  // The buyer snapshot. Pre-filled from the company profile, then editable:
+  // paying with a personal card may well need a boleta instead of a factura.
+  const [billing, setBilling] = useState<BillingData>({
+    docType: "factura",
+    docNumber: "",
+    name: "",
+    address: "",
+    email: "",
+  });
+  const [billingTouched, setBillingTouched] = useState(false);
+  const [billingErrors, setBillingErrors] = useState<string[]>([]);
   // A provider with a recurring rail can also sell just one period, which is the
   // only way to pay with Yape, Plin or cash (and does not require logging into a
   // Mercado Pago account). `true` = one-time Checkout Pro by default.
@@ -165,8 +423,25 @@ export default function CheckoutDialog({
       setCode('');
       setApplied(null);
       setCodeError(null);
+      setBillingTouched(false);
+      setBillingErrors([]);
     }
   }, [open]);
+
+  // Prefill once the profile arrives, unless the customer already typed.
+  useEffect(() => {
+    if (!open || billingTouched || !billingProfile.data) {
+      return;
+    }
+    const profile = billingProfile.data;
+    setBilling({
+      docType: profile.docType,
+      docNumber: profile.docNumber,
+      name: profile.name,
+      address: profile.address,
+      email: profile.email,
+    });
+  }, [open, billingTouched, billingProfile.data]);
 
   const price = plan ? (period === 'annual' ? plan.priceAnnual : plan.priceMonthly) : 0;
   const periodLabel = period === 'annual' ? 'anual (ahorra ~50% vs mensual)' : 'mensual';
@@ -179,6 +454,13 @@ export default function CheckoutDialog({
 
   /** What the customer pays: the catalogue price, or the discounted one. */
   const payable = applied && !recurring ? applied.finalAmountCents / 100 : price;
+
+  /**
+   * The anatomy of the amount: prices are gross, so the base and the IGV are
+   * derived (never added on top). Shown next to the buyer fields so a business
+   * customer can see exactly what the factura will say.
+   */
+  const breakdown = igvBreakdown(Math.round(payable * 100));
 
   /** Asks the server what the typed code is worth (never trust the browser). */
   const handleApplyCode = async () => {
@@ -221,6 +503,20 @@ export default function CheckoutDialog({
       return;
     }
 
+    // Validated before anything is charged: a wrong RUC or a missing mailbox
+    // would otherwise surface only when the factura cannot be issued.
+    const errors = validateBilling(billing);
+    if (errors.length > 0) {
+      setBillingErrors(errors);
+      toast({
+        title: "Revise los datos del comprobante",
+        description: errors[0],
+        variant: "destructive",
+      });
+      return;
+    }
+    setBillingErrors([]);
+
     try {
       const response = await checkout.mutateAsync({
         plan: plan.id,
@@ -229,6 +525,7 @@ export default function CheckoutDialog({
         mode: recurring ? 'auto' : 'one_time',
         // Only a single period can carry a discount; the server re-validates it.
         discountCode: applied && !recurring ? applied.code : undefined,
+        billing,
       });
       onStarted?.();
 
@@ -361,6 +658,40 @@ export default function CheckoutDialog({
                 No hay métodos de pago disponibles. Contacte a soporte.
               </p>
             )}
+
+            <BillingFields
+              value={billing}
+              profile={billingProfile.data}
+              errors={billingErrors}
+              onChange={(next) => {
+                setBilling(next);
+                setBillingTouched(true);
+                if (billingErrors.length > 0) {
+                  setBillingErrors(validateBilling(next));
+                }
+              }}
+            />
+
+            <div
+              className="rounded-lg border bg-gray-50 p-3 text-sm"
+              data-testid="checkout-igv-breakdown"
+            >
+              <div className="flex justify-between text-gray-700">
+                <span>Valor de venta</span>
+                <span>{PAYMENT_CURRENCY_SYMBOL} {(breakdown.subtotalCents / 100).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-gray-700">
+                <span>IGV ({formatIgvRate(breakdown.rateBps)})</span>
+                <span>{PAYMENT_CURRENCY_SYMBOL} {(breakdown.igvCents / 100).toFixed(2)}</span>
+              </div>
+              <div className="mt-1 flex justify-between border-t pt-1 font-semibold text-gray-900">
+                <span>Total</span>
+                <span>{PAYMENT_CURRENCY_SYMBOL} {(breakdown.totalCents / 100).toFixed(2)}</span>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                {PRICES_INCLUDE_IGV_NOTE} El comprobante que elijas no cambia el total.
+              </p>
+            </div>
 
             {/* A promo code is only offered for a single period: a recurring charge at a
                 discounted amount would follow the customer forever. */}

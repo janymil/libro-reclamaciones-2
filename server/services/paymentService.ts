@@ -29,10 +29,13 @@ import { getPlan, isPlanId, isTrialing } from "@shared/plans";
 import { buildTransferInstructions } from "@shared/payment-details";
 import { buildPaymentResumeUrl } from "@shared/payment-recovery";
 import { formatCalendarDate } from "@shared/peru-time";
+import { getComprobanteDocType, COMPROBANTE_ISSUE_NOTE, type BillingData } from "@shared/comprobantes";
+import { formatIgvRate, igvBreakdown } from "@shared/tax";
 import type { Business, Payment, Subscription } from "@shared/schema";
 
 import { storage } from "../storage";
 import { emailService } from "./emailService";
+import { ensureComprobanteForPayment } from "./comprobanteService";
 import { redeemDiscountForPayment, evaluateDiscountForCheckout, DiscountRejectedError } from "./discountService";
 import { effectivePlanAmountCents } from "./pricingService";
 import { readTransferDetails } from "./paymentSettingsService";
@@ -228,6 +231,14 @@ export interface StartPaymentInput {
    * customer was shown.
    */
   discount?: { id: string; code: string; amountOffCents: number };
+  /**
+   * To whom the comprobante is issued, captured at checkout.
+   *
+   * Optional because an operator-confirmed payment may have no checkout; the
+   * business profile is then used as the fallback. Stored as a snapshot on the
+   * payment so a later profile edit cannot rewrite an issued document.
+   */
+  billing?: BillingData;
 }
 
 export interface StartPaymentResult {
@@ -278,6 +289,11 @@ export async function startPayment(input: StartPaymentInput): Promise<StartPayme
     amountCents,
     currency: PAYMENT_CURRENCY,
     status: "pending",
+    billingDocType: input.billing?.docType ?? null,
+    billingDocNumber: input.billing?.docNumber || null,
+    billingName: input.billing?.name || null,
+    billingAddress: input.billing?.address || null,
+    billingEmail: input.billing?.email || null,
     // The ledger explains the charge: what it was, what came off and which code did it.
     discountCode: input.discount?.code ?? null,
     discountCents,
@@ -348,6 +364,8 @@ export interface StartSubscriptionInput {
   planId: string;
   period: PlanPeriod;
   baseUrl: string;
+  /** Buyer snapshot; renewals inherit it from this agreement. */
+  billing?: BillingData;
 }
 
 /**
@@ -392,6 +410,11 @@ export async function startSubscription(input: StartSubscriptionInput): Promise<
     amountCents,
     currency: PAYMENT_CURRENCY,
     payerEmail: input.userEmail,
+    billingDocType: input.billing?.docType ?? null,
+    billingDocNumber: input.billing?.docNumber || null,
+    billingName: input.billing?.name || null,
+    billingAddress: input.billing?.address || null,
+    billingEmail: input.billing?.email || null,
     status: "pending",
   });
 
@@ -449,6 +472,8 @@ export interface StartCheckoutInput {
   mode?: "auto" | "one_time";
   /** Customer-typed promo code, if any. Never trusted: re-validated here. */
   discountCode?: string;
+  /** Buyer snapshot for the comprobante (validated by the route). */
+  billing?: BillingData;
 }
 
 export type StartCheckoutResult =
@@ -621,6 +646,16 @@ export async function settlePayment(
   if (isPaymentSuccessful(settled.status)) {
     await activatePlan(settled);
 
+    // The invoice's paper trail starts here: one pending comprobante per paid
+    // order, created before the receipt goes out so the email and the console
+    // agree. A failure to record it must never undo a confirmed payment.
+    await ensureComprobanteForPayment(settled).catch((error) => {
+      console.error(
+        `[comprobantes] no se pudo crear el comprobante de ${settled.reference}:`,
+        error,
+      );
+    });
+
     // The code is consumed HERE, not at checkout: an abandoned checkout must not
     // burn a redemption. Fire-and-forget by design - the money is already in.
     await redeemDiscountForPayment(settled).catch((error) => {
@@ -695,6 +730,24 @@ async function sendPaymentReceipt(payment: Payment): Promise<void> {
   // printed, so a deployment that never opened Configuración reads as before.
   const identity = await getIdentity().catch(() => undefined);
 
+  // The receipt already explains the amount's anatomy: base, IGV and total, plus
+  // the document the customer will receive. This is what an accountant asks for
+  // when the factura itself has not arrived yet (Phase 1 is manual).
+  const breakdown = igvBreakdown(payment.amountCents);
+  const doc = getComprobanteDocType(payment.billingDocType ?? business?.billingDocType);
+  // A boleta is a person's document: the company's razón social is not the buyer.
+  const buyerName =
+    payment.billingName ??
+    (doc.id === "factura" ? business?.businessName ?? "su empresa" : "");
+  const buyerDoc =
+    payment.billingDocNumber ??
+    (doc.id === "factura" ? business?.ruc : business?.billingDni) ??
+    "";
+  const billingDocLabel = buyerDoc
+    ? `${doc.label}${buyerName ? ` a nombre de ${buyerName}` : ""} · ${doc.requiresRuc ? "RUC" : "DNI"} ${buyerDoc}`
+    : `${doc.label} (consumidor final)`;
+  const destination = payment.billingEmail ?? business?.billingEmail ?? user.email;
+
   await emailService.sendPaymentReceipt({
     email: user.email,
     firstName: user.firstName ?? "",
@@ -706,6 +759,11 @@ async function sendPaymentReceipt(payment: Payment): Promise<void> {
     reference: payment.reference,
     validUntilLabel: periodEnd ? formatCalendarDate(periodEnd) : null,
     identity,
+    billingDocLabel,
+    subtotalLabel: `${PAYMENT_CURRENCY_SYMBOL} ${centsToSoles(breakdown.subtotalCents).toFixed(2)}`,
+    igvLabel: `${PAYMENT_CURRENCY_SYMBOL} ${centsToSoles(breakdown.igvCents).toFixed(2)}`,
+    igvRateLabel: formatIgvRate(breakdown.rateBps),
+    comprobanteNote: `${COMPROBANTE_ISSUE_NOTE} Se enviará a ${destination}.`,
   });
 }
 
@@ -1133,6 +1191,13 @@ export async function recordSubscriptionCharge(
     amountCents: subscription.amountCents,
     currency: subscription.currency,
     status: "pending",
+    // A renewal has no checkout: the snapshot captured when the agreement was
+    // authorised is what its invoice must say.
+    billingDocType: subscription.billingDocType,
+    billingDocNumber: subscription.billingDocNumber,
+    billingName: subscription.billingName,
+    billingAddress: subscription.billingAddress,
+    billingEmail: subscription.billingEmail,
     subscriptionId: subscription.id,
   }));
 
@@ -1463,6 +1528,16 @@ export async function confirmManualPayment(
   const settled = updated ?? payment;
 
   await activatePlan(settled);
+
+  // Same paper trail as any other confirmed charge: a manually confirmed
+  // transfer must also produce its pending comprobante.
+  await ensureComprobanteForPayment(settled).catch((error) => {
+    console.error(
+      `[comprobantes] no se pudo crear el comprobante de ${settled.reference}:`,
+      error,
+    );
+  });
+
   return settled;
 }
 

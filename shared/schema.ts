@@ -87,6 +87,19 @@ export const businesses = pgTable("businesses", {
   departamento: varchar("departamento", { length: 100 }).notNull(),
   website: varchar("website", { length: 255 }),
   /**
+   * Default billing preferences (Phase "comprobantes").
+   *
+   * The platform sells to companies, so a factura to the business's own RUC is
+   * the default. A customer paying with a personal card may still prefer a
+   * boleta; the choice and the delivery mailbox are remembered here and
+   * pre-filled at the next checkout. The snapshot actually used for a payment
+   * lives on `payments`/`comprobantes`, so changing this never rewrites history.
+   */
+  billingDocType: varchar("billing_doc_type", { length: 20 }).notNull().default("factura"),
+  billingEmail: varchar("billing_email", { length: 255 }),
+  /** DNI for a boleta issued to a person (empty = consumidor final). */
+  billingDni: varchar("billing_dni", { length: 8 }),
+  /**
    * How many establishments (locales) the company says it will have, casa matriz
    * included. Onboarding asks a chain for it, and the "Primeros pasos" checklist
    * on /panel uses it to say "2 de 5" and to remind the customer which locales are
@@ -518,6 +531,19 @@ export const payments = pgTable("payments", {
   period: varchar("period", { length: 20 }).notNull(), // monthly | annual
   amountCents: integer("amount_cents").notNull(),
   currency: varchar("currency", { length: 3 }).notNull().default("PEN"),
+  /**
+   * Billing snapshot: to whom this charge's comprobante is issued.
+   *
+   * Copied from the checkout (and from the recurring agreement on renewals) at
+   * the moment of payment, never re-read from the business profile: the factura
+   * must keep saying what it said when the money arrived, even if the company
+   * later changes its razón social or its default document type.
+   */
+  billingDocType: varchar("billing_doc_type", { length: 20 }),
+  billingDocNumber: varchar("billing_doc_number", { length: 20 }),
+  billingName: text("billing_name"),
+  billingAddress: text("billing_address"),
+  billingEmail: varchar("billing_email", { length: 255 }),
   status: varchar("status", { length: 20 }).notNull().default("pending"),
   redirectUrl: text("redirect_url"), // where the customer must go to pay (PSP checkout)
   failureReason: text("failure_reason"),
@@ -582,6 +608,18 @@ export const subscriptions = pgTable("subscriptions", {
   period: varchar("period", { length: 20 }).notNull(), // monthly | annual
   amountCents: integer("amount_cents").notNull(),
   currency: varchar("currency", { length: 3 }).notNull().default("PEN"),
+  /**
+   * Billing snapshot for the recurring agreement.
+   *
+   * A renewal has no checkout screen, so the provider's charge has to inherit
+   * the document type and buyer captured when the agreement was authorised.
+   * Otherwise every renewal would silently fall back to the company profile.
+   */
+  billingDocType: varchar("billing_doc_type", { length: 20 }),
+  billingDocNumber: varchar("billing_doc_number", { length: 20 }),
+  billingName: text("billing_name"),
+  billingAddress: text("billing_address"),
+  billingEmail: varchar("billing_email", { length: 255 }),
   payerEmail: varchar("payer_email", { length: 255 }),
   status: varchar("status", { length: 20 }).notNull().default("pending"),
   // Where the customer goes to authorise the recurring charge.
@@ -597,6 +635,84 @@ export const subscriptions = pgTable("subscriptions", {
   unique("uq_subscriptions_reference").on(table.reference),
   index("idx_subscriptions_business_id").on(table.businessId),
   index("idx_subscriptions_provider_ref").on(table.provider, table.providerRef),
+]);
+
+/**
+ * Comprobantes de pago electrónicos (Phase 1: emisión manual).
+ *
+ * One row per confirmed payment, created automatically when the payment turns
+ * `paid`, and completed by an operator after issuing it in SUNAT's own tool:
+ * the row starts `pendiente`, moves to `emitido` with the serie/correlativo and
+ * the PDF/XML upload, and can end `anulado` when a nota de crédito is issued.
+ *
+ * Why it is a separate table instead of columns on `payments`:
+ *   * a payment can exist for years before anyone issues its invoice, and the
+ *     queue of pending comprobantes is a work list of its own;
+ *   * the fiscal snapshot (buyer, amounts, rate) must be immutable even if the
+ *     business later edits its profile;
+ *   * Phase 2 (PSE automation) can fill the same rows with a CDR and SUNAT
+ *     status without changing the customer-facing screens.
+ */
+export const comprobantes = pgTable("comprobantes", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  /** The charge this document invoices. One comprobante per payment. */
+  paymentId: uuid("payment_id").notNull(),
+  businessId: uuid("business_id").notNull(),
+  /** factura | boleta */
+  docType: varchar("doc_type", { length: 20 }).notNull(),
+  /** pendiente | emitido | anulado */
+  status: varchar("status", { length: 20 }).notNull().default("pendiente"),
+
+  /** Filled when the operator issues it in SUNAT: F001 + 00000123. */
+  serie: varchar("serie", { length: 4 }),
+  number: varchar("number", { length: 8 }),
+  issueDate: timestamp("issue_date"),
+
+  /** Buyer snapshot (SUNAT catalog 06: 6 = RUC, 1 = DNI, 0 = consumidor final). */
+  customerDocType: varchar("customer_doc_type", { length: 1 }).notNull(),
+  customerDocNumber: varchar("customer_doc_number", { length: 20 }).notNull(),
+  customerName: text("customer_name").notNull(),
+  customerAddress: text("customer_address"),
+  customerEmail: varchar("customer_email", { length: 255 }),
+
+  /** What the comprobante says was sold: "Servicio ... - Plan Pro (anual)". */
+  description: text("description").notNull(),
+
+  /**
+   * Gross-first amounts: `totalCents` is exactly what was charged and
+   * `subtotalCents + igvCents === totalCents` (see `@shared/tax`). Snapshotting
+   * the rate means a future IGV change never rewrites an issued document.
+   */
+  subtotalCents: integer("subtotal_cents").notNull(),
+  igvCents: integer("igv_cents").notNull(),
+  totalCents: integer("total_cents").notNull(),
+  igvRateBps: integer("igv_rate_bps").notNull().default(1800),
+  currency: varchar("currency", { length: 3 }).notNull().default("PEN"),
+  /** Medio de pago (required on sales over S/ 2,000, Ley 28194). */
+  paymentMethod: varchar("payment_method", { length: 40 }),
+
+  /** Uploaded files, stored under the uploads root with random names. */
+  pdfPath: text("pdf_path"),
+  xmlPath: text("xml_path"),
+  pdfOriginalName: text("pdf_original_name"),
+  xmlOriginalName: text("xml_original_name"),
+
+  emittedAt: timestamp("emitted_at"),
+  emittedByUserId: uuid("emitted_by_user_id"),
+  /** When the PDF/XML was last mailed to the customer. */
+  emailSentAt: timestamp("email_sent_at"),
+  /** Operator-only note (SUNAT ticket, motivo de anulación...). */
+  notes: text("notes"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  unique("uq_comprobantes_payment").on(table.paymentId),
+  // A correlativo cannot repeat within a serie. NULLs are distinct in Postgres,
+  // so the many still-pending rows (no number yet) do not collide.
+  unique("uq_comprobantes_serie_number").on(table.docType, table.serie, table.number),
+  index("idx_comprobantes_business_id").on(table.businessId),
+  index("idx_comprobantes_status").on(table.status),
 ]);
 
 // Where the platform itself collects money (Phase 2.7, step 3).
@@ -814,6 +930,7 @@ export const businessesRelations = relations(businesses, ({ many }) => ({
   userAccess: many(userBusinessAccess),
   apiKeys: many(apiKeys),
   webhooks: many(webhooks),
+  comprobantes: many(comprobantes),
 }));
 
 export const userBusinessAccessRelations = relations(userBusinessAccess, ({ one }) => ({
@@ -838,6 +955,17 @@ export const webhooksRelations = relations(webhooks, ({ one }) => ({
   business: one(businesses, {
     fields: [webhooks.businessId],
     references: [businesses.id],
+  }),
+}));
+
+export const comprobantesRelations = relations(comprobantes, ({ one }) => ({
+  business: one(businesses, {
+    fields: [comprobantes.businessId],
+    references: [businesses.id],
+  }),
+  payment: one(payments, {
+    fields: [comprobantes.paymentId],
+    references: [payments.id],
   }),
 }));
 
@@ -1166,6 +1294,13 @@ export const insertSubscriptionSchema = createInsertSchema(subscriptions).omit({
   updatedAt: true,
 });
 
+/** Server-created only: the API never accepts a comprobante body wholesale. */
+export const insertComprobanteSchema = createInsertSchema(comprobantes).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 /**
  * Normalization applied to every email that identifies an account.
  *
@@ -1319,6 +1454,10 @@ export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 
 export type Subscription = typeof subscriptions.$inferSelect;
 export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
+
+/** A comprobante de pago electrónico issued (or awaiting emission) for a payment. */
+export type Comprobante = typeof comprobantes.$inferSelect;
+export type InsertComprobante = z.infer<typeof insertComprobanteSchema>;
 
 /**
  * The singleton row with the platform's own collection details. The console edits

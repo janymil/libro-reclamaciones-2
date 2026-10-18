@@ -99,6 +99,13 @@
       "when": 1792700000000,
       "tag": "0014_ai_usage_feedback",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792800000000,
+      "tag": "0015_comprobantes",
+      "breakpoints": true
     }
   ]
 }

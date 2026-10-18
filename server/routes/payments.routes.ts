@@ -13,6 +13,8 @@ import {
   type PlanPeriod,
 } from "@shared/payments";
 import { getPlan, isPlanId } from "@shared/plans";
+import { normalizeBilling, validateBilling } from "@shared/comprobantes";
+import { companyNamesMatch, isRucActive } from "@shared/ruc";
 import type { Payment, Subscription } from "@shared/schema";
 
 import { storage } from "../storage";
@@ -36,6 +38,8 @@ import {
 } from "../services/paymentService";
 import { evaluateDiscountForCheckout, DiscountRejectedError } from "../services/discountService";
 import { effectivePlanAmountCents } from "../services/pricingService";
+import { saveBillingDefaults } from "../services/comprobanteService";
+import { lookupRucRecord } from "../ruc-lookup";
 
 
 /**
@@ -70,6 +74,13 @@ export function toPublicPayment(payment: Payment) {
     // themselves instead of showing a number nobody can reconcile.
     discountCode: payment.discountCode,
     discountCents: payment.discountCents,
+    // To whom the comprobante is issued; the customer's own history explains
+    // itself instead of hiding the document behind the console.
+    billingDocType: payment.billingDocType,
+    billingDocNumber: payment.billingDocNumber,
+    billingName: payment.billingName,
+    billingAddress: payment.billingAddress,
+    billingEmail: payment.billingEmail,
     status: payment.status,
     statusLabel: isPaymentStatus(payment.status) ? PAYMENT_STATUS_LABELS[payment.status] : payment.status,
     redirectUrl: payment.redirectUrl,
@@ -219,7 +230,7 @@ export function registerPaymentsRoutes(app: Express): void {
         return res.status(404).json({ message: "La cuenta aún no tiene una empresa configurada" });
       }
 
-      const { plan, period, provider, mode, discountCode } = z.object({
+      const { plan, period, provider, mode, discountCode, billing: rawBilling } = z.object({
         plan: z.string(),
         period: z.string().default('monthly'),
         provider: z.string(),
@@ -227,6 +238,12 @@ export function registerPaymentsRoutes(app: Express): void {
         mode: z.enum(['auto', 'one_time']).default('auto'),
         /** Promo code, validated below against the live price - never trusted. */
         discountCode: z.string().trim().max(40).optional(),
+        /**
+         * Buyer snapshot for the factura/boleta. Optional so an API client that
+         * predates the comprobante feature keeps working; when present it is
+         * normalized and validated here, never trusted as typed.
+         */
+        billing: z.unknown().optional(),
       }).parse(req.body);
 
       if (!isPlanId(plan)) {
@@ -263,6 +280,66 @@ export function registerPaymentsRoutes(app: Express): void {
         return res.status(404).json({ message: "Empresa no encontrada" });
       }
 
+      // The factura/boleta is decided BEFORE paying: changing it afterwards would
+      // require a nota de crédito, so an invalid RUC or a missing mailbox is
+      // refused here, while the customer can still correct it.
+      const billing = rawBilling ? normalizeBilling(rawBilling) : undefined;
+      if (billing) {
+        const billingErrors = validateBilling(billing);
+        if (billingErrors.length > 0) {
+          return res.status(400).json({
+            message: billingErrors[0],
+            errors: billingErrors,
+            code: "billing_invalid",
+          });
+        }
+
+        // SUNAT is the authority on whether an invoice can be issued to this
+        // company. The browser already shows the lookup result, but this is the
+        // guard that matters: a client could skip it. A provider outage allows
+        // the payment (the customer is not at fault); a RUC SUNAT rejects, or a
+        // razón social that belongs to another company, does not.
+        if (billing.docType === "factura") {
+          const verification = await lookupRucRecord(billing.docNumber).catch(() => null);
+
+          if (verification?.ok) {
+            const record = verification.record;
+            if (!isRucActive(record.estado, record.condicion)) {
+              return res.status(400).json({
+                message: `SUNAT reporta el RUC ${billing.docNumber} como ${record.estado ?? "—"} / ${record.condicion ?? "—"}. No se puede emitir una factura a ese RUC.`,
+                code: "billing_ruc_not_habido",
+              });
+            }
+            if (!companyNamesMatch(billing.name, record.razon_social)) {
+              return res.status(400).json({
+                message: `La razón social no coincide con SUNAT. SUNAT registra: ${record.razon_social}. Corrígela antes de pagar.`,
+                code: "billing_name_mismatch",
+                suggestedName: record.razon_social,
+              });
+            }
+          } else if (verification?.failure === "not_found") {
+            return res.status(400).json({
+              message: "SUNAT no reconoce este RUC. Verifícalo antes de pagar.",
+              code: "billing_ruc_not_found",
+            });
+          } else {
+            // Never turn a third party's downtime into a lost sale.
+            console.warn(
+              `[comprobantes] no se pudo verificar el RUC de la factura (${verification?.failure ?? "error"}); se permite el pago`,
+            );
+          }
+        }
+
+        // Only after the data is acceptable: remember the choice for next time.
+        // A failure here must never block a payment the customer is trying to make.
+        await saveBillingDefaults(business.id, billing).catch((error) => {
+          console.error(
+            "[comprobantes] no se pudieron guardar los datos de facturación:",
+            error,
+          );
+        });
+      }
+
       const result = await startCheckout({
         business,
         userId: req.user.id,
@@ -277,6 +354,7 @@ export function registerPaymentsRoutes(app: Express): void {
         baseUrl: resolveBaseUrl(req),
         mode,
         discountCode,
+        billing,
       });
 
       if (result.mode === 'subscription') {

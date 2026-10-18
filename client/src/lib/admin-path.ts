@@ -42,6 +42,8 @@ export const ADMIN_SECTIONS = [
   { href: adminPathFor(), label: 'Resumen', icon: 'insights' },
   { href: adminPathFor('/clientes'), label: 'Clientes', icon: 'groups' },
   { href: adminPathFor('/pagos'), label: 'Pagos', icon: 'receipt_long' },
+  // The manual emission queue: each paid order becomes a factura or a boleta.
+  { href: adminPathFor('/comprobantes'), label: 'Comprobantes', icon: 'description' },
   { href: adminPathFor('/suscripciones'), label: 'Suscripciones', icon: 'autorenew' },
   // The platform's own collection details (Yape number, bank accounts, CCI): the
   // customer-facing text of a transfer payment comes from here.

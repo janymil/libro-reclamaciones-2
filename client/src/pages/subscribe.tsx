@@ -104,6 +104,12 @@ export default function SubscribePage() {
                   </span>
                 </p>
                 <p className="mt-1 text-xs text-gray-500">
+                  IGV incluido · Emitimos boleta o factura electrónica.{" "}
+                  <Link href="/comprobantes">
+                    <span className="cursor-pointer underline">Cómo funciona</span>
+                  </Link>
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
                   {target.period === "annual"
                     ? "Se cobra una vez al año y se renueva automáticamente. Puede cancelar cuando quiera."
                     : "Se cobra cada mes y se renueva automáticamente. Puede cancelar cuando quiera."}

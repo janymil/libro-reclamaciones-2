@@ -4,6 +4,7 @@ import { OPERATOR, LIBRO_DE_RECLAMACIONES_URL } from '@/lib/platform-legal';
 import { LEGAL_RESPONSE_TIME_BUSINESS_DAYS, CONTACT_INFO } from '@/lib/constants';
 import { PLANS, TRIAL_DAYS, RETENTION_MONTHS, LAUNCH_OFFER_ANNUAL_BASICO } from '@shared/plans';
 import { HOSTING_LOCATIONS } from '@shared/encargado';
+import { formatIgvRate } from '@shared/tax';
 
 /**
  * Términos y condiciones del servicio: el contrato con la empresa que contrata
@@ -114,9 +115,12 @@ export default function TerminosPage() {
           ]}
         />
         <p>
-          Los precios se expresan en soles (PEN). El comprobante se emite por el importe efectivamente
-          cobrado; si el precio incluye IGV, se indica en el checkout antes de pagar. El precio anual
-          tiene descuento frente al pago mes a mes y es el precio recomendado del servicio.
+          Todos los precios publicados son precios finales en soles (PEN) e incluyen el IGV (
+          {formatIgvRate()}: 16% IGV + 2% Impuesto de Promoción Municipal). El precio no se
+          incrementa al contratar, ni cambia según se elija factura o boleta. El comprobante se
+          emite por el importe efectivamente cobrado, con su desglose de valor de venta e IGV. El
+          precio anual tiene descuento frente al pago mes a mes y es el precio recomendado del
+          servicio.
         </p>
         <p>
           Las ofertas de lanzamiento (como el plan {basic.name} a S/{' '}
@@ -131,7 +135,10 @@ export default function TerminosPage() {
             'Los medios habilitados se muestran al pagar: tarjeta, Yape, Plin o pago en efectivo a través de la pasarela, y también transferencia o Yape directo con validación de nuestro equipo.',
             'Con tarjeta el cobro puede ser automático y recurrente: la suscripción se renueva sola al inicio de cada periodo hasta que usted la cancele.',
             'Los pagos por transferencia, Yape o efectivo se activan cuando el pago es confirmado; para seguir el siguiente periodo, se emite un nuevo pago.',
-            'Emitimos el comprobante electrónico a nombre de la empresa y del RUC declarados en el panel. Verifique esos datos antes de pagar: el comprobante no se puede reemitir con otro RUC.',
+            'Emitimos factura o boleta de venta electrónica por cada pago confirmado, válida ante SUNAT. La factura requiere RUC, razón social y domicilio fiscal; la boleta se emite a persona natural y el DNI es opcional.',
+            'El comprobante se elige en el checkout, antes de pagar, y no puede cambiarse después: corregir el RUC o el tipo de documento requiere una nota de crédito y un nuevo comprobante.',
+            'Enviamos el PDF y el XML al correo indicado dentro de los 3 días hábiles siguientes al pago; también quedan disponibles en la sección Pagos.',
+            'El XML es el comprobante válido ante SUNAT y el PDF su representación impresa. Puede verificarlo en sunat.gob.pe con nuestro RUC y el número de comprobante.',
             'Si un cobro automático es rechazado, avisamos al correo del titular, la suscripción queda pausada y el servicio vuelve al plan gratuito si el pago no se regulariza.',
           ]}
         />
