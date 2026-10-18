@@ -125,7 +125,7 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
                     className={aiStatus.enabled ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}
                     data-testid="badge-ai-status"
                   >
-                    {aiStatus.enabled ? `IA activa · ${aiStatus.fastModel}` : 'IA inactiva · modo heurístico'}
+                    {aiStatus.enabled ? 'IA activa' : 'IA inactiva'}
                   </Badge>
                 )}
               </CardTitle>
