@@ -20,7 +20,7 @@ staged="$(git diff --cached --name-only --diff-filter=ACM)"
 # `!.env.example`), so it is excluded from the path block below. Its CONTENT is
 # still scanned by the credential check at the end, which is what matters.
 blocked="$(printf '%s\n' "$staged" \
-  | grep -E '(^|/)secrets/|(^|/)\.env($|\.)|\.(pem|key|crt)$' \
+  | grep -E '(^|/)secrets/|(^|/)\.env($|\.)|\.(pem|key|crt)$|(^|/)[^/]*(_KEY|SECRET|TOKEN|PASSWORD)[^/]*\.(txt|json|csv)$' \
   | grep -vE '(^|/)\.env\.example$' || true)"
 if [ -n "$blocked" ]; then
   printf 'Commit blocked — secret-like paths are staged:\n%s\n' "$blocked" >&2

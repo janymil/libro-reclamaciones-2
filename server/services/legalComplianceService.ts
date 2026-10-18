@@ -136,7 +136,7 @@ class LegalComplianceService {
         'Implementar procedimientos para derechos ARCO',
         'Capacitar al personal en protección de datos',
         'Designar Oficial de Protección de Datos si aplica',
-        'Implementar la notificación de incidentes en 48 horas',
+        'Implementar la notificación de incidentes de seguridad a la ANPD y a los titulares',
       ],
     };
   }

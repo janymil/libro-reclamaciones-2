@@ -31,3 +31,13 @@ final-run.txt
 *.key
 *.crt
 
+# Local exports of key material. The attachment key is copied to the password
+# manager from a scratch file like this one; keeping it in the workspace is
+# fine, committing it is not.
+*_KEY*.txt
+*_KEY*.json
+*SECRET*.txt
+*SECRET*.json
+*TOKEN*.txt
+*TOKEN*.json
+

@@ -237,8 +237,8 @@ export default function TerminosPage() {
           items={[
             `Aplicamos las medidas descritas en la ficha del encargado: acceso por roles, cifrado en tránsito (TLS), cifrado en reposo de la base de datos (AES-256) y de los adjuntos de evidencia (AES-256-GCM), registro de auditoría y respaldos.`,
             `La base de datos se aloja en ${HOSTING_LOCATIONS[0].provider}, región ${HOSTING_LOCATIONS[0].region} (${HOSTING_LOCATIONS[0].country}), y los archivos adjuntos en ${HOSTING_LOCATIONS[1].provider} (${HOSTING_LOCATIONS[1].country}). Es una transferencia transfronteriza que usted declara al inscribir su banco de datos en el RNPD.`,
-            'Los subencargados tratan los datos solo para alojarlos. Si incorporamos uno nuevo con acceso a datos personales, lo publicamos en la ficha del encargado antes de que empiece a tratarlos.',
-            'Le notificamos sin dilación indebida, y en todo caso dentro de las 48 horas desde que tengamos conocimiento, cualquier incidente de seguridad que afecte a sus datos, con la información disponible para que usted cumpla sus obligaciones ante la ANPD y los titulares.',
+            'Los proveedores de alojamiento tratan los datos solo para alojarlos.',
+            'Le notificamos sin dilación indebida cualquier incidente de seguridad que afecte a sus datos, con la información disponible para que usted cumpla sus obligaciones ante la ANPD y los titulares.',
             'Le asistimos para atender las solicitudes de acceso, rectificación, cancelación y oposición (ARCO) de los titulares, por los canales de la política de privacidad.',
           ]}
         />
@@ -253,10 +253,10 @@ export default function TerminosPage() {
         />
 
         <p className="mt-3">
-          <strong>Responsabilidad.</strong> Su empresa responde por la licitud del banco de datos, por
-          su contenido y por su inscripción en el Registro Nacional de Protección de Datos Personales
-          (RNPD). Nosotros respondemos por el tratamiento que realicemos fuera de sus instrucciones o
-          sin las medidas de seguridad comprometidas aquí.
+          <strong>Responsabilidad.</strong> Su empresa responde por la licitud del banco de datos y por
+          su inscripción en el Registro Nacional de Protección de Datos Personales (RNPD). Nosotros
+          respondemos por el tratamiento que realicemos fuera de sus instrucciones o sin las medidas de
+          seguridad de esta cláusula. Esta cláusula no altera lo que la ley exige a cada parte.
         </p>
         <p>
           El detalle técnico del encargo (rol, alojamiento, medidas y datos para la declaración ante la
