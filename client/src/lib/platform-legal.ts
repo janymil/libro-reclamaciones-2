@@ -72,7 +72,7 @@ export const LIBRO_DE_RECLAMACIONES_URL: string =
 export const LIBRO_DE_RECLAMACIONES_PENDING = LIBRO_DE_RECLAMACIONES_URL === '#';
 
 /** Fecha de la última revisión de los documentos legales (texto ya formateado). */
-export const LEGAL_LAST_UPDATED = '16 de octubre de 2026';
+export const LEGAL_LAST_UPDATED = '17 de octubre de 2026';
 
 export interface LegalDocumentLink {
   href: string;

@@ -3,6 +3,7 @@ import { LegalPage, LegalList, LegalSection } from '@/components/legal/legal-pag
 import { OPERATOR, LIBRO_DE_RECLAMACIONES_URL } from '@/lib/platform-legal';
 import { LEGAL_RESPONSE_TIME_BUSINESS_DAYS, CONTACT_INFO } from '@/lib/constants';
 import { PLANS, TRIAL_DAYS, RETENTION_MONTHS, LAUNCH_OFFER_ANNUAL_BASICO } from '@shared/plans';
+import { HOSTING_LOCATIONS } from '@shared/encargado';
 
 /**
  * Términos y condiciones del servicio: el contrato con la empresa que contrata
@@ -207,10 +208,71 @@ export default function TerminosPage() {
           <Link href="/privacidad" className="underline underline-offset-2 text-[#c02b0a]">
             política de privacidad
           </Link>
+          . El alcance de ese encargo, las medidas de seguridad y la devolución de los datos están
+          regulados en la cláusula 12.
+        </p>
+      </LegalSection>
+      <LegalSection title="12. Encargo de tratamiento de datos personales" testId="encargo-tratamiento">
+        <p>
+          Esta cláusula regula el tratamiento de los datos personales de los consumidores que reclaman
+          en el Libro de su empresa (el «encargo»). <strong>Su empresa es la responsable</strong> del
+          banco de datos: decide qué datos se recogen y con qué finalidad, y responde ante los
+          titulares y ante la Autoridad Nacional de Protección de Datos Personales (ANPD).{' '}
+          <strong>{OPERATOR.businessName}</strong> actúa únicamente como{' '}
+          <strong>encargado del tratamiento</strong>, por cuenta e instrucción de su empresa.
+        </p>
+
+        <p className="mt-3 font-medium">Alcance e instrucciones</p>
+        <LegalList
+          items={[
+            'Tratamos los datos solo para prestar el servicio: registrar, notificar, responder y conservar los reclamos, y exportarlos cuando usted o la autoridad competente lo requieran. Cualquier otra finalidad requiere su instrucción escrita.',
+            'No usamos esos datos para publicidad propia, perfilado comercial ni cesión a terceros, y no los mezclamos con los de otras empresas.',
+            'Las personas y los proveedores que intervienen en el tratamiento están sujetos a deber de confidencialidad.',
+            'Si necesitamos tratar los datos para otra finalidad, se lo pedimos por escrito y no lo hacemos hasta tener su autorización.',
+          ]}
+        />
+
+        <p className="mt-3 font-medium">Seguridad, alojamiento y subencargados</p>
+        <LegalList
+          items={[
+            `Aplicamos las medidas descritas en la ficha del encargado: acceso por roles, cifrado en tránsito (TLS), cifrado en reposo de la base de datos (AES-256) y de los adjuntos de evidencia (AES-256-GCM), registro de auditoría y respaldos.`,
+            `La base de datos se aloja en ${HOSTING_LOCATIONS[0].provider}, región ${HOSTING_LOCATIONS[0].region} (${HOSTING_LOCATIONS[0].country}), y los archivos adjuntos en ${HOSTING_LOCATIONS[1].provider} (${HOSTING_LOCATIONS[1].country}). Es una transferencia transfronteriza que usted declara al inscribir su banco de datos en el RNPD.`,
+            'Los subencargados tratan los datos solo para alojarlos. Si incorporamos uno nuevo con acceso a datos personales, lo publicamos en la ficha del encargado antes de que empiece a tratarlos.',
+            'Le notificamos sin dilación indebida, y en todo caso dentro de las 48 horas desde que tengamos conocimiento, cualquier incidente de seguridad que afecte a sus datos, con la información disponible para que usted cumpla sus obligaciones ante la ANPD y los titulares.',
+            'Le asistimos para atender las solicitudes de acceso, rectificación, cancelación y oposición (ARCO) de los titulares, por los canales de la política de privacidad.',
+          ]}
+        />
+
+        <p className="mt-3 font-medium">Devolución y conservación</p>
+        <LegalList
+          items={[
+            'Puede exportar sus datos y los adjuntos desde el panel en cualquier momento; si lo necesita en otro formato, lo pedimos por correo.',
+            `Al terminar el servicio se desactiva el acceso y los datos se conservan únicamente durante ${RETENTION_MONTHS} meses, el plazo que exige la normativa de consumo, junto con sus adjuntos. Vencido ese plazo se eliminan o se anonimizan.`,
+            'Si antes de ese plazo usted solicita la baja definitiva de la cuenta, se aplica el procedimiento de eliminación y se borran los datos y adjuntos, sin perjuicio de las conservaciones que la ley imponga.',
+          ]}
+        />
+
+        <p className="mt-3">
+          <strong>Responsabilidad.</strong> Su empresa responde por la licitud del banco de datos, por
+          su contenido y por su inscripción en el Registro Nacional de Protección de Datos Personales
+          (RNPD). Nosotros respondemos por el tratamiento que realicemos fuera de sus instrucciones o
+          sin las medidas de seguridad comprometidas aquí.
+        </p>
+        <p>
+          El detalle técnico del encargo (rol, alojamiento, medidas y datos para la declaración ante la
+          ANPD) está en la{' '}
+          <Link href="/encargado" className="underline underline-offset-2 text-[#c02b0a]">
+            ficha del encargado
+          </Link>
+          ; las finalidades y los canales ARCO, en la{' '}
+          <Link href="/privacidad" className="underline underline-offset-2 text-[#c02b0a]">
+            política de privacidad
+          </Link>
           .
         </p>
       </LegalSection>
-      <LegalSection title="12. Propiedad intelectual">
+
+      <LegalSection title="13. Propiedad intelectual">
         <p>
           La plataforma, su software, sus marcas y su documentación son de titularidad del prestador
           o de sus licenciantes. El contenido que usted carga (datos de la empresa, reclamos,
@@ -219,7 +281,7 @@ export default function TerminosPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="13. Responsabilidad">
+      <LegalSection title="14. Responsabilidad">
         <p>
           La plataforma se presta como herramienta de gestión. No garantizamos un resultado
           administrativo o legal determinado, ni que la autoridad considere conforme su Libro: eso
@@ -232,7 +294,7 @@ export default function TerminosPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="14. Suspensión y terminación">
+      <LegalSection title="15. Suspensión y terminación">
         <LegalList
           items={[
             'Podemos suspender el servicio por falta de pago, por un uso que ponga en riesgo la plataforma o por requerimiento de autoridad competente.',
@@ -242,7 +304,7 @@ export default function TerminosPage() {
         />
       </LegalSection>
 
-      <LegalSection title="15. Modificaciones">
+      <LegalSection title="16. Modificaciones">
         <p>
           Podemos actualizar estos términos para reflejar cambios del servicio o de la normativa.
           Publicamos la nueva versión en esta página con su fecha y avisamos al correo del titular
@@ -251,7 +313,7 @@ export default function TerminosPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="16. Ley aplicable y reclamos">
+      <LegalSection title="17. Ley aplicable y reclamos">
         <p>
           Estos términos se rigen por la legislación peruana. Para cualquier discrepancia, puede
           escribirnos primero a {OPERATOR.email}: respondemos en un plazo no mayor a{' '}
