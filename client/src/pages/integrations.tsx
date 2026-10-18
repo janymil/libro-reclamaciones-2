@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { Link } from "wouter";
 import AppLayout from "@/components/layout/app-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
@@ -20,11 +22,26 @@ import {
   useApiKeys,
   useCreateApiKey,
   useRevokeApiKey,
+  useRotateApiKey,
   useWebhooks,
   useCreateWebhook,
+  useUpdateWebhook,
+  useRotateWebhookSecret,
   useDeleteWebhook,
+  useWebhookDeliveries,
+  useRetryWebhookDelivery,
   useWidgetSnippet,
 } from "@/hooks/use-subscription";
+
+/**
+ * Events a webhook can subscribe to. Kept in sync with WEBHOOK_EVENTS in
+ * server/services/webhookService.ts.
+ */
+const WEBHOOK_EVENT_OPTIONS = [
+  { value: "complaint.created", label: "Nueva reclamación" },
+  { value: "complaint.updated", label: "Cambio de estado o prioridad" },
+  { value: "complaint.responded", label: "Respuesta enviada" },
+];
 
 /**
  * Integraciones: how the business puts its Libro where its customers are.
@@ -44,6 +61,10 @@ export default function IntegrationsPage() {
   const [webhookUrl, setWebhookUrl] = useState("");
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
+  const [webhookEvents, setWebhookEvents] = useState<string[]>(
+    WEBHOOK_EVENT_OPTIONS.map((option) => option.value),
+  );
+  const [includeConsumerData, setIncludeConsumerData] = useState(true);
 
   const { data: config } = useQuery<LibroConfiguration | null>({
     queryKey: ["/api/libro-configuration"],
@@ -78,9 +99,14 @@ export default function IntegrationsPage() {
   const apiKeys = useApiKeys();
   const createApiKey = useCreateApiKey();
   const revokeApiKey = useRevokeApiKey();
+  const rotateApiKey = useRotateApiKey();
   const webhooks = useWebhooks();
   const createWebhook = useCreateWebhook();
+  const updateWebhook = useUpdateWebhook();
+  const rotateWebhookSecret = useRotateWebhookSecret();
   const deleteWebhook = useDeleteWebhook();
+  const deliveries = useWebhookDeliveries();
+  const retryDelivery = useRetryWebhookDelivery();
   const widget = useWidgetSnippet();
 
   return (
@@ -163,11 +189,18 @@ export default function IntegrationsPage() {
           <CardHeader>
             <CardTitle>Claves de API</CardTitle>
             <CardDescription>
-              Para crear y consultar reclamaciones desde su CRM/ERP vía POST/GET /api/v1/complaints
+              Cree, consulte, responda y adjunte evidencias desde su CRM/ERP con la API REST
               (plan Empresarial).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="flex justify-end">
+              <Link href="/integraciones/api">
+                <Button variant="outline" size="sm" data-testid="link-api-docs">
+                  Ver documentación de la API
+                </Button>
+              </Link>
+            </div>
             <div className="flex gap-2">
               <Input
                 placeholder="Nombre de la clave (ej.: Mi CRM)"
@@ -216,14 +249,36 @@ export default function IntegrationsPage() {
                     )}
                   </span>
                   {!key.revokedAt && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => revokeApiKey.mutate(key.id)}
-                      aria-label={`Revocar ${key.name}`}
-                    >
-                      <span className="material-icons text-lg">block</span>
-                    </Button>
+                    <span className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={async () => {
+                          try {
+                            const rotated = await rotateApiKey.mutateAsync(key.id);
+                            setCreatedKey(rotated.fullKey ?? null);
+                            toast({
+                              title: "Clave rotada",
+                              description: "La clave anterior dejó de funcionar. Copie la nueva ahora.",
+                            });
+                          } catch (error) {
+                            upgradeToast(error, 'No se pudo rotar la clave');
+                          }
+                        }}
+                        aria-label={`Rotar ${key.name}`}
+                        data-testid={`button-rotate-api-key-${key.id}`}
+                      >
+                        <span className="material-icons text-lg">autorenew</span>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => revokeApiKey.mutate(key.id)}
+                        aria-label={`Revocar ${key.name}`}
+                      >
+                        <span className="material-icons text-lg">block</span>
+                      </Button>
+                    </span>
                   )}
                 </li>
               ))}
@@ -239,17 +294,51 @@ export default function IntegrationsPage() {
         <PlanGate
           feature="webhooks"
           title="Webhooks a su sistema"
-          description="Le avisamos a su sistema cada nueva reclamación, con firma HMAC-SHA256."
+          description="Le avisamos a su sistema cada evento, con firma HMAC-SHA256 y reintentos automáticos."
         >
         <Card>
           <CardHeader>
             <CardTitle>Webhooks</CardTitle>
             <CardDescription>
-              Le notificamos a su sistema cada nueva reclamación con una firma HMAC-SHA256 en la
-              cabecera X-LibroDigital-Signature (plan Empresarial).
+              Le notificamos a su sistema cada evento con una firma HMAC-SHA256 en la cabecera
+              X-LibroDigital-Signature. Las entregas fallidas se reintentan y quedan visibles abajo
+              (plan Empresarial).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-gray-700">Eventos a notificar</p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {WEBHOOK_EVENT_OPTIONS.map((option) => (
+                  <label key={option.value} className="flex items-center gap-2 text-sm text-gray-700">
+                    <Checkbox
+                      checked={webhookEvents.includes(option.value)}
+                      onCheckedChange={(checked) =>
+                        setWebhookEvents((previous) =>
+                          checked === true
+                            ? [...previous, option.value]
+                            : previous.filter((event) => event !== option.value),
+                        )
+                      }
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <label className="flex items-start gap-2 text-sm text-gray-700">
+              <Checkbox
+                checked={includeConsumerData}
+                onCheckedChange={(checked) => setIncludeConsumerData(checked === true)}
+              />
+              <span>
+                Incluir los datos del consumidor en el webhook (nombre, documento, correo, teléfono).
+                Si lo desactiva, el evento solo lleva los identificadores y su sistema debe consultar
+                <code className="mx-1 text-xs">GET /api/v1/complaints/:id</code>.
+              </span>
+            </label>
+
             <div className="flex gap-2">
               <Input
                 placeholder="https://su-sistema.pe/webhooks/reclamos"
@@ -259,10 +348,14 @@ export default function IntegrationsPage() {
               />
               <Button
                 className="btn-primary"
-                disabled={!webhookUrl.trim() || createWebhook.isPending}
+                disabled={!webhookUrl.trim() || webhookEvents.length === 0 || createWebhook.isPending}
                 onClick={async () => {
                   try {
-                    const created = await createWebhook.mutateAsync({ url: webhookUrl.trim() });
+                    const created = await createWebhook.mutateAsync({
+                      url: webhookUrl.trim(),
+                      events: webhookEvents,
+                      includeConsumerData,
+                    });
                     setCreatedSecret(created.secret ?? null);
                     setWebhookUrl("");
                     toast({ title: "Webhook creado", description: "Guarde el secreto de firma mostrado abajo." });
@@ -287,22 +380,145 @@ export default function IntegrationsPage() {
 
             <ul className="space-y-2">
               {(webhooks.data ?? []).map((hook) => (
-                <li key={hook.id} className="flex items-center justify-between border rounded-lg px-3 py-2 text-sm">
-                  <span className="truncate">{hook.url}</span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => deleteWebhook.mutate(hook.id)}
-                    aria-label="Eliminar webhook"
-                  >
-                    <span className="material-icons text-lg">delete</span>
-                  </Button>
+                <li key={hook.id} className="border rounded-lg px-3 py-2 text-sm space-y-2" data-testid={`webhook-row-${hook.id}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-medium">{hook.url}</span>
+                    <span className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={async () => {
+                          try {
+                            const rotated = await rotateWebhookSecret.mutateAsync(hook.id);
+                            setCreatedSecret(rotated.secret);
+                            toast({
+                              title: "Secreto rotado",
+                              description: "El secreto anterior dejó de validar. Copie el nuevo ahora.",
+                            });
+                          } catch (error) {
+                            upgradeToast(error, 'No se pudo rotar el secreto');
+                          }
+                        }}
+                        aria-label="Rotar secreto de firma"
+                        data-testid={`button-rotate-webhook-${hook.id}`}
+                      >
+                        <span className="material-icons text-lg">key</span>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => deleteWebhook.mutate(hook.id)}
+                        aria-label="Eliminar webhook"
+                      >
+                        <span className="material-icons text-lg">delete</span>
+                      </Button>
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                    {(hook.events ?? ["complaint.created"]).map((event) => (
+                      <Badge key={event} className="bg-gray-100 text-gray-700">
+                        {WEBHOOK_EVENT_OPTIONS.find((option) => option.value === event)?.label ?? event}
+                      </Badge>
+                    ))}
+                    <label className="flex items-center gap-1">
+                      <Checkbox
+                        checked={hook.includeConsumerData !== false}
+                        onCheckedChange={async (checked) => {
+                          try {
+                            await updateWebhook.mutateAsync({
+                              id: hook.id,
+                              includeConsumerData: checked === true,
+                            });
+                            toast({
+                              title: "Preferencia actualizada",
+                              description: checked === true
+                                ? "Los webhooks incluirán los datos del consumidor."
+                                : "Los webhooks ya no incluirán datos del consumidor.",
+                            });
+                          } catch (error) {
+                            upgradeToast(error, 'No se pudo actualizar el webhook');
+                          }
+                        }}
+                      />
+                      Datos del consumidor
+                    </label>
+                  </div>
                 </li>
               ))}
               {webhooks.data?.length === 0 && (
                 <li className="text-sm text-gray-500">Aún no hay webhooks configurados.</li>
               )}
             </ul>
+
+            <div className="border-t pt-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-gray-700">
+                  Últimas entregas (5 intentos automáticos)
+                </p>
+                <Button variant="ghost" size="sm" onClick={() => deliveries.refetch()}>
+                  Actualizar
+                </Button>
+              </div>
+
+              {deliveries.data?.length ? (
+                <ul className="space-y-1">
+                  {deliveries.data.map((delivery) => (
+                    <li
+                      key={delivery.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded border px-2 py-1.5 text-xs"
+                    >
+                      <span className="flex flex-wrap items-center gap-2">
+                        <Badge
+                          className={
+                            delivery.status === "delivered"
+                              ? "bg-green-100 text-green-800"
+                              : delivery.status === "failed"
+                                ? "bg-yellow-100 text-yellow-800"
+                                : delivery.status === "dead"
+                                  ? "bg-red-100 text-red-800"
+                                  : "bg-gray-100 text-gray-700"
+                          }
+                        >
+                          {delivery.status === "delivered"
+                            ? "Entregado"
+                            : delivery.status === "failed"
+                              ? "Reintentando"
+                              : delivery.status === "dead"
+                                ? "Fallido"
+                                : "Pendiente"}
+                        </Badge>
+                        <span className="font-medium">{delivery.event}</span>
+                        <span className="text-gray-500">
+                          intento {delivery.attempts}
+                          {delivery.lastStatusCode ? ` · HTTP ${delivery.lastStatusCode}` : ""}
+                          {` · ${new Date(delivery.createdAt).toLocaleString("es-PE")}`}
+                        </span>
+                        <span className="max-w-[220px] truncate text-gray-500" title={delivery.url}>
+                          {delivery.url}
+                        </span>
+                        {delivery.lastError && (
+                          <span className="max-w-[220px] truncate text-red-700" title={delivery.lastError}>
+                            {delivery.lastError}
+                          </span>
+                        )}
+                      </span>
+                      {(delivery.status === "failed" || delivery.status === "dead") && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={retryDelivery.isPending}
+                          onClick={() => retryDelivery.mutate(delivery.id)}
+                        >
+                          Reintentar
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-gray-500">Todavía no hay entregas registradas.</p>
+              )}
+            </div>
           </CardContent>
         </Card>
         </PlanGate>

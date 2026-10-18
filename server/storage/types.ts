@@ -32,6 +32,7 @@ import type {
   ApiKeyPublic,
   Webhook,
   InsertWebhook,
+  WebhookDelivery,
   Payment,
   InsertPayment,
   Subscription,
@@ -181,6 +182,19 @@ export interface IStorage {
   getComplaint(id: string): Promise<Complaint | undefined>;
   findComplaintByCorrelative(businessId: string, correlativeNumber: string, documentNumber: string): Promise<Complaint | undefined>;
   getComplaintsByBusiness(businessId: string, filters?: ComplaintFilters): Promise<Complaint[]>;
+  /**
+   * SQL-level page of complaints plus the total for the filtered set.
+   *
+   * The public API used to load every complaint of the tenant and slice the
+   * array in memory, which stops scaling at a few thousand records. This keeps
+   * the LIMIT/OFFSET in PostgreSQL.
+   */
+  getComplaintsPage(
+    businessId: string,
+    filters: ComplaintFilters | undefined,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: Complaint[]; total: number }>;
   getComplaintsByEstablishment(establishmentId: string): Promise<Complaint[]>;
   /** Tenant-scoped uniqueness probe for the legal correlative number. */
   complaintCorrelativeExists(businessId: string, correlativeNumber: string): Promise<boolean>;
@@ -218,6 +232,12 @@ export interface IStorage {
   getApiKeyByKeyHash(keyHash: string): Promise<ApiKeyPublic & { businessId: string } | undefined>;
   markApiKeyUsed(id: string): Promise<void>;
   revokeApiKey(id: string, businessId: string): Promise<ApiKeyPublic | undefined>;
+  /** Replaces the secret of an existing key in place (old key stops working). */
+  rotateApiKey(
+    id: string,
+    businessId: string,
+    data: { keyPrefix: string; keyHash: string },
+  ): Promise<ApiKeyPublic | undefined>;
 
   // AI usage meter + draft feedback (append-only)
   recordAIUsage(data: InsertAIUsage): Promise<AIUsage>;
@@ -227,10 +247,25 @@ export interface IStorage {
 
   // Webhooks (Phase 3.12)
   createWebhook(data: InsertWebhook): Promise<Webhook>;
+  getWebhook(id: string): Promise<Webhook | undefined>;
   getWebhooksByBusiness(businessId: string): Promise<Webhook[]>;
   getActiveWebhooks(businessId: string, event: string): Promise<Webhook[]>;
   updateWebhook(id: string, businessId: string, updates: Partial<InsertWebhook>): Promise<Webhook | undefined>;
   deleteWebhook(id: string, businessId: string): Promise<boolean>;
+
+  // Webhook delivery queue / log (retries + dead-letter)
+  createWebhookDeliveries(deliveries: Array<Pick<WebhookDelivery, 'businessId' | 'webhookId' | 'complaintId' | 'event'>>): Promise<WebhookDelivery[]>;
+  releaseStaleWebhookDeliveries(staleBefore: Date): Promise<number>;
+  claimDueWebhookDeliveries(limit: number, now: Date): Promise<WebhookDelivery[]>;
+  markWebhookDelivered(id: string): Promise<void>;
+  markWebhookFailed(
+    id: string,
+    data: { attempts: number; nextAttemptAt: Date; lastStatusCode: number | null; lastError: string },
+  ): Promise<void>;
+  markWebhookDead(id: string, data: { attempts: number; lastStatusCode: number | null; lastError: string }): Promise<void>;
+  getWebhookDeliveriesByBusiness(businessId: string, limit: number): Promise<Array<WebhookDelivery & { url: string }>>;
+  getWebhookDelivery(id: string): Promise<WebhookDelivery | undefined>;
+  retryWebhookDelivery(id: string, businessId: string): Promise<WebhookDelivery | undefined>;
 
   // Payments (Phase 2.7)
   createPayment(data: InsertPayment): Promise<Payment>;

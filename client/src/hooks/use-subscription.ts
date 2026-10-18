@@ -180,10 +180,26 @@ export function useRevokeApiKey() {
   });
 }
 
+/** Issues a new secret for an existing key; the old one stops working at once. */
+export function useRotateApiKey() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await apiRequest('POST', `/api/api-keys/${id}/rotate`, {});
+      return response.json() as Promise<ApiKeyInfo>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/api-keys'] });
+    },
+  });
+}
+
 export interface WebhookInfo {
   id: string;
   url: string;
   events: string[];
+  includeConsumerData: boolean;
   isActive: boolean;
   createdAt: string;
   secret?: string; // only present right after creation
@@ -206,8 +222,16 @@ export function useCreateWebhook() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ url, events }: { url: string; events?: string[] }) => {
-      const response = await apiRequest('POST', '/api/webhooks', { url, events });
+    mutationFn: async ({
+      url,
+      events,
+      includeConsumerData,
+    }: {
+      url: string;
+      events?: string[];
+      includeConsumerData?: boolean;
+    }) => {
+      const response = await apiRequest('POST', '/api/webhooks', { url, events, includeConsumerData });
       return response.json() as Promise<WebhookInfo>;
     },
     onSuccess: () => {
@@ -225,6 +249,87 @@ export function useDeleteWebhook() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/webhooks'] });
+    },
+  });
+}
+
+export interface WebhookDeliveryInfo {
+  id: string;
+  webhookId: string;
+  complaintId: string;
+  event: string;
+  status: 'pending' | 'sending' | 'delivered' | 'failed' | 'dead';
+  attempts: number;
+  nextAttemptAt: string;
+  lastStatusCode: number | null;
+  lastError: string | null;
+  createdAt: string;
+  deliveredAt: string | null;
+  url: string;
+}
+
+export function useUpdateWebhook() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...data
+    }: {
+      id: string;
+      url?: string;
+      events?: string[];
+      includeConsumerData?: boolean;
+      isActive?: boolean;
+    }) => {
+      const response = await apiRequest('PATCH', `/api/webhooks/${id}`, data);
+      return response.json() as Promise<WebhookInfo>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/webhooks'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/webhooks/deliveries'] });
+    },
+  });
+}
+
+/** Issues a new signing secret; the previous one stops validating at once. */
+export function useRotateWebhookSecret() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await apiRequest('POST', `/api/webhooks/${id}/rotate-secret`, {});
+      return response.json() as Promise<{ id: string; secret: string }>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/webhooks'] });
+    },
+  });
+}
+
+export function useWebhookDeliveries(limit = 25) {
+  return useQuery({
+    queryKey: ['/api/webhooks/deliveries', limit],
+    queryFn: async () => {
+      const response = await fetch(`/api/webhooks/deliveries?limit=${limit}`, { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error('Failed to fetch webhook deliveries');
+      }
+      return response.json() as Promise<WebhookDeliveryInfo[]>;
+    },
+  });
+}
+
+export function useRetryWebhookDelivery() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await apiRequest('POST', `/api/webhooks/deliveries/${id}/retry`, {});
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/webhooks/deliveries'] });
     },
   });
 }

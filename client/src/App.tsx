@@ -47,6 +47,7 @@ import { ADMIN_LOGIN_PATH, ADMIN_PATH } from "@/lib/admin-path";
 import SubscribePage from "@/pages/subscribe";
 import CustomizationPage from "@/pages/customization";
 import IntegrationsPage from "@/pages/integrations";
+import ApiDocsPage from "@/pages/api-docs";
 import StatusPage from "@/pages/status";
 import AccessibilityPage from "@/pages/accessibility";
 import AuthPage from "@/pages/auth-page";
@@ -114,6 +115,8 @@ function Router() {
       <Route path="/subscribe"><Redirect to="/suscribir" /></Route>
       <Route path="/personalizacion" component={CustomizationPage} />
       <Route path="/integraciones" component={IntegrationsPage} />
+      <Route path="/integraciones/api" component={ApiDocsPage} />
+      <Route path="/integrations/api"><Redirect to="/integraciones/api" /></Route>
 
       {/* Páginas públicas de transparencia (Phase 3.13) */}
       <Route path="/estado" component={StatusPage} />

@@ -531,7 +531,18 @@ npm run db:apply -- migrations/manual/0008_trial_lifecycle_backfill.sql   # tria
 npm run db:apply -- migrations/manual/0009_normalize_plan_ids.sql         # legacy 'basic' -> 'gratis'
 npm run db:apply -- migrations/manual/0010_rebrand_domain_emails.sql      # @librovirtual.pe -> @librodigital.pe
 npm run db:apply -- migrations/manual/0011_provision_missing_books.sql    # Libro de Reclamaciones of pre-existing establishments
+npm run db:apply -- migrations/0016_integrations_hardening.sql            # webhooks.include_consumer_data + webhook_deliveries (retry/dead-letter)
 ```
+
+`0016_integrations_hardening.sql` backs the current integration behaviour: it adds
+`webhooks.include_consumer_data` (a receiver may opt out of the consumer PII block) and the
+`webhook_deliveries` retry/dead-letter queue. The queue stores only ids; the payload is rebuilt
+at delivery time. A minute worker retries failed deliveries at 1 min, 5 min, 30 min and 2 h (5
+attempts total), then leaves them `dead` until an administrator presses **Reintentar** in
+Integraciones. Applying the migration is safe before or after the release (the old code ignores
+the new column/table); the new code needs it to create webhooks and record deliveries. The
+customer-facing contract is at `/api/v1/openapi.json` and the rendered guide at
+`/integraciones/api`.
 
 `0008_platform_payment_settings.sql` is the console's **Configuración** tab (not to be
 confused with `migrations/manual/0008_trial_lifecycle_backfill.sql`): the singleton

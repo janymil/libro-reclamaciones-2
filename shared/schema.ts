@@ -505,11 +505,51 @@ export const webhooks = pgTable("webhooks", {
   url: varchar("url", { length: 500 }).notNull(),
   secret: varchar("secret", { length: 100 }).notNull(), // HMAC-SHA256 signing secret
   events: jsonb("events"), // Array of event names, e.g. ["complaint.created"]
+  /**
+   * Whether deliveries include the consumer block (name, document, email,
+   * phone). Defaults to true so existing receivers keep their payload, but a
+   * customer may opt out and fetch the detail through the REST API instead
+   * (Ley 29733 data-minimization principle).
+   */
+  includeConsumerData: boolean("include_consumer_data").notNull().default(true),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
   index("idx_webhooks_business_id").on(table.businessId),
+]);
+
+/**
+ * Outgoing webhook delivery log / retry queue.
+ *
+ * The row is a pointer, not a copy of the event: it stores only the webhook,
+ * the event name and the complaint id. The payload (which contains consumer
+ * PII) is rebuilt from the complaint when the delivery is attempted, so a
+ * failed queue never becomes a second PII database, and a retry sends the
+ * current state of the record.
+ *
+ * Status: pending -> sending -> delivered | failed -> (retry) | dead.
+ * `dead` is the dead-letter state after MAX_ATTEMPTS; an operator can requeue
+ * it explicitly from the integrations screen.
+ */
+export const webhookDeliveries = pgTable("webhook_deliveries", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessId: uuid("business_id").notNull(),
+  webhookId: uuid("webhook_id").notNull(),
+  complaintId: uuid("complaint_id").notNull(),
+  event: varchar("event", { length: 50 }).notNull(),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at").defaultNow().notNull(),
+  lastStatusCode: integer("last_status_code"),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  deliveredAt: timestamp("delivered_at"),
+}, (table) => [
+  index("idx_webhook_deliveries_business").on(table.businessId),
+  index("idx_webhook_deliveries_webhook").on(table.webhookId),
+  index("idx_webhook_deliveries_due").on(table.status, table.nextAttemptAt),
 ]);
 
 // Payment attempts against the SaaS subscription (Phase 2.7).
@@ -1448,6 +1488,9 @@ export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
 
 export type Webhook = typeof webhooks.$inferSelect;
 export type InsertWebhook = z.infer<typeof insertWebhookSchema>;
+
+export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
+export type InsertWebhookDelivery = typeof webhookDeliveries.$inferInsert;
 
 export type Payment = typeof payments.$inferSelect;
 export type InsertPayment = z.infer<typeof insertPaymentSchema>;

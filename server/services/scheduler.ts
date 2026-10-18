@@ -1,5 +1,6 @@
 import { runRetentionSweep } from "./retentionService";
 import { runSlaMonitoringSweep } from "./slaMonitoringService";
+import { startWebhookWorker } from "./webhookService";
 
 /**
  * Background jobs (Phases 1.2 and 2.9).
@@ -73,5 +74,8 @@ export function startScheduler(): void {
   }, initialDelayMs + 5_000);
   slaTimer.unref?.();
 
-  console.log("[scheduler] background jobs armed: retention (daily), SLA monitoring (hourly)");
+  // Webhook retries / dead-letter backstop (every minute).
+  startWebhookWorker();
+
+  console.log("[scheduler] background jobs armed: retention (daily), SLA monitoring (hourly), webhooks (every minute)");
 }

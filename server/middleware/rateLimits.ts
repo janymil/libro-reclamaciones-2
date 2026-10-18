@@ -162,10 +162,35 @@ export const rucLookupLimiter = rateLimit({
 });
 
 // Public REST API (Phase 3.12): keyed requests from CRM/ERP systems.
-export const apiV1Limiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 60, // Maximum 60 API requests per minute per IP
-  message: { message: "Límite de la API alcanzado. Intenta en un minuto." },
+//
+// Two layers:
+//   * a generous per-IP ceiling that also protects the 401 path (invalid keys
+//     never reach the per-key limiter), and
+//   * a per-key ceiling applied AFTER authentication, so several CRM
+//     integrations behind the same NAT no longer share one bucket, and a noisy
+//     client cannot starve its neighbours.
+export const apiV1IpLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: RELAXED_LIMITS ? 6000 : 600,
+  message: { error: 'rate_limited', message: 'Límite de la API alcanzado. Intenta en un minuto.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const apiV1ReadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: RELAXED_LIMITS ? 3000 : 240,
+  keyGenerator: (req: any) => `api-key:${req.apiKey?.id ?? 'anonymous'}`,
+  message: { error: 'rate_limited', message: 'Límite de lectura de la API alcanzado. Intenta en un minuto.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const apiV1WriteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: RELAXED_LIMITS ? 600 : 60,
+  keyGenerator: (req: any) => `api-key:${req.apiKey?.id ?? 'anonymous'}`,
+  message: { error: 'rate_limited', message: 'Límite de escritura de la API alcanzado. Intenta en un minuto.' },
   standardHeaders: true,
   legacyHeaders: false,
 });

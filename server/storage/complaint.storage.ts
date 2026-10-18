@@ -15,6 +15,37 @@ import type {
 } from "./types";
 import { summarizeSla, averageResponseBusinessDays } from "../services/complaintSlaService";
 
+/** Shared WHERE conditions for complaint listings (filters are tenant-scoped). */
+function complaintConditions(businessId: string, filters?: ComplaintFilters) {
+  const conditions = [eq(complaints.businessId, businessId)];
+
+  if (filters) {
+    if (filters.status) {
+      conditions.push(eq(complaints.status, filters.status));
+    }
+    if (filters.type) {
+      conditions.push(eq(complaints.complaintType, filters.type));
+    }
+    if (filters.priority) {
+      conditions.push(eq(complaints.priority, filters.priority));
+    }
+    if (filters.assignedToUserId) {
+      conditions.push(eq(complaints.assignedToUserId, filters.assignedToUserId));
+    }
+    if (filters.establishmentId) {
+      conditions.push(eq(complaints.establishmentId, filters.establishmentId));
+    }
+    if (filters.dateFrom) {
+      conditions.push(gte(complaints.submissionDate, filters.dateFrom));
+    }
+    if (filters.dateTo) {
+      conditions.push(lte(complaints.submissionDate, filters.dateTo));
+    }
+  }
+
+  return conditions;
+}
+
 /** Data access for the "complaint" aggregate. */
 export const complaintStorage = {
   async getComplaint(id: string): Promise<Complaint | undefined> {
@@ -45,35 +76,34 @@ export const complaintStorage = {
   },
 
   async getComplaintsByBusiness(businessId: string, filters?: ComplaintFilters): Promise<Complaint[]> {
-    const conditions = [eq(complaints.businessId, businessId)];
-
-    if (filters) {
-      if (filters.status) {
-        conditions.push(eq(complaints.status, filters.status));
-      }
-      if (filters.type) {
-        conditions.push(eq(complaints.complaintType, filters.type));
-      }
-      if (filters.priority) {
-        conditions.push(eq(complaints.priority, filters.priority));
-      }
-      if (filters.assignedToUserId) {
-        conditions.push(eq(complaints.assignedToUserId, filters.assignedToUserId));
-      }
-      if (filters.establishmentId) {
-        conditions.push(eq(complaints.establishmentId, filters.establishmentId));
-      }
-      if (filters.dateFrom) {
-        conditions.push(gte(complaints.submissionDate, filters.dateFrom));
-      }
-      if (filters.dateTo) {
-        conditions.push(lte(complaints.submissionDate, filters.dateTo));
-      }
-    }
-
     return await db.select().from(complaints)
-      .where(and(...conditions))
+      .where(and(...complaintConditions(businessId, filters)))
       .orderBy(desc(complaints.createdAt));
+  },
+
+  /**
+   * SQL-level page for the public REST API. `LIMIT`/`OFFSET` stay in the
+   * database, and `total` is the size of the full filtered set so the caller
+   * can paginate without guessing.
+   */
+  async getComplaintsPage(
+    businessId: string,
+    filters: ComplaintFilters | undefined,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: Complaint[]; total: number }> {
+    const where = and(...complaintConditions(businessId, filters));
+
+    const [items, totalRow] = await Promise.all([
+      db.select().from(complaints)
+        .where(where)
+        .orderBy(desc(complaints.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ total: count() }).from(complaints).where(where),
+    ]);
+
+    return { items, total: Number(totalRow[0]?.total ?? 0) };
   },
 
   async getComplaintsByEstablishment(establishmentId: string): Promise<Complaint[]> {

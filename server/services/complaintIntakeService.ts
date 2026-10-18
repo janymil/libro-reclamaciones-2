@@ -10,7 +10,7 @@ import { emailIdentity } from "./emailIdentity";
 import { readLogoBuffer } from "./logoService";
 import { pdfService } from "./pdfService";
 import { routingService } from "./routingService";
-import { complaintCreatedPayload, dispatchWebhookEvent } from "./webhookService";
+import { enqueueWebhookEvent } from "./webhookService";
 
 /**
  * Shared complaint intake (Phases 2.6, 2.8 and 3.12).
@@ -237,8 +237,8 @@ export async function intakeComplaint(data: ComplaintSubmission): Promise<Intake
     relatedEntityId: complaint.id,
   });
 
-  // Webhooks (Corporativo) - fire and forget
-  void dispatchWebhookEvent(business.id, 'complaint.created', complaintCreatedPayload(complaint)).catch(() => {});
+  // Webhooks (Empresarial) - queued with retries; failure never blocks intake
+  void enqueueWebhookEvent(business.id, 'complaint.created', complaint).catch(() => {});
 
   return { complaint, correlativeNumber };
 }
