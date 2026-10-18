@@ -2,9 +2,11 @@ import type { Express } from "express";
 import { z } from "zod";
 
 import { buildConsumerDraftContext } from "@shared/consumer-draft-context";
+import type { Complaint } from "@shared/schema";
 import { PERU_TIME_ZONE, startOfPeruMonth } from "@shared/peru-time";
 import { aiService, getAIHealth, getAIStatus } from "../services/aiService";
 import type { ResponseLength, ResponseTone } from "../services/aiService";
+import { renderComplaintAIContext } from "../services/complaintAIContext";
 import { rankSlaRisk } from "../services/slaPredictionService";
 import { hasFeature } from "../services/subscriptionService";
 import { requireAuth } from "../middleware/requireAuth";
@@ -29,6 +31,27 @@ const AI_DRAFTING_REQUIRED = {
 };
 
 /**
+ * Loads the complaint referenced by `complaintId` from the DATABASE, scoped to
+ * the caller's business, instead of trusting complaint fields sent by the
+ * browser. Returns:
+ *   - null      -> the request carried no `complaintId` (manual text mode)
+ *   - undefined -> the id does not exist or belongs to another tenant
+ */
+async function loadComplaintForAI(req: any): Promise<Complaint | null | undefined> {
+  const id = typeof req.body?.complaintId === "string" ? req.body.complaintId.trim() : "";
+  if (!id) {
+    return null;
+  }
+
+  const complaint = await storage.getComplaint(id);
+  if (!complaint || complaint.businessId !== req.user.businessId) {
+    return undefined;
+  }
+
+  return complaint;
+}
+
+/**
  * AI assisted complaint classification, response drafting and trend analysis.
  * Every response includes a `source` field ("ai" | "fallback") so the client
  * can tell the user when local heuristics were used instead of a real model.
@@ -42,13 +65,22 @@ export function registerAiRoutes(app: Express): void {
 
   app.post('/api/ai/classify', requireAuth, aiLimiter, async (req: any, res) => {
     try {
-      const { text } = req.body;
+      const complaint = await loadComplaintForAI(req);
+      if (complaint === undefined) {
+        return res.status(404).json({ message: "Reclamación no encontrada" });
+      }
 
-      if (!text || typeof text !== 'string') {
+      const typedText = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+      // The record metadata comes from the database, never from the browser.
+      const input = complaint
+        ? `${renderComplaintAIContext(complaint)}\n\n[Texto a analizar]\n${typedText || complaint.complaintDetail}`
+        : typedText;
+
+      if (!input) {
         return res.status(400).json({ message: "Text is required" });
       }
 
-      const classification = await aiService.classifyComplaint(text, {
+      const classification = await aiService.classifyComplaint(input, {
         businessId: req.user.businessId,
         userId: req.user.id,
         feature: 'classification',
@@ -66,9 +98,23 @@ export function registerAiRoutes(app: Express): void {
         return res.status(402).json(AI_DRAFTING_REQUIRED);
       }
 
-      const { complaintText, complaintType } = req.body;
+      const complaint = await loadComplaintForAI(req);
+      if (complaint === undefined) {
+        return res.status(404).json({ message: "Reclamación no encontrada" });
+      }
 
-      if (!complaintText || !complaintType) {
+      const { complaintText, complaintType } = req.body;
+      // The stored record wins over the browser's copy of the type.
+      const type = complaint
+        ? (complaint.complaintType === 'queja' ? 'queja' : 'reclamo')
+        : complaintType;
+      const input = complaint
+        ? `${renderComplaintAIContext(complaint)}\n\n[Detalle de la reclamación]\n${
+            (typeof complaintText === 'string' && complaintText.trim()) || complaint.complaintDetail
+          }`
+        : complaintText;
+
+      if (!input || !type) {
         return res.status(400).json({ message: "Complaint text and type are required" });
       }
 
@@ -83,8 +129,8 @@ export function registerAiRoutes(app: Express): void {
         : undefined;
 
       const { suggestion, source } = await aiService.suggestResponse(
-        complaintText,
-        complaintType,
+        input,
+        type,
         brandContext,
         { tone, length },
         { businessId: req.user.businessId, userId: req.user.id, feature: 'draft' },

@@ -13,16 +13,22 @@ interface ComplaintFilters {
   dateTo?: string;
 }
 
+/** A complaint plus the name of its establishment (dashboard lists). */
+export type DashboardComplaint = Complaint & { establishmentName?: string | null };
+
 interface DashboardMetrics {
   activeComplaints: number;
   urgentComplaints: number;
   overdueComplaints: number;
-  slaCompliance: number;
+  /** Complaints received by the business; 0 means the rate metrics have no data. */
+  totalComplaints: number;
+  /** null = no complaints yet (never rendered as 0%). */
+  slaCompliance: number | null;
   resolvedThisMonth: number;
   resolutionRate: number;
   averageResponseTime: number;
-  recentComplaints: Complaint[];
-  urgentAlerts: Complaint[];
+  recentComplaints: DashboardComplaint[];
+  urgentAlerts: DashboardComplaint[];
 }
 
 export function useComplaints(filters?: ComplaintFilters) {
@@ -304,10 +310,19 @@ export function useAIPublicExtract() {
   });
 }
 
+export interface AIClassificationInput {
+  text: string;
+  /** Stored complaint to analyse; the server loads it and adds its metadata. */
+  complaintId?: string | null;
+}
+
 export function useAIClassification() {
   return useMutation({
-    mutationFn: async (text: string) => {
-      const response = await apiRequest('POST', '/api/ai/classify', { text });
+    mutationFn: async ({ text, complaintId }: AIClassificationInput) => {
+      const response = await apiRequest('POST', '/api/ai/classify', {
+        text,
+        complaintId: complaintId ?? undefined,
+      });
       return response.json();
     },
   });
@@ -319,16 +334,19 @@ export type ResponseLength = 'breve' | 'estandar' | 'detallada';
 export interface AISuggestResponseInput {
   complaintText: string;
   complaintType: string;
+  /** Stored complaint to draft for; the server loads it and adds its metadata. */
+  complaintId?: string | null;
   tone?: ResponseTone | null;
   length?: ResponseLength | null;
 }
 
 export function useAISuggestResponse() {
   return useMutation({
-    mutationFn: async ({ complaintText, complaintType, tone, length }: AISuggestResponseInput) => {
+    mutationFn: async ({ complaintText, complaintType, complaintId, tone, length }: AISuggestResponseInput) => {
       const response = await apiRequest('POST', '/api/ai/suggest-response', {
         complaintText,
         complaintType,
+        complaintId: complaintId ?? undefined,
         tone: tone ?? undefined,
         length: length ?? undefined,
       });

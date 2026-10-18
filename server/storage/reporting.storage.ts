@@ -3,16 +3,15 @@ import { eq, and, desc, asc, count, gte, lte, lt, or } from "drizzle-orm";
 import {
   businesses,
   complaints,
+  establishments,
 } from "@shared/schema";
-import type { ComplianceTracking } from "@shared/schema";
+import type { Complaint } from "@shared/schema";
 import type {
   DashboardMetrics,
-  ComplianceReport,
   ReportStats,
   MonthlyReport,
 } from "./types";
 import { complaintStorage } from "./complaint.storage";
-import { complianceStorage } from "./compliance.storage";
 import { startOfPeruMonth } from "@shared/peru-time";
 import { buildMonthlyReports } from "@shared/monthly-reports";
 
@@ -27,19 +26,30 @@ export const reportingStorage = {
       ))
       .limit(10);
 
-    const recentComplaints = await db.select().from(complaints)
+    // The dashboard shows the establishment NAME, never its UUID, so both lists
+    // join `establishments` instead of leaving the client to guess.
+    const recentComplaints = await db
+      .select({ complaint: complaints, establishmentName: establishments.name })
+      .from(complaints)
+      .leftJoin(establishments, eq(complaints.establishmentId, establishments.id))
       .where(eq(complaints.businessId, businessId))
       .orderBy(desc(complaints.createdAt))
       .limit(5);
 
     // Get complaints due within 2 days for urgent alerts
-    const urgentAlerts = await db.select().from(complaints)
+    const urgentAlerts = await db
+      .select({ complaint: complaints, establishmentName: establishments.name })
+      .from(complaints)
+      .leftJoin(establishments, eq(complaints.establishmentId, establishments.id))
       .where(and(
         eq(complaints.businessId, businessId),
         lte(complaints.dueDate, new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)),
         or(eq(complaints.status, 'new'), eq(complaints.status, 'in_progress'))
       ))
       .orderBy(asc(complaints.dueDate));
+
+    const withEstablishment = (rows: Array<{ complaint: Complaint; establishmentName: string | null }>) =>
+      rows.map(({ complaint, establishmentName }) => ({ ...complaint, establishmentName }));
 
     // Complaints resolved during the current month (Peru calendar month)
     const monthStart = startOfPeruMonth(new Date());
@@ -61,47 +71,13 @@ export const reportingStorage = {
       activeComplaints: stats.new + stats.inProgress,
       urgentComplaints: urgentComplaints.length,
       overdueComplaints: stats.overdue,
-      slaCompliance: stats.slaCompliance,
+      totalComplaints: stats.total,
+      slaCompliance: stats.slaOnTimeRate,
       resolvedThisMonth: resolvedThisMonthResult?.count ?? 0,
       resolutionRate,
       averageResponseTime: stats.avgResponseTime,
-      recentComplaints,
-      urgentAlerts,
-    };
-  },
-
-  async generateComplianceReport(businessId: string): Promise<ComplianceReport> {
-    const tracking = await complianceStorage.getComplianceTracking(businessId);
-
-    const statusOf = (type: string): ComplianceTracking['status'] | null => {
-      const item = tracking.find(t => t.complianceType === type);
-      return item ? item.status : null;
-    };
-
-    const ds011Status = statusOf('ds_011_2011_pcm') === 'compliant';
-    const ds101Status = statusOf('ds_101_2022_pcm') === 'compliant';
-    const ley29733Status = statusOf('ley_29733') === 'compliant';
-
-    const overdueItems = tracking.filter(t =>
-      t.status !== 'compliant' &&
-      t.dueDate &&
-      new Date(t.dueDate) < new Date()
-    );
-
-    // Guidance only; none of these is a hardcoded "deadline" any more (the
-    // previous copy carried a stale fixed date that would always look overdue).
-    const nextActions = [
-      !ley29733Status ? 'Registrar/actualizar el banco de datos personales ante la autoridad' : null,
-      'Actualizar la Política de Privacidad y su fecha de vigencia',
-      'Capacitación anual en derechos ARCO del personal',
-    ].filter(Boolean) as string[];
-
-    return {
-      ds011Status,
-      ds101Status,
-      ley29733Status,
-      nextActions,
-      overdueItems,
+      recentComplaints: withEstablishment(recentComplaints),
+      urgentAlerts: withEstablishment(urgentAlerts),
     };
   },
 
@@ -142,31 +118,16 @@ export const reportingStorage = {
       ? Math.round(((stats.resolved + stats.responded) / stats.total) * 100)
       : 0;
 
-    // The formal-obligations checklist is reported SEPARATELY: it describes
-    // paperwork (RNPD, privacy policy...) and must never be presented as a
-    // deadline metric. "Cumplimiento legal" on the reports page is the share of
-    // complaints answered within the 15 business days of DS 101-2022-PCM.
-    const compliance = await reportingStorage.generateComplianceReport(businessId);
-    const formalChecks = [
-      compliance.ds011Status,
-      compliance.ds101Status,
-      compliance.ley29733Status,
-    ];
-    const formalComplianceRate = Math.round(
-      (formalChecks.filter(Boolean).length / formalChecks.length) * 100,
-    );
-
     return {
       totalComplaints: stats.total,
       complaintsGrowth,
       averageResponseTime: stats.avgResponseTime,
       resolutionRate,
       // null = "sin datos" (no complaints yet), which is NOT the same as 0%.
-      slaOnTimeRate: stats.total > 0 ? stats.slaCompliance : null,
+      slaOnTimeRate: stats.slaOnTimeRate,
       answeredComplaints: stats.answered,
       overdueComplaints: stats.overdue,
-      complianceRate: stats.total > 0 ? stats.slaCompliance : 0,
-      formalComplianceRate,
+      complianceRate: stats.slaOnTimeRate ?? 0,
     };
   },
 

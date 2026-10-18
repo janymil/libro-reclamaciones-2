@@ -16,7 +16,12 @@ set -euo pipefail
 staged="$(git diff --cached --name-only --diff-filter=ACM)"
 [ -z "$staged" ] && exit 0
 
-blocked="$(printf '%s\n' "$staged" | grep -E '(^|/)secrets/|(^|/)\.env($|\.)|\.(pem|key|crt)$' || true)"
+# `.env.example` is the template the repo does commit (see .gitignore:
+# `!.env.example`), so it is excluded from the path block below. Its CONTENT is
+# still scanned by the credential check at the end, which is what matters.
+blocked="$(printf '%s\n' "$staged" \
+  | grep -E '(^|/)secrets/|(^|/)\.env($|\.)|\.(pem|key|crt)$' \
+  | grep -vE '(^|/)\.env\.example$' || true)"
 if [ -n "$blocked" ]; then
   printf 'Commit blocked — secret-like paths are staged:\n%s\n' "$blocked" >&2
   exit 1

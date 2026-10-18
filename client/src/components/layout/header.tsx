@@ -82,24 +82,24 @@ export default function Header({
   };
 
   return (
-    <header className="border-b border-[#e3d9c6] bg-[#fdfaf3]/90 px-6 py-4 backdrop-blur-sm" data-testid="header">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3" data-testid="header-info">
+    <header className="border-b border-[#e3d9c6] bg-[#fdfaf3]/90 px-4 py-3 backdrop-blur-sm sm:px-6 sm:py-4" data-testid="header">
+      <div className="flex items-center justify-between gap-2 sm:gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3" data-testid="header-info">
           {libroConfig?.logoUrl && (
             <img
               src={libroConfig.logoUrl}
               alt={businessName || "Logo"}
-              className="h-9 w-auto max-w-[130px] object-contain"
+              className="h-8 w-auto max-w-[80px] object-contain sm:h-9 sm:max-w-[130px]"
               data-testid="header-logo"
             />
           )}
-          <div>
-            <h2 className="font-display text-2xl font-semibold tracking-tight text-[#1b1611]">{title}</h2>
-            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5c5246]">{subtitle || businessName}</p>
+          <div className="min-w-0">
+            <h2 className="truncate font-display text-lg font-semibold tracking-tight text-[#1b1611] sm:text-2xl">{title}</h2>
+            <p className="truncate font-mono text-[10px] uppercase tracking-[0.14em] text-[#5c5246] sm:text-[11px]">{subtitle || businessName}</p>
           </div>
         </div>
 
-        <div className="flex items-center space-x-4">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-4">
           {/* Multi-RUC switcher (Phase 2.7) */}
           {switchableBusinesses.length > 0 && (
             <DropdownMenu>
@@ -112,7 +112,7 @@ export default function Header({
                   data-testid="business-switcher"
                 >
                   <span className="material-icons mr-1 text-sm">business</span>
-                  <span className="truncate">{businessName || "Empresa"}</span>
+                  <span className="hidden truncate sm:inline">{businessName || "Empresa"}</span>
                   <span className="material-icons ml-1 text-sm">expand_more</span>
                 </Button>
               </DropdownMenuTrigger>

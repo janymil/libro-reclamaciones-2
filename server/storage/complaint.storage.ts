@@ -166,7 +166,7 @@ export const complaintStorage = {
       overdue: sla.overdue,
       answered: sla.answered,
       avgResponseTime: averageResponseBusinessDays(slaRows),
-      slaCompliance: sla.onTimeRate ?? 0,
+      slaOnTimeRate: sla.onTimeRate,
     };
   },
 

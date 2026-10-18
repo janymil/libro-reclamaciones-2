@@ -121,6 +121,24 @@ export default function Reports() {
     queryKey: ['/api/compliance/report'],
   });
 
+  // The standards the dashboard and this page share (derived server-side from
+  // real data: books per local, complaint deadlines, RNPD register). A standard
+  // without data ("not_applicable") is listed but never counted as met.
+  const complianceStandards: Array<{
+    id: string;
+    label: string;
+    status: string;
+    detail: string;
+    action: string | null;
+  }> = compliance?.standards ?? [];
+
+  const complianceStatusLabel: Record<string, string> = {
+    compliant: 'Conforme',
+    pending: 'Pendiente',
+    overdue: 'Incumplido',
+    not_applicable: 'Sin datos',
+  };
+
   // ---- Complaint-handling compliance (DS 101-2022-PCM: 15 business days) ----
   // Derived from the real complaint dates, never from the paperwork checklist,
   // and never rendered through a falsy fallback (0% must never print as 100%).
@@ -129,7 +147,6 @@ export default function Reports() {
   const totalCount = reportStats?.totalComplaints ?? 0;
   const overdueCount = reportStats?.overdueComplaints ?? 0;
   const hasComplaints = totalCount > 0;
-  const deadlineComplianceOk = hasComplaints && overdueCount === 0 && slaRate === 100;
   const slaCaption = !hasComplaints
     ? 'Aún no hay reclamaciones registradas'
     : `${answeredCount} de ${totalCount} respondidas · ${overdueCount} vencida(s) sin respuesta`;
@@ -150,7 +167,6 @@ export default function Reports() {
       'Cumplimiento de plazo 15 días hábiles (%)': reportStats?.slaOnTimeRate ?? 'Sin datos',
       'Respondidas': reportStats?.answeredComplaints ?? 0,
       'Vencidas sin respuesta': reportStats?.overdueComplaints ?? 0,
-      'Obligaciones formales registradas (%)': reportStats?.formalComplianceRate ?? 0,
     }]);
   };
 
@@ -217,13 +233,18 @@ export default function Reports() {
 
   const exportAudit = () => {
     downloadCsv(`auditoria-cumplimiento-${todayStamp()}`, [
-      { Norma: 'DS 011-2011-PCM (Reglamento del Libro)', Estado: compliance?.ds011Status ? 'Conforme (checklist)' : 'Pendiente (checklist)' },
-      // Derived from the real complaint dates, never from the paperwork checklist.
-      { Norma: 'DS 101-2022-PCM (respuestas en 15 días hábiles)', Estado: deadlineComplianceOk ? 'Conforme' : 'Incumplido' },
-      { Norma: '  · Reclamaciones vencidas sin respuesta', Estado: String(reportStats?.overdueComplaints ?? 0) },
-      { Norma: '  · Respondidas dentro del plazo', Estado: `${reportStats?.answeredComplaints ?? 0} de ${reportStats?.totalComplaints ?? 0}` },
-      { Norma: 'Ley 29733 (Protección de Datos)', Estado: compliance?.ley29733Status ? 'Conforme (checklist)' : 'Pendiente (checklist)' },
-      ...(compliance?.nextActions ?? []).map((action: string) => ({ Norma: 'Acción pendiente', Estado: action })),
+      ...complianceStandards.map((standard) => ({
+        Norma: standard.label,
+        Estado: complianceStatusLabel[standard.status] ?? standard.status,
+        Detalle: standard.detail,
+        'Acción pendiente': standard.action ?? '',
+      })),
+      {
+        Norma: 'Reclamaciones',
+        Estado: `${reportStats?.totalComplaints ?? 0} en total`,
+        Detalle: `${reportStats?.answeredComplaints ?? 0} respondidas · ${reportStats?.overdueComplaints ?? 0} vencidas sin respuesta`,
+        'Acción pendiente': '',
+      },
     ]);
   };
 
@@ -235,7 +256,7 @@ export default function Reports() {
         description="Cumplimiento, tendencias, reincidencia y exportación SIREC / INDECOPI de su libro."
       >
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-gray-900" data-testid="reports-title">
               Reportes y Estadísticas
@@ -244,7 +265,11 @@ export default function Reports() {
               Análisis detallado de reclamaciones y cumplimiento legal
             </p>
           </div>
-          <Button className="flex items-center gap-2" onClick={exportSummary} data-testid="button-export">
+          <Button
+            className="flex w-full items-center gap-2 sm:w-auto"
+            onClick={exportSummary}
+            data-testid="button-export"
+          >
             <Download className="h-4 w-4" />
             Exportar Reportes
           </Button>
@@ -315,7 +340,7 @@ export default function Reports() {
 
         {/* Report Generation */}
         <Tabs defaultValue="monthly" className="space-y-4">
-          <TabsList>
+          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
             <TabsTrigger value="monthly" data-testid="tab-monthly">Reportes Mensuales</TabsTrigger>
             <TabsTrigger value="custom" data-testid="tab-custom">Reporte Personalizado</TabsTrigger>
             <TabsTrigger value="legal" data-testid="tab-legal">Cumplimiento Legal</TabsTrigger>
@@ -472,27 +497,45 @@ export default function Reports() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-3">
-                  {[
-                    { label: 'DS 011-2011-PCM - Libro de Reclamaciones', ok: compliance?.ds011Status },
-                    // Deadline compliance is computed from the real complaints, not
-                    // from the manual checklist (which says nothing about dates).
-                    { label: 'DS 101-2022-PCM - Respuestas en 15 días hábiles', ok: deadlineComplianceOk },
-                    { label: 'Ley 29733 - Protección de Datos', ok: compliance?.ley29733Status },
-                  ].map(({ label, ok }) => (
-                    <div
-                      key={label}
-                      className={`flex items-center justify-between p-3 rounded-lg ${ok ? 'bg-green-50' : 'bg-yellow-50'}`}
-                    >
-                      <span>{label}</span>
-                      <span className={`font-medium ${ok ? 'text-green-600' : 'text-yellow-600'}`}>
-                        {ok ? '✓ Conforme' : '⚠ Pendiente'}
-                      </span>
-                    </div>
-                  ))}
+                  {complianceStandards.map((standard) => {
+                    const ok = standard.status === 'compliant';
+                    const neutral = standard.status === 'not_applicable';
+                    return (
+                      <div
+                        key={standard.id}
+                        className={`flex items-start justify-between gap-3 p-3 rounded-lg ${
+                          ok ? 'bg-green-50' : neutral ? 'bg-gray-50' : 'bg-yellow-50'
+                        }`}
+                        data-testid={`audit-standard-${standard.id}`}
+                      >
+                        <div>
+                          <span>{standard.label}</span>
+                          <p className="mt-1 text-xs text-muted-foreground">{standard.detail}</p>
+                          {standard.action && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              <span className="font-medium text-gray-700">Cómo corregirlo:</span>{' '}
+                              {standard.action}
+                            </p>
+                          )}
+                        </div>
+                        <span
+                          className={`shrink-0 font-medium ${
+                            ok ? 'text-green-600' : neutral ? 'text-gray-500' : 'text-yellow-700'
+                          }`}
+                        >
+                          {complianceStatusLabel[standard.status] ?? standard.status}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {complianceStandards.length === 0 && (
+                    <p className="text-sm text-muted-foreground">Cargando estándares…</p>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground" data-testid="legal-deadline-source">
                   El estado de plazos se calcula con las fechas reales de sus reclamaciones: {slaCaption}
-                  {' '}· Obligaciones formales registradas (checklist): {reportStats?.formalComplianceRate ?? 0}%
+                  {' '}· Obligaciones cumplidas: {compliance?.compliantStandards ?? 0} de{' '}
+                  {compliance?.applicableStandards ?? 0} aplicables
                 </p>
                 <Button className="w-full" onClick={exportAudit} data-testid="button-audit-report">
                   Generar Reporte de Auditoría

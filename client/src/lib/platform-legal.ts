@@ -91,6 +91,7 @@ export const LEGAL_DOCUMENTS: LegalDocumentLink[] = [
   { href: '/privacidad', label: 'Política de privacidad', testId: 'link-privacidad' },
   { href: '/aviso-legal', label: 'Aviso legal', testId: 'link-aviso-legal' },
   { href: '/normativa', label: 'Marco normativo', testId: 'link-normativa' },
+  { href: '/encargado', label: 'Ficha del encargado', testId: 'link-encargado' },
   { href: '/accesibilidad', label: 'Accesibilidad y cookies', testId: 'link-accesibilidad' },
   { href: '/estado', label: 'Estado del servicio', testId: 'link-estado' },
 ];

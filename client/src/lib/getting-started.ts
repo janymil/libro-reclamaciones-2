@@ -23,6 +23,12 @@ export interface GettingStartedInput {
   books: number;
   /** From the onboarding scenario; null when unknown (older accounts). */
   expectedLocales: number | null;
+  /**
+   * Whether the business declared its data bank as inscribed in the RNPD
+   * (SIPDP). `undefined` means "not consulted yet" and adds no row: a failed
+   * compliance request must not turn into a permanent nag.
+   */
+  rnpdRegistered?: boolean;
 }
 
 export type GettingStartedAction = 'resend-verification' | 'navigate';
@@ -52,7 +58,7 @@ export interface GettingStartedPlan {
  * arrive, complete the network of locales, and give each local its book.
  */
 export function buildGettingStarted(input: GettingStartedInput): GettingStartedPlan {
-  const { libroSlug, isEmailVerified, establishments, books, expectedLocales } = input;
+  const { libroSlug, isEmailVerified, establishments, books, expectedLocales, rnpdRegistered } = input;
 
   const steps: GettingStartedStep[] = [
     {
@@ -77,6 +83,26 @@ export function buildGettingStarted(input: GettingStartedInput): GettingStartedP
       actionLabel: 'Reenviar correo',
     },
   ];
+
+  // The State inscription, once the panel knows the answer. It is a legal duty of
+  // the business (Ley N.° 29733), it cannot be completed from the platform, and
+  // the link sends the customer to /cumplimiento, where the two links and the
+  // one-click register live.
+  if (rnpdRegistered !== undefined) {
+    steps.push({
+      id: 'rnpd-inscripcion',
+      title: rnpdRegistered
+        ? 'Banco de datos inscrito en el RNPD'
+        : 'Inscribe tu banco de datos en el RNPD',
+      description: rnpdRegistered
+        ? 'Tu empresa declaró la inscripción ante la ANPD por el SIPDP.'
+        : 'La Ley N.° 29733 obliga a inscribir el banco de datos del Libro. Es gratuito, de aprobación automática y lo presenta tu empresa en el SIPDP.',
+      done: rnpdRegistered,
+      href: '/cumplimiento',
+      action: 'navigate',
+      actionLabel: rnpdRegistered ? 'Ver el estado' : 'Ver el trámite',
+    });
+  }
 
   // Only a chain sees a target: a single-local business is already complete, and
   // guessing a number for an older account would nag about something it never

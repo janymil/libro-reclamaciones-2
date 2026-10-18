@@ -4,15 +4,34 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import ComplaintDetail from "@/components/complaints/complaint-detail";
 import ComplaintResponseDialog from "@/components/complaints/complaint-response-dialog";
-import type { Complaint } from "@shared/schema";
+import { useBusinessDays } from "@/hooks/use-business-days";
+import type { DashboardComplaint } from "@/hooks/use-complaints";
 
 interface AlertsSectionProps {
-  alerts?: Complaint[];
+  alerts?: DashboardComplaint[];
 }
 
 export default function AlertsSection({ alerts = [] }: AlertsSectionProps) {
-  const [viewTarget, setViewTarget] = useState<Complaint | null>(null);
-  const [respondTarget, setRespondTarget] = useState<Complaint | null>(null);
+  const [viewTarget, setViewTarget] = useState<DashboardComplaint | null>(null);
+  const [respondTarget, setRespondTarget] = useState<DashboardComplaint | null>(null);
+  const { getBusinessDaysRemaining, isOverdue } = useBusinessDays();
+
+  /**
+   * The card used to print "vence hoy / vence mañana" from a boolean, so a
+   * complaint due in two business days said "mañana" and an overdue one said
+   * "hoy". This reads the real calendar (Peru holidays included).
+   */
+  const dueLabel = (dueDate: Date | string): string => {
+    const due = new Date(dueDate);
+    if (Number.isNaN(due.getTime())) {
+      return 'con plazo pendiente';
+    }
+    if (isOverdue(due)) {
+      return 'venció';
+    }
+    const remaining = getBusinessDaysRemaining(due);
+    return remaining <= 1 ? 'vence hoy o mañana' : `vence en ${remaining} días hábiles`;
+  };
 
   if (alerts.length === 0) {
     return (
@@ -44,17 +63,17 @@ export default function AlertsSection({ alerts = [] }: AlertsSectionProps) {
             {alerts.map((alert) => (
               <div
                 key={alert.id}
-                className="flex items-center justify-between bg-white rounded-lg p-4 border border-red-200"
+                className="flex flex-wrap items-center justify-between gap-2 bg-white rounded-lg p-4 border border-red-200"
                 data-testid={`alert-item-${alert.id}`}
               >
-                <div className="flex items-center space-x-3">
+                <div className="flex min-w-0 items-start space-x-3">
                   <span className="material-icons text-red-600">timer</span>
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-medium text-gray-900">
-                      Reclamo #{alert.correlativeNumber} vence {new Date(alert.dueDate) <= new Date() ? 'hoy' : 'mañana'}
+                      Reclamo #{alert.correlativeNumber} {dueLabel(alert.dueDate)}
                     </p>
                     <p className="text-sm text-gray-600">
-                      Establecimiento: {alert.establishmentId}
+                      Establecimiento: {alert.establishmentName ?? 'Sin local asignado'}
                     </p>
                   </div>
                 </div>

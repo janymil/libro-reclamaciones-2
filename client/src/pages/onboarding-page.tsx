@@ -39,6 +39,7 @@ import FloatingNotice from "@/components/onboarding/floating-notice";
 import { departments, getProvinces, getDistricts } from '@/data/peru-locations';
 import { resolvePeruLocation } from '@/lib/location-matcher';
 import { safeInternalPath } from "@/lib/subscribe-link";
+import { RNPD_PROCEDURE_URL, SIPDP_URL } from "@shared/rnpd";
 
 interface BusinessData {
   ruc: string;
@@ -159,6 +160,16 @@ export default function OnboardingPage() {
   });
 
   const [isResumed, setIsResumed] = useState(false);
+
+  /**
+   * RNPD (SIPDP) declaration.
+   *
+   * Default is "no": the platform cannot know whether the company already filed
+   * the inscription, and assuming "yes" would paint the compliance card green
+   * without evidence. Answering "yes" marks it as declared (never verified).
+   */
+  const [rnpdRegistered, setRnpdRegistered] = useState<'si' | 'no'>('no');
+  const [rnpdCode, setRnpdCode] = useState('');
 
   // Set when the RUC is already registered by another account: the wizard can
   // then offer "solicitar acceso" instead of leaving the user stuck.
@@ -384,7 +395,11 @@ export default function OnboardingPage() {
 
   // Complete onboarding mutation
   const onboardingMutation = useMutation({
-    mutationFn: async (data: { businessData: BusinessData; libroData: LibroData }) => {
+    mutationFn: async (data: {
+      businessData: BusinessData;
+      libroData: LibroData;
+      rnpdRegistration: { registered: boolean; code?: string };
+    }) => {
       const response = await apiRequest('POST', '/api/auth/complete-onboarding', data);
       return response.json();
     },
@@ -565,6 +580,12 @@ export default function OnboardingPage() {
         expectedEstablishments: expectedLocales(scenario, Number(totalLocales)) ?? undefined,
       },
       libroData: libroForm,
+      // Stored in the same transaction as the tenant: an "onboarded" account
+      // must not lose the answer to a question the customer already gave.
+      rnpdRegistration: {
+        registered: rnpdRegistered === 'si',
+        code: rnpdRegistered === 'si' ? rnpdCode.trim() || undefined : undefined,
+      },
     });
   };
 
@@ -1054,6 +1075,101 @@ export default function OnboardingPage() {
                         placeholder="https://miempresa.com"
                       />
                     </div>
+                  </div>
+
+                  {/* RNPD (SIPDP) declaration, asked once here and never again as
+                      a blank form: the company either already filed it or it is
+                      tracked as pending in "Estado general de cumplimiento". */}
+                  <div
+                    className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/60 p-4"
+                    data-testid="card-rnpd-onboarding"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-blue-950">
+                        ¿Ya inscribiste el banco de datos de tu Libro en el RNPD?
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-blue-900">
+                        La Ley N.° 29733 obliga a todo titular de un banco de datos personales a
+                        inscribirlo ante la ANPD por el <strong>SIPDP</strong>. Es{' '}
+                        <strong>gratuito</strong> y de <strong>aprobación automática</strong>, y lo
+                        presenta tu empresa: la plataforma no puede hacerlo por ti. Al terminar
+                        obtienes la constancia y el código del banco de datos.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        aria-pressed={rnpdRegistered === 'si'}
+                        onClick={() => setRnpdRegistered('si')}
+                        className={`rounded-lg border p-3 text-left text-sm transition-colors ${
+                          rnpdRegistered === 'si'
+                            ? 'border-blue-600 bg-white ring-2 ring-blue-600'
+                            : 'border-gray-200 bg-white/70 hover:border-blue-300'
+                        }`}
+                        data-testid="button-rnpd-onboarding-yes"
+                      >
+                        <span className="block font-medium text-gray-900">Sí, ya está inscrito</span>
+                        <span className="mt-1 block text-xs text-gray-600">
+                          Se marcará como cumplido en tu panel.
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={rnpdRegistered === 'no'}
+                        onClick={() => setRnpdRegistered('no')}
+                        className={`rounded-lg border p-3 text-left text-sm transition-colors ${
+                          rnpdRegistered === 'no'
+                            ? 'border-blue-600 bg-white ring-2 ring-blue-600'
+                            : 'border-gray-200 bg-white/70 hover:border-blue-300'
+                        }`}
+                        data-testid="button-rnpd-onboarding-no"
+                      >
+                        <span className="block font-medium text-gray-900">Todavía no</span>
+                        <span className="mt-1 block text-xs text-gray-600">
+                          Quedará pendiente, con el enlace al trámite.
+                        </span>
+                      </button>
+                    </div>
+
+                    {rnpdRegistered === 'si' && (
+                      <div className="space-y-1">
+                        <Label htmlFor="rnpdCodeOnboarding" className="text-xs">
+                          Código del banco de datos (opcional)
+                        </Label>
+                        <Input
+                          id="rnpdCodeOnboarding"
+                          type="text"
+                          value={rnpdCode}
+                          onChange={(event) => setRnpdCode(event.target.value)}
+                          placeholder="Lo entrega el SIPDP al terminar"
+                          data-testid="input-rnpd-code-onboarding"
+                        />
+                        <p className="text-xs text-gray-600">
+                          Se guarda como evidencia. La plataforma no verifica el registro estatal.
+                        </p>
+                      </div>
+                    )}
+
+                    <p className="text-xs text-blue-900">
+                      <a
+                        href={RNPD_PROCEDURE_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium underline underline-offset-2"
+                      >
+                        Ver el trámite en gob.pe
+                      </a>{' '}
+                      ·{' '}
+                      <a
+                        href={SIPDP_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium underline underline-offset-2"
+                      >
+                        Entrar al SIPDP
+                      </a>
+                    </p>
                   </div>
 
                   {/* The AI assistant and the preview live in the help column

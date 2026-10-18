@@ -5,7 +5,9 @@ interface StatsCardsProps {
     activeComplaints: number;
     urgentComplaints: number;
     overdueComplaints: number;
-    slaCompliance: number;
+    totalComplaints: number;
+    /** null = no complaints yet: "sin datos", not 0%. */
+    slaCompliance: number | null;
     resolvedThisMonth: number;
     resolutionRate: number;
     averageResponseTime: number;
@@ -17,13 +19,15 @@ export default function StatsCards({ metrics }: StatsCardsProps) {
     activeComplaints: 0,
     urgentComplaints: 0,
     overdueComplaints: 0,
-    slaCompliance: 0,
+    totalComplaints: 0,
+    slaCompliance: null as number | null,
     resolvedThisMonth: 0,
     resolutionRate: 0,
     averageResponseTime: 0,
   };
 
   const data = metrics || defaultMetrics;
+  const hasComplaints = data.totalComplaints > 0;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6" data-testid="stats-cards">
@@ -49,8 +53,15 @@ export default function StatsCards({ metrics }: StatsCardsProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">SLA Cumplimiento</p>
-              <p className="text-3xl font-bold text-success" data-testid="stat-sla">{data.slaCompliance}%</p>
-              <p className="text-sm text-gray-500 mt-2">Respondidas dentro de 15 días hábiles</p>
+              <p
+                className={`font-bold ${data.slaCompliance === null ? 'text-xl text-gray-500' : 'text-3xl text-success'}`}
+                data-testid="stat-sla"
+              >
+                {data.slaCompliance === null ? 'Sin datos' : `${data.slaCompliance}%`}
+              </p>
+              <p className="text-sm text-gray-500 mt-2">
+                {hasComplaints ? 'Respondidas dentro de 15 días hábiles' : 'Aún no hay reclamaciones'}
+              </p>
             </div>
             <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
               <span className="material-icons text-success">schedule</span>
@@ -65,7 +76,9 @@ export default function StatsCards({ metrics }: StatsCardsProps) {
             <div>
               <p className="text-sm font-medium text-gray-600">Resueltas Este Mes</p>
               <p className="text-3xl font-bold text-gray-900" data-testid="stat-resolved">{data.resolvedThisMonth}</p>
-              <p className="text-sm text-gray-500 mt-2">Tasa de atención: {data.resolutionRate}%</p>
+              <p className="text-sm text-gray-500 mt-2">
+                Tasa de atención: {hasComplaints ? `${data.resolutionRate}%` : 'Sin datos'}
+              </p>
             </div>
             <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center">
               <span className="material-icons text-emerald-600">check_circle</span>

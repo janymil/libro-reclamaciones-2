@@ -45,6 +45,13 @@ export default function GettingStarted() {
   });
   const { data: establishments } = useQuery<Establishment[]>({ queryKey: ["/api/establishments"] });
   const { data: books } = useQuery<BookSummary[]>({ queryKey: ["/api/books"] });
+  // Only for the RNPD row below. Left optional: if this call fails the checklist
+  // simply omits that row instead of hiding the ones that matter for the book.
+  const { data: compliance, isError: complianceFailed } = useQuery<{
+    rnpd?: { registered: boolean };
+  }>({
+    queryKey: ["/api/compliance/report"],
+  });
 
   // Read once: the customer can close the checklist for good (per browser).
   const [dismissed, setDismissed] = useState(() => isGettingStartedDismissed());
@@ -77,6 +84,11 @@ export default function GettingStarted() {
   if (user?.isDemo) return null;
   if (!user?.businessId || !user.onboardingCompleted || dismissed) return null;
   if (!business || libroConfig === undefined || !establishments || !books) return null;
+  // Wait for the compliance answer too: without it the RNPD row is unknown, and
+  // a tenant whose only pending step is that one would see the whole checklist
+  // disappear and come back a moment later. If the call failed we render anyway
+  // (the row is simply omitted) instead of hiding the checklist forever.
+  if (compliance === undefined && !complianceFailed) return null;
 
   const { steps, pending, allDone } = buildGettingStarted({
     businessName: business.businessName,
@@ -90,6 +102,8 @@ export default function GettingStarted() {
     // Declared during onboarding and editable from /sucursales; NULL means the
     // customer never declared a total (the checklist then omits the target).
     expectedLocales: business.expectedEstablishments ?? null,
+    // `undefined` while the compliance report has not answered: no RNPD row.
+    rnpdRegistered: compliance ? Boolean(compliance.rnpd?.registered) : undefined,
   });
 
   if (allDone) return null;

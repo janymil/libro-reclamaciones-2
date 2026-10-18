@@ -7,6 +7,8 @@ import {
   UIT_2026,
   UIT_2026_NORM,
 } from '@/lib/legal-norms';
+import { OPERATOR } from '@/lib/platform-legal';
+import { RNPD_PROCEDURE_URL, SIPDP_URL } from '@shared/rnpd';
 import { RETENTION_MONTHS, TRIAL_DAYS } from '@shared/plans';
 
 /**
@@ -21,6 +23,9 @@ export default function NormativaPage() {
   const soles = (uit: number) =>
     new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', maximumFractionDigits: 0 })
       .format(uit * UIT_2026);
+
+  const ley29733Norm = LEGAL_NORMS.find((norm) => norm.id === 'ley-29733')!;
+  const ds016Norm = LEGAL_NORMS.find((norm) => norm.id === 'ds-016-2024-jus')!;
 
   return (
     <LegalPage
@@ -89,7 +94,81 @@ export default function NormativaPage() {
         />
       </LegalSection>
 
-      <LegalSection title="3. Multas: topes por gravedad (art. 110)">
+      <LegalSection title="3. Inscripción en el RNPD: qué debes hacer tú" testId="rnpd-obligation">
+        <p>
+          La Ley N.° 29733 obliga a los titulares de bancos de datos personales a inscribirlos en el
+          Registro Nacional de Protección de Datos Personales (RNPD), en los términos de su
+          Reglamento (DS N.° 016-2024-JUS). El Libro de Reclamaciones es un banco de datos
+          personales: guarda el nombre, el documento, el domicilio, el teléfono y el correo de los
+          consumidores que reclaman.
+        </p>
+        <p>
+          Esa inscripción <strong>la hace la empresa, no la plataforma</strong>. LibroDigital no está
+          conectada al RNPD, no envía datos al Estado y no puede presentar ese trámite por usted. Lo
+          que sí entrega es el <strong>registro de actividades de tratamiento</strong> (Asistente
+          RNPD) y su PDF, que sirven como sustento del trámite ante la Autoridad Nacional de
+          Protección de Datos Personales (ANPD, MINJUSDH).
+        </p>
+        <p>
+          LibroDigital actúa como <strong>encargado del tratamiento</strong>: la empresa decide qué
+          datos se recogen y con qué finalidad, y la plataforma los aloja y los trata solo por su
+          cuenta e instrucción, con acceso por roles, registro de auditoría y respaldos. Si al
+          declarar el banco de datos necesita identificar al encargado o el lugar donde se alojan los
+          datos, escríbanos a{' '}
+          <a href={`mailto:${OPERATOR.email}`} className="text-[#c02b0a] underline underline-offset-2">
+            {OPERATOR.email}
+          </a>{' '}
+          y se los entregamos por escrito.
+        </p>
+        <p className="text-xs text-[#5c5246]">
+          Textos oficiales:{' '}
+          <a
+            href={ley29733Norm.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#c02b0a] underline underline-offset-2"
+          >
+            Ley N.° 29733
+          </a>{' '}
+          ·{' '}
+          <a
+            href={ds016Norm.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#c02b0a] underline underline-offset-2"
+          >
+            DS N.° 016-2024-JUS
+          </a>
+          . El procedimiento vigente, sus requisitos y el canal de presentación se consultan en
+          gob.pe (MINJUSDH): esta página no reproduce un trámite que puede cambiar.
+        </p>
+        <p className="text-sm">
+          <a
+            href={RNPD_PROCEDURE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-[#c02b0a] underline underline-offset-2"
+          >
+            Ficha oficial del trámite en gob.pe
+          </a>{' '}
+          ·{' '}
+          <a
+            href={SIPDP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-[#c02b0a] underline underline-offset-2"
+          >
+            SIPDP: entrar o crear cuenta
+          </a>
+        </p>
+        <p className="text-sm">
+          Según la ficha oficial, la inscripción es <strong>gratuita</strong> y de{' '}
+          <strong>aprobación automática</strong> sujeta a fiscalización posterior. Al terminar se
+          obtienen la constancia de inscripción y el código del banco de datos.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="4. Multas: topes por gravedad (art. 110)">
         <p>
           El Código fija topes en UIT según la gravedad de la infracción. La multa concreta se calcula
           con los factores del propio artículo 110, así que el tope no es el monto que se paga en
@@ -114,7 +193,7 @@ export default function NormativaPage() {
           .
         </p>
       </LegalSection>
-      <LegalSection title="4. Norma en trámite: no la aplique todavía" testId="pending-norm">
+      <LegalSection title="5. Norma en trámite: no la aplique todavía" testId="pending-norm">
         <p className="flex items-start gap-2">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#c02b0a]" aria-hidden="true" />
           <span>
@@ -137,7 +216,7 @@ export default function NormativaPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="5. Cómo leer esta página">
+      <LegalSection title="6. Cómo leer esta página">
         <p className="flex items-start gap-2">
           <Landmark className="mt-0.5 h-4 w-4 shrink-0 text-[#c02b0a]" aria-hidden="true" />
           <span>

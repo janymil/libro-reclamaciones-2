@@ -48,6 +48,7 @@ import type {
   AIFeedback,
   InsertAIFeedback,
 } from "@shared/schema";
+import type { RnpdDeclaration } from "@shared/rnpd";
 import type {
   CompleteOnboardingInput,
   CompleteOnboardingResult,
@@ -300,6 +301,15 @@ export interface IStorage {
   getComplianceTracking(businessId: string): Promise<ComplianceTracking[]>;
   createComplianceTracking(tracking: InsertComplianceTracking): Promise<ComplianceTracking>;
   updateComplianceTracking(id: string, updates: Partial<InsertComplianceTracking>): Promise<ComplianceTracking>;
+  /**
+   * Upserts the business's declaration about the RNPD (SIPDP) inscription as a
+   * `rnpd_registration` row. Declaring "not yet" stores `pending`, so the answer
+   * is remembered (that is what makes it visible as pending instead of unknown).
+   */
+  setRnpdRegistration(
+    businessId: string,
+    declaration: RnpdDeclaration,
+  ): Promise<ComplianceTracking>;
   
   // Data processing activities operations
   getDataProcessingActivities(businessId: string): Promise<DataProcessingActivity[]>;
@@ -313,7 +323,6 @@ export interface IStorage {
   
   // Analytics and reporting
   getDashboardMetrics(businessId: string): Promise<DashboardMetrics>;
-  generateComplianceReport(businessId: string): Promise<ComplianceReport>;
   getReportStats(businessId: string): Promise<ReportStats>;
   getMonthlyReports(businessId: string): Promise<MonthlyReport[]>;
 
@@ -376,8 +385,11 @@ export interface ComplaintStats {
   /** Complaints with a provider response. */
   answered: number;
   avgResponseTime: number;
-  /** Share of complaints answered within the legal deadline (15 business days). */
-  slaCompliance: number;
+  /**
+   * Share of complaints answered within the legal deadline (15 business days).
+   * `null` = no complaints yet, which is NOT the same as 0%.
+   */
+  slaOnTimeRate: number | null;
 }
 
 // Phase 3.11: reincidence (repeat complaints by product/store)
@@ -393,24 +405,78 @@ export interface ReincidenceReport {
   byEstablishment: ReincidenceEntry[];
 }
 
+/**
+ * A complaint plus the public name of its establishment. The dashboard must show
+ * "Local Miraflores", never the raw `establishmentId` UUID.
+ */
+export type ComplaintWithEstablishment = Complaint & { establishmentName: string | null };
+
 export interface DashboardMetrics {
   activeComplaints: number;
   urgentComplaints: number;
   overdueComplaints: number;
-  slaCompliance: number;
+  /** Complaints received by the business (0 = no data for the rate metrics). */
+  totalComplaints: number;
+  /** `null` when there are no complaints yet; never report that as 0%. */
+  slaCompliance: number | null;
   resolvedThisMonth: number;
   resolutionRate: number;
   averageResponseTime: number;
-  recentComplaints: Complaint[];
-  urgentAlerts: Complaint[];
+  recentComplaints: ComplaintWithEstablishment[];
+  urgentAlerts: ComplaintWithEstablishment[];
+}
+
+export type ComplianceStandardStatus = 'compliant' | 'pending' | 'overdue' | 'not_applicable';
+
+/**
+ * One legal obligation, with the evidence that decided its status and the
+ * concrete fix. `not_applicable` is a first-class state: with zero complaints
+ * there is nothing to be late on, so the 15-day deadline must NOT be counted as
+ * "compliant" (that inflated a brand-new business to 67%).
+ */
+export interface ComplianceStandard {
+  id: 'ds_011' | 'ds_101' | 'ley_29733' | 'rnpd';
+  label: string;
+  status: ComplianceStandardStatus;
+  /** Evidence in plain language, with real numbers (never a placeholder). */
+  detail: string;
+  /** What the business must do; null when there is nothing to fix. */
+  action: string | null;
+  /** In-app destination that fixes it, when one exists. */
+  href: string | null;
+  /**
+   * In-app assistant that fixes it when a page is not enough. `rnpd-assistant`
+   * opens the processing-activities dialog (the fix is one click, not a form).
+   */
+  actionTarget?: 'rnpd-assistant';
+  /**
+   * Official procedure the platform cannot complete on the client's behalf
+   * (for example the RNPD inscription, which is filed by the business itself).
+   */
+  external?: { href: string; label: string };
 }
 
 export interface ComplianceReport {
-  ds011Status: boolean;
-  ds101Status: boolean;
-  ley29733Status: boolean;
+  standards: ComplianceStandard[];
+  /** Obligations that apply today (excludes "no complaints yet"). */
+  applicableStandards: number;
+  compliantStandards: number;
+  /** Checklist rows stored for the business (optional paperwork record). */
+  checklistItems: number;
   nextActions: string[];
   overdueItems: ComplianceTracking[];
+  /**
+   * What the business declared about the RNPD (SIPDP) inscription.
+   * `registered` is a declaration, never a verification: the platform does not
+   * and cannot check the State registry.
+   */
+  rnpd: {
+    registered: boolean;
+    /** Whether the business answered at all (onboarding or the dialog). */
+    answered: boolean;
+    code: string | null;
+    completedDate: string | null;
+  };
 }
 
 export interface UserStats {
@@ -520,8 +586,6 @@ export interface ReportStats {
   overdueComplaints: number;
   /** Same as slaOnTimeRate, as a plain number (0 when there is no data). */
   complianceRate: number;
-  /** Paperwork checklist (RNPD, privacy policy, DS 011/101) - NOT a deadline metric. */
-  formalComplianceRate: number;
 }
 
 /** Built by `@shared/monthly-reports`, which also owns the aggregation. */

@@ -12,6 +12,7 @@ import {
   useAISuggestResponse,
   useAIStatus,
   useAITrends,
+  useComplaints,
   useSlaPrediction,
   type ResponseLength,
   type ResponseTone,
@@ -19,7 +20,9 @@ import {
 import { useSubscription } from "@/hooks/use-subscription";
 import PlanGate from "@/components/plan/plan-gate";
 import AIFeedbackButtons from "@/components/ai/ai-feedback-buttons";
+import ComplaintPicker from "@/components/ai/complaint-picker";
 import { COMPLAINT_TYPES } from "@/lib/constants";
+import { buildComplaintAIText } from "@/lib/ai-classification";
 
 interface AIAssistantProps {
   onSuggestionAccept?: (suggestion: string) => void;
@@ -27,7 +30,9 @@ interface AIAssistantProps {
 
 export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
   const [analysisText, setAnalysisText] = useState("");
+  const [selectedComplaintId, setSelectedComplaintId] = useState("manual");
   const [responseText, setResponseText] = useState("");
+  const [selectedResponseComplaintId, setSelectedResponseComplaintId] = useState("manual");
   const [responseType, setResponseType] = useState<"reclamo" | "queja">("reclamo");
   const [tone, setTone] = useState<ResponseTone | "auto">("auto");
   const [length, setLength] = useState<ResponseLength | "auto">("auto");
@@ -36,6 +41,15 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
   const { toast } = useToast();
   const upgradeToast = useUpgradeToast();
   const { data: aiStatus } = useAIStatus();
+  const { data: complaints = [], isLoading: complaintsLoading } = useComplaints();
+  const selectedComplaint =
+    selectedComplaintId === "manual"
+      ? null
+      : complaints.find((complaint) => complaint.id === selectedComplaintId) ?? null;
+  const selectedResponseComplaint =
+    selectedResponseComplaintId === "manual"
+      ? null
+      : complaints.find((complaint) => complaint.id === selectedResponseComplaintId) ?? null;
   const { data: subscription } = useSubscription();
   const trendsMutation = useAITrends();
   // Drafting, SLA prediction and trends are all part of the Pro `aiDrafting`
@@ -45,6 +59,46 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
   const { data: slaPrediction } = useSlaPrediction(canUseAIDrafting);
   const classifyMutation = useAIClassification();
   const suggestResponseMutation = useAISuggestResponse();
+
+  /**
+   * Choosing a stored complaint fills the textarea with what the AI needs, and
+   * the id travels with the request so the server can add the record's own
+   * metadata (status, priority, correlative, date) from the database.
+   */
+  const handleComplaintSelect = (value: string) => {
+    setSelectedComplaintId(value);
+    classifyMutation.reset();
+
+    if (value === "manual") {
+      return;
+    }
+
+    const complaint = complaints.find((entry) => entry.id === value);
+    if (complaint) {
+      setAnalysisText(buildComplaintAIText(complaint));
+    }
+  };
+
+  const handleClearAnalysis = () => {
+    setAnalysisText("");
+    setSelectedComplaintId("manual");
+    classifyMutation.reset();
+  };
+
+  const handleResponseComplaintSelect = (value: string) => {
+    setSelectedResponseComplaintId(value);
+    suggestResponseMutation.reset();
+
+    if (value === "manual") {
+      return;
+    }
+
+    const complaint = complaints.find((entry) => entry.id === value);
+    if (complaint) {
+      setResponseText(buildComplaintAIText(complaint));
+      setResponseType(complaint.complaintType === "queja" ? "queja" : "reclamo");
+    }
+  };
 
   const handleClassification = async () => {
     if (!analysisText.trim()) {
@@ -57,7 +111,10 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
     }
 
     try {
-      const result = await classifyMutation.mutateAsync(analysisText);
+      const result = await classifyMutation.mutateAsync({
+        text: analysisText,
+        complaintId: selectedComplaint?.id ?? null,
+      });
       toast({
         title: result.source === 'fallback' ? "Análisis heurístico local" : "Análisis completado",
         description:
@@ -88,6 +145,7 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
       const result = await suggestResponseMutation.mutateAsync({
         complaintText: responseText,
         complaintType: responseType,
+        complaintId: selectedResponseComplaint?.id ?? null,
         tone: tone === "auto" ? undefined : tone,
         length: length === "auto" ? undefined : length,
       });
@@ -169,8 +227,11 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
         </CardContent>
       </Card>
 
+      {/* Classification and response drafting share one row on desktop. */}
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+      <div className="space-y-6">
       {/* Classification Tool */}
-      <Card>
+      <Card data-testid="ai-classification-card">
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
             <span className="material-icons text-blue-600">auto_awesome</span>
@@ -178,6 +239,16 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <ComplaintPicker
+            id="analysis-complaint"
+            label="Reclamo a analizar"
+            testIdPrefix="analysis-complaint"
+            complaints={complaints}
+            isLoading={complaintsLoading}
+            value={selectedComplaintId}
+            onChange={handleComplaintSelect}
+          />
+
           <div>
             <label className="block text-sm font-medium mb-2">
               Texto a analizar
@@ -191,14 +262,26 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
             />
           </div>
           
-          <Button
-            onClick={handleClassification}
-            disabled={classifyMutation.isPending}
-            className="w-full sm:w-auto"
-            data-testid="button-classify"
-          >
-            {classifyMutation.isPending ? "Analizando..." : "Analizar con IA"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={handleClassification}
+              disabled={classifyMutation.isPending}
+              className="w-full sm:w-auto"
+              data-testid="button-classify"
+            >
+              {classifyMutation.isPending ? "Analizando..." : "Analizar con IA"}
+            </Button>
+            {(analysisText || selectedComplaintId !== "manual" || classifyMutation.data) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearAnalysis}
+                data-testid="button-clear-analysis"
+              >
+                Limpiar
+              </Button>
+            )}
+          </div>
 
           {/* Classification Results */}
           {classifyMutation.data && (
@@ -253,6 +336,37 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
         </CardContent>
       </Card>
 
+      {/* Quick Tips: fills the left column under the classifier. */}
+      <Card data-testid="ai-tips-card">
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <span className="material-icons text-yellow-600">lightbulb</span>
+            <span>Consejos para Mejores Resultados</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ul className="space-y-2 text-sm text-gray-600">
+            <li className="flex items-start space-x-2">
+              <span className="material-icons text-xs mt-1">check_circle</span>
+              <span>Proporcione el texto completo de la reclamación para un análisis más preciso</span>
+            </li>
+            <li className="flex items-start space-x-2">
+              <span className="material-icons text-xs mt-1">check_circle</span>
+              <span>Revise siempre las sugerencias de IA antes de enviarlas al consumidor</span>
+            </li>
+            <li className="flex items-start space-x-2">
+              <span className="material-icons text-xs mt-1">check_circle</span>
+              <span>La IA redacta siguiendo la normativa peruana vigente (DS 011-2011-PCM, DS 101-2022-PCM)</span>
+            </li>
+            <li className="flex items-start space-x-2">
+              <span className="material-icons text-xs mt-1">check_circle</span>
+              <span>Use la clasificación automática para priorizar reclamaciones urgentes</span>
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+      </div>
+
       {/* Pro AI tools: drafting, SLA prediction and trends share one gate so a
           customer on a lower plan sees one clear upgrade card instead of three
           buttons that answer 402. */}
@@ -263,7 +377,7 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
       >
         <div className="space-y-6">
       {/* Response Suggestion Tool */}
-      <Card>
+      <Card data-testid="ai-response-card">
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
             <span className="material-icons text-green-600">edit</span>
@@ -271,6 +385,16 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <ComplaintPicker
+            id="response-complaint"
+            label="Reclamo para la respuesta"
+            testIdPrefix="response-complaint"
+            complaints={complaints}
+            isLoading={complaintsLoading}
+            value={selectedResponseComplaintId}
+            onChange={handleResponseComplaintSelect}
+          />
+
           <div>
             <label className="block text-sm font-medium mb-2">
               Tipo de reclamación
@@ -526,36 +650,8 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
       </Card>
         </div>
       </PlanGate>
+      </div>
 
-      {/* Quick Tips */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <span className="material-icons text-yellow-600">lightbulb</span>
-            <span>Consejos para Mejores Resultados</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ul className="space-y-2 text-sm text-gray-600">
-            <li className="flex items-start space-x-2">
-              <span className="material-icons text-xs mt-1">check_circle</span>
-              <span>Proporcione el texto completo de la reclamación para un análisis más preciso</span>
-            </li>
-            <li className="flex items-start space-x-2">
-              <span className="material-icons text-xs mt-1">check_circle</span>
-              <span>Revise siempre las sugerencias de IA antes de enviarlas al consumidor</span>
-            </li>
-            <li className="flex items-start space-x-2">
-              <span className="material-icons text-xs mt-1">check_circle</span>
-              <span>La IA redacta siguiendo la normativa peruana vigente (DS 011-2011-PCM, DS 101-2022-PCM)</span>
-            </li>
-            <li className="flex items-start space-x-2">
-              <span className="material-icons text-xs mt-1">check_circle</span>
-              <span>Use la clasificación automática para priorizar reclamaciones urgentes</span>
-            </li>
-          </ul>
-        </CardContent>
-      </Card>
     </div>
   );
 }

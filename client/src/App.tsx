@@ -23,6 +23,7 @@ import PrivacidadPage from "@/pages/privacidad";
 import TerminosPage from "@/pages/terminos";
 import AvisoLegalPage from "@/pages/aviso-legal";
 import NormativaPage from "@/pages/normativa";
+import EncargadoPage from "@/pages/encargado";
 import ContactoPage from "@/pages/contacto";
 import ResetPasswordPage from "@/pages/reset-password";
 import VerifyEmailPage from "@/pages/verify-email";
@@ -126,6 +127,9 @@ function Router() {
       {/* Marco normativo: las normas del Libro de Reclamaciones con su enlace
           oficial, para que el pie no tenga que cargar ocho entradas. */}
       <Route path="/normativa" component={NormativaPage} />
+      {/* Ficha del encargado: lo que la empresa necesita para declarar a
+          LibroDigital en el SIPDP (rol, alojamiento y flujo transfronterizo). */}
+      <Route path="/encargado" component={EncargadoPage} />
 
       {/* Nosotros y contacto: página pública con el formulario de contacto. */}
       <Route path="/contacto" component={ContactoPage} />

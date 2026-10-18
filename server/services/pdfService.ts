@@ -5,9 +5,14 @@ import type { Complaint, Business, Establishment } from '@shared/schema';
 import type { ExecutiveReport } from './aiService';
 
 export interface ComplianceReportData {
-  ds011Status: boolean;
-  ds101Status: boolean;
-  ley29733Status: boolean;
+  standards: Array<{
+    label: string;
+    status: string;
+    detail: string;
+    action: string | null;
+  }>;
+  applicableStandards: number;
+  compliantStandards: number;
   nextActions: string[];
   overdueItems: Array<{
     complianceType: string;
@@ -414,19 +419,39 @@ class PDFService {
       doc.text(`Fecha de emisión: ${new Date().toLocaleDateString('es-PE')}`);
       doc.moveDown(1.5);
 
-      const compliant = [report.ds011Status, report.ds101Status, report.ley29733Status].filter(Boolean).length;
-      doc.fontSize(12).font('Helvetica-Bold').text(`Cumplimiento general: ${Math.round((compliant / 3) * 100)}%`);
+      doc.fontSize(12).font('Helvetica-Bold').text(
+        `Obligaciones cumplidas: ${report.compliantStandards} de ${report.applicableStandards} aplicables`,
+      );
+      if (report.applicableStandards < report.standards.length) {
+        doc
+          .fontSize(9)
+          .font('Helvetica')
+          .fillColor('#555555')
+          .text(
+            'Las obligaciones sin datos (por ejemplo, el plazo de 15 días antes del primer reclamo) no se cuentan.',
+          );
+        doc.fillColor('black');
+      }
       doc.moveDown();
 
-      const rows: Array<[string, boolean, string]> = [
-        ['DS 011-2011-PCM — Reglamento del Libro de Reclamaciones', report.ds011Status, 'Libro de Reclamaciones habilitado y publicado'],
-        ['Ley N.° 29571, art. 152 (Ley N.° 31435) — Plazo de 15 días hábiles', report.ds101Status, 'Respuestas a reclamos y quejas dentro del plazo legal'],
-        ['Ley 29733 — Protección de Datos Personales', report.ley29733Status, 'Tratamiento de datos conforme a la normativa'],
-      ];
+      const statusLabel: Record<string, string> = {
+        compliant: 'Conforme',
+        pending: 'Pendiente',
+        overdue: 'Incumplido',
+        not_applicable: 'Sin datos',
+      };
 
-      for (const [label, ok, description] of rows) {
-        doc.fontSize(11).font('Helvetica-Bold').text(`${ok ? '[X]' : '[ ]'} ${label}`);
-        doc.fontSize(9).font('Helvetica').fillColor('#555555').text(description);
+      for (const standard of report.standards) {
+        const mark =
+          standard.status === 'compliant' ? '[X]' : standard.status === 'not_applicable' ? '[-]' : '[ ]';
+        doc
+          .fontSize(11)
+          .font('Helvetica-Bold')
+          .text(`${mark} ${standard.label} — ${statusLabel[standard.status] ?? standard.status}`);
+        doc.fontSize(9).font('Helvetica').fillColor('#555555').text(standard.detail);
+        if (standard.action) {
+          doc.text(`Acción: ${standard.action}`);
+        }
         doc.fillColor('black');
         doc.moveDown(0.5);
       }
@@ -544,7 +569,7 @@ class PDFService {
 
       if (activities.length === 0) {
         doc.fontSize(11).font('Helvetica').text(
-          'Aún no se han registrado actividades de tratamiento. Use el asistente RNPD para incorporarlas.',
+          'Aún no se han registrado actividades de tratamiento. Confírmalas en Cumplimiento → Registro de actividades de tratamiento.',
         );
       }
 

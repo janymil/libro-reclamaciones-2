@@ -87,6 +87,7 @@ export default function ComplaintResponseDialog({ complaint, open, onOpenChange 
   const handleSuggest = async () => {
     try {
       const result = await suggestResponse.mutateAsync({
+        complaintId: complaint.id,
         complaintText: `${complaint.complaintDetail}\n\nPedido del consumidor: ${complaint.consumerRequest ?? 'No especificado'}`,
         complaintType: complaint.complaintType,
         tone: tone === "auto" ? undefined : tone,

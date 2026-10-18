@@ -109,8 +109,6 @@ export interface ReportStats {
   answeredComplaints: number;
   overdueComplaints: number;
   complianceRate: number;
-  /** Paperwork checklist (RNPD, privacy policy, DS 011/101) - not a deadline metric. */
-  formalComplianceRate: number;
 }
 
 /** Built by `@shared/monthly-reports`, which also owns the aggregation. */

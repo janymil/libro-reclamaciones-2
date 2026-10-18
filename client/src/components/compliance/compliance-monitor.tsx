@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import RnpdAssistantDialog from "@/components/compliance/rnpd-assistant-dialog";
 import LegalDocumentsDialog from "@/components/compliance/legal-documents-dialog";
@@ -7,25 +8,94 @@ import { downloadBlob, todayStamp } from "@/lib/export";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { COMPLIANCE_STATUSES } from "@/lib/constants";
+import { summarizeCompliance, type ComplianceStatus } from "@/lib/compliance-score";
 
-interface ComplianceItem {
-  type: string;
-  status: 'compliant' | 'pending' | 'overdue' | 'not_applicable';
-  description: string;
-  dueDate?: string;
-  actions: string[];
+interface ComplianceStandard {
+  id: "ds_011" | "ds_101" | "ley_29733" | "rnpd";
+  label: string;
+  status: ComplianceStatus;
+  /** Evidence behind the status, with real numbers. */
+  detail: string;
+  /** What to do when it is not met. */
+  action: string | null;
+  /** In-app page that fixes it. */
+  href: string | null;
+  /** In-app assistant that fixes it (the processing-activities dialog). */
+  actionTarget?: "rnpd-assistant";
+  /** Official procedure filed outside the platform (RNPD / SIPDP). */
+  external?: { href: string; label: string };
 }
 
 interface ComplianceReport {
-  ds011Status: boolean;
-  ds101Status: boolean;
-  ley29733Status: boolean;
-  nextActions: string[];
-  overdueItems: ComplianceItem[];
+  standards: ComplianceStandard[];
+  applicableStandards: number;
+  compliantStandards: number;
+  /** Declaration about the RNPD inscription (never a verification). */
+  rnpd?: {
+    registered: boolean;
+    answered: boolean;
+    code: string | null;
+    completedDate: string | null;
+  };
 }
+
+const STATUS_LABELS: Record<ComplianceStatus, string> = {
+  compliant: "Conforme",
+  pending: "Pendiente",
+  overdue: "Incumplido",
+  not_applicable: "Sin datos",
+};
+
+/**
+ * Each row uses its real status. `not_applicable` means "there is nothing to
+ * evaluate yet" (e.g. the 15-day deadline before the first complaint), which is
+ * why it says "Sin datos" and never counts as either met or breached.
+ */
+const STATUS_TONES: Record<
+  ComplianceStatus,
+  { card: string; title: string; detail: string; icon: string; iconClass: string; badge: string }
+> = {
+  compliant: {
+    card: "bg-green-50 border-green-200",
+    title: "text-green-900",
+    detail: "text-green-800",
+    icon: "check_circle",
+    iconClass: "text-success",
+    badge: "bg-green-100 text-green-800",
+  },
+  pending: {
+    card: "bg-amber-50 border-amber-200",
+    title: "text-amber-900",
+    detail: "text-amber-800",
+    icon: "schedule",
+    iconClass: "text-warning",
+    badge: "bg-amber-100 text-amber-900",
+  },
+  overdue: {
+    card: "bg-red-50 border-red-200",
+    title: "text-red-900",
+    detail: "text-red-800",
+    icon: "error",
+    iconClass: "text-destructive",
+    badge: "bg-red-100 text-red-800",
+  },
+  not_applicable: {
+    card: "bg-gray-50 border-gray-200",
+    title: "text-gray-800",
+    detail: "text-gray-600",
+    icon: "remove_circle_outline",
+    iconClass: "text-gray-400",
+    badge: "bg-gray-200 text-gray-700",
+  },
+};
+
+const FIX_LABELS: Record<string, string> = {
+  "/sucursales": "Ir a Sucursales",
+  "/libros": "Ir a Libros",
+  "/reclamos": "Ir a Reclamos",
+  "/cumplimiento": "Ir a Cumplimiento",
+};
 
 export default function ComplianceMonitor() {
   const [rnpdOpen, setRnpdOpen] = useState(false);
@@ -41,19 +111,6 @@ export default function ComplianceMonitor() {
         throw new Error('Failed to fetch compliance report');
       }
       return response.json() as Promise<ComplianceReport>;
-    },
-  });
-
-  const { data: tracking } = useQuery({
-    queryKey: ['/api/compliance/tracking'],
-    queryFn: async () => {
-      const response = await fetch('/api/compliance/tracking', {
-        credentials: 'include',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to fetch compliance tracking');
-      }
-      return response.json() as Promise<ComplianceItem[]>;
     },
   });
 
@@ -80,27 +137,32 @@ export default function ComplianceMonitor() {
     );
   }
 
-  const getComplianceScore = () => {
-    if (!report) return 0;
-    const total = 3;
-    const compliant = [report.ds011Status, report.ds101Status, report.ley29733Status].filter(Boolean).length;
-    return Math.round((compliant / total) * 100);
-  };
+  /**
+   * Only applicable standards count. Before the first complaint the 15-day
+   * deadline has no data, so it is excluded instead of being scored as "met".
+   */
+  const summary = summarizeCompliance(report?.standards);
 
-  const getStatusBadge = (status: string) => {
-    const variants = {
-      compliant: "bg-green-100 text-green-800",
-      pending: "bg-yellow-100 text-yellow-800",
-      overdue: "bg-red-100 text-red-800",
-      not_applicable: "bg-gray-100 text-gray-800",
-    };
+  const scoreRing = {
+    unknown: "text-gray-200",
+    ok: "text-green-500",
+    partial: "text-yellow-500",
+    risk: "text-red-500",
+  }[summary.tone];
 
-    return (
-      <Badge className={variants[status as keyof typeof variants] || "bg-gray-100 text-gray-800"}>
-        {COMPLIANCE_STATUSES[status as keyof typeof COMPLIANCE_STATUSES] || status}
-      </Badge>
-    );
-  };
+  const scoreBar = {
+    unknown: "bg-gray-300",
+    ok: "bg-green-600",
+    partial: "bg-yellow-500",
+    risk: "bg-red-600",
+  }[summary.tone];
+
+  const scoreText = {
+    unknown: "text-gray-500",
+    ok: "text-green-600",
+    partial: "text-yellow-600",
+    risk: "text-red-600",
+  }[summary.tone];
 
   const downloadReport = async () => {
     try {
@@ -114,11 +176,9 @@ export default function ComplianceMonitor() {
     }
   };
 
-  const complianceScore = getComplianceScore();
-
   return (
     <div className="space-y-6" data-testid="compliance-monitor">
-      {/* Overall Compliance Score */}
+      {/* Overall status + per-obligation detail */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
@@ -129,8 +189,20 @@ export default function ComplianceMonitor() {
         <CardContent>
           <div className="flex items-center justify-between mb-4">
             <div>
-              <div className="text-3xl font-bold text-gray-900">{complianceScore}%</div>
-              <p className="text-sm text-gray-600">Cumplimiento Legal</p>
+              <div
+                className={`font-bold text-gray-900 ${summary.tone === "unknown" ? "text-xl" : "text-3xl"}`}
+                data-testid="compliance-score"
+              >
+                {summary.tone === "unknown"
+                  ? "Sin datos"
+                  : `${summary.compliant} de ${summary.applicable}`}
+              </div>
+              <p className="text-sm text-gray-600">Obligaciones cumplidas</p>
+              {summary.notApplicable > 0 && (
+                <p className="mt-1 text-xs text-gray-500">
+                  {summary.notApplicable} obligación(es) sin datos todavía: no se cuentan en el resultado.
+                </p>
+              )}
             </div>
             <div className="w-24 h-24 relative">
               <svg className="w-24 h-24 transform -rotate-90" viewBox="0 0 100 100">
@@ -150,143 +222,103 @@ export default function ComplianceMonitor() {
                   stroke="currentColor"
                   strokeWidth="8"
                   fill="transparent"
-                  strokeDasharray={`${complianceScore * 2.51} 251`}
-                  className={complianceScore >= 80 ? "text-green-500" : complianceScore >= 60 ? "text-yellow-500" : "text-red-500"}
+                  strokeDasharray={`${summary.ratio * 251} 251`}
+                  className={scoreRing}
                 />
               </svg>
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-lg font-bold">{complianceScore}%</span>
+                <span className="text-lg font-bold">
+                  {summary.tone === "unknown" ? "—" : `${summary.compliant}/${summary.applicable}`}
+                </span>
               </div>
             </div>
           </div>
-          
-          <Progress value={complianceScore} className="w-full" />
-          
-          <div className="mt-4 text-sm text-gray-600">
-            {complianceScore >= 80 && (
-              <p className="text-green-600">✓ Excelente cumplimiento legal</p>
-            )}
-            {complianceScore >= 60 && complianceScore < 80 && (
-              <p className="text-yellow-600">⚠ Cumplimiento parcial - Revisar pendientes</p>
-            )}
-            {complianceScore < 60 && (
-              <p className="text-red-600">⚠ Atención requerida - Riesgo de incumplimiento</p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
 
-      {/* Legal Framework Compliance */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Monitor de Cumplimiento Legal</CardTitle>
-          <p className="text-sm text-gray-600">Estado actual de conformidad normativa</p>
-        </CardHeader>
-        
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-4">
-              {/* DS 011-2011-PCM */}
-              <div className="flex items-center justify-between p-4 bg-green-50 rounded-lg border border-green-200">
-                <div className="flex items-center space-x-3">
-                  <span className="material-icons text-success">check_circle</span>
-                  <div>
-                    <h4 className="font-medium text-green-800">DS 011-2011-PCM</h4>
-                    <p className="text-sm text-green-600">Reglamento del Libro de Reclamaciones</p>
-                  </div>
-                </div>
-                {getStatusBadge(report?.ds011Status ? 'compliant' : 'pending')}
-              </div>
-              
-              {/* DS 101-2022-PCM */}
-              <div className="flex items-center justify-between p-4 bg-green-50 rounded-lg border border-green-200">
-                <div className="flex items-center space-x-3">
-                  <span className="material-icons text-success">check_circle</span>
-                  <div>
-                    <h4 className="font-medium text-green-800">DS 101-2022-PCM</h4>
-                    <p className="text-sm text-green-600">15 días hábiles improrrogables</p>
-                  </div>
-                </div>
-                {getStatusBadge(report?.ds101Status ? 'compliant' : 'pending')}
-              </div>
-              
-              {/* Ley 29733 + DS 016-2024-JUS */}
-              <div className="flex items-center justify-between p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                <div className="flex items-center space-x-3">
-                  <span className="material-icons text-warning">warning</span>
-                  <div>
-                    <h4 className="font-medium text-yellow-800">Ley 29733 + DS 016-2024-JUS</h4>
-                    <p className="text-sm text-yellow-600">Protección de Datos Personales</p>
-                  </div>
-                </div>
-                {getStatusBadge(report?.ley29733Status ? 'compliant' : 'pending')}
-              </div>
-            </div>
-            
-            {/* Next Actions */}
-            <div className="space-y-4">
-              <Card className="bg-blue-50 border-blue-200">
-                <CardContent className="pt-4">
-                  <h4 className="font-medium text-blue-800 mb-2">Próximas Acciones Requeridas</h4>
-                  {report?.nextActions && report.nextActions.length > 0 ? (
-                    <ul className="space-y-2 text-sm text-blue-700">
-                      {report.nextActions.map((action, index) => (
-                        <li key={index} className="flex items-center space-x-2">
-                          <span className="material-icons text-xs">circle</span>
-                          <span>{action}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-sm text-blue-700">No hay acciones pendientes</p>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+          <div
+            className="h-4 w-full overflow-hidden rounded-full bg-gray-200"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={summary.applicable || 1}
+            aria-valuenow={summary.compliant}
+            aria-label="Obligaciones legales cumplidas"
+          >
+            <div
+              className={`h-full rounded-full transition-all ${scoreBar}`}
+              style={{ width: `${summary.ratio * 100}%` }}
+            />
           </div>
-        </CardContent>
-      </Card>
 
-      {/* Detailed Compliance Tracking */}
-      {tracking && tracking.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Seguimiento Detallado</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {tracking.map((item, index) => (
-                <div key={index} className="border rounded-lg p-4" data-testid={`compliance-item-${index}`}>
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="font-medium">{item.description}</h4>
-                    {getStatusBadge(item.status)}
-                  </div>
-                  
-                  {item.dueDate && (
-                    <p className="text-sm text-gray-600 mb-2">
-                      Vencimiento: {new Date(item.dueDate).toLocaleDateString('es-PE')}
-                    </p>
-                  )}
-                  
-                  {item.actions && item.actions.length > 0 && (
-                    <div>
-                      <p className="text-sm font-medium text-gray-700 mb-1">Acciones:</p>
-                      <ul className="text-sm text-gray-600 space-y-1">
-                        {item.actions.map((action, actionIndex) => (
-                          <li key={actionIndex} className="flex items-start space-x-2">
-                            <span className="material-icons text-xs mt-1">arrow_right</span>
-                            <span>{action}</span>
-                          </li>
-                        ))}
-                      </ul>
+          <p className={`mt-4 text-sm ${scoreText}`} data-testid="compliance-message">
+            {summary.message}
+          </p>
+
+          {report?.standards && report.standards.length > 0 && (
+            <div className="mt-5 space-y-3">
+              {report.standards.map((standard) => {
+                const tone = STATUS_TONES[standard.status];
+                return (
+                  <div
+                    key={standard.id}
+                    className={`rounded-lg border p-4 ${tone.card}`}
+                    data-testid={`compliance-standard-${standard.id}`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex min-w-0 items-start gap-2 sm:gap-3">
+                        <span className={`material-icons ${tone.iconClass}`}>{tone.icon}</span>
+                        <div className="min-w-0">
+                          <h4 className={`text-sm font-semibold ${tone.title}`}>{standard.label}</h4>
+                          <p className={`mt-1 text-sm ${tone.detail}`}>{standard.detail}</p>
+                          {standard.action && (
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-medium text-gray-900">Cómo corregirlo:</span>
+                              <span className="text-sm text-gray-700">{standard.action}</span>
+                              {standard.actionTarget === "rnpd-assistant" ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setRnpdOpen(true)}
+                                  data-testid="button-fix-ley29733"
+                                >
+                                  Ver mi registro de actividades
+                                </Button>
+                              ) : standard.href ? (
+                                <Link href={standard.href}>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    data-testid={`button-fix-${standard.id}`}
+                                  >
+                                    {FIX_LABELS[standard.href] ?? "Ir a corregir"}
+                                  </Button>
+                                </Link>
+                              ) : null}
+                              {standard.external && (
+                                <a
+                                  href={standard.external.href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-sm font-medium text-primary underline underline-offset-2"
+                                  data-testid={`link-external-${standard.id}`}
+                                >
+                                  {standard.external.label}
+                                  <span className="material-icons text-sm" aria-hidden="true">
+                                    open_in_new
+                                  </span>
+                                </a>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <Badge className={`shrink-0 ${tone.badge}`}>{STATUS_LABELS[standard.status]}</Badge>
                     </div>
-                  )}
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
 
       {/* Quick Actions */}
       <Card>
@@ -307,7 +339,7 @@ export default function ComplianceMonitor() {
                 <div className="text-xs text-gray-500">Compliance completo</div>
               </div>
             </Button>
-            
+
             <Button
               variant="outline"
               className="h-auto p-4 flex flex-col items-center space-y-2"
@@ -316,11 +348,11 @@ export default function ComplianceMonitor() {
             >
               <span className="material-icons text-purple-600">assignment</span>
               <div className="text-center">
-                <div className="font-medium">Asistente RNPD</div>
-                <div className="text-xs text-gray-500">Registro datos</div>
+                <div className="font-medium">Registro de actividades</div>
+                <div className="text-xs text-gray-500">Datos personales</div>
               </div>
             </Button>
-            
+
             <Button
               variant="outline"
               className="h-auto p-4 flex flex-col items-center space-y-2"
@@ -364,13 +396,12 @@ export default function ComplianceMonitor() {
           </p>
         </CardContent>
       </Card>
+
       {/* Asistente RNPD: registro de actividades de tratamiento */}
       <RnpdAssistantDialog open={rnpdOpen} onOpenChange={setRnpdOpen} />
 
       {/* Documentos legales descargables */}
       <LegalDocumentsDialog open={documentsOpen} onOpenChange={setDocumentsOpen} />
-
-
     </div>
   );
 }

@@ -42,7 +42,6 @@ import {
   ExternalLink,
   Menu,
   X,
-  Star,
   CircleCheck,
   Landmark,
   BookOpenCheck,
@@ -105,25 +104,6 @@ const AI_FEATURES = [
     icon: Gavel,
     title: 'Previene multas',
     body: 'Detector de cláusulas abusivas (arts. 49 y 50 del Código) y predicción de SLA que alerta antes de que un plazo venza.',
-  },
-];
-
-// PLACEHOLDER testimonials — replace with real customer quotes before launch.
-const TESTIMONIALS = [
-  {
-    quote: 'La IA me redacta la respuesta y yo solo reviso. Respondimos en 3 días.',
-    name: 'Mariana Q.',
-    role: 'Cafetería · Lima',
-  },
-  {
-    quote: 'Nos fiscalizaron y exportamos el expediente completo en minutos.',
-    name: 'Ricardo B.',
-    role: 'Colegio · Arequipa',
-  },
-  {
-    quote: 'El QR en caja nos sacó del papel en una sola tarde.',
-    name: 'Lucía T.',
-    role: 'Cadena de tiendas · Trujillo',
   },
 ];
 
@@ -823,7 +803,7 @@ function ProductShowcase() {
 
 function SocialProof() {
   return (
-    <section className="mx-auto max-w-6xl px-5 py-20 sm:px-8 md:py-24" aria-label="Rubros y testimonios">
+    <section className="mx-auto max-w-6xl px-5 py-20 sm:px-8 md:py-24" aria-label="Rubros">
       <Reveal>
         <p className="text-center font-mono text-xs uppercase tracking-[0.28em] text-[#5c5246]">
           Pensado para cada rubro obligado por ley
@@ -839,27 +819,6 @@ function SocialProof() {
           ))}
         </ul>
       </Reveal>
-
-      <div className="mt-14 grid gap-6 md:grid-cols-3">
-        {TESTIMONIALS.map((t, i) => (
-          <Reveal key={t.name} delay={i * 110}>
-            <figure className="flex h-full flex-col rounded-2xl border border-[#e3d9c6] bg-[#fdfaf3] p-7">
-              <div className="flex gap-1 text-amber-500" aria-label="5 de 5 estrellas">
-                {Array.from({ length: 5 }).map((_, s) => (
-                  <Star key={s} className="h-4 w-4 fill-current" aria-hidden="true" />
-                ))}
-              </div>
-              <blockquote className="mt-4 flex-1 font-display text-lg italic leading-relaxed text-[#1b1611]">
-                “{t.quote}”
-              </blockquote>
-              <figcaption className="mt-5 border-t border-[#e3d9c6] pt-4">
-                <p className="font-semibold text-[#1b1611]">{t.name}</p>
-                <p className="text-sm text-[#5c5246]">{t.role}</p>
-              </figcaption>
-            </figure>
-          </Reveal>
-        ))}
-      </div>
     </section>
   );
 }

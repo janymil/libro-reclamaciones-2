@@ -139,4 +139,31 @@ describe("buildGettingStarted", () => {
     ]);
     expect(plan.pending).toBe(3);
   });
+
+  it("shows the RNPD inscription as pending until the business declares it", () => {
+    const plan = buildGettingStarted({ ...base, rnpdRegistered: false });
+    const rnpd = plan.steps.find((entry) => entry.id === "rnpd-inscripcion");
+
+    expect(rnpd).toMatchObject({ done: false, href: "/cumplimiento" });
+    expect(rnpd?.description).toContain("SIPDP");
+    // The platform cannot file it, so it stays open until the company answers.
+    expect(plan.allDone).toBe(false);
+  });
+
+  it("shows the RNPD inscription as a completed step once declared", () => {
+    const plan = buildGettingStarted({ ...base, rnpdRegistered: true });
+    const rnpd = plan.steps.find((entry) => entry.id === "rnpd-inscripcion");
+
+    expect(rnpd).toMatchObject({
+      done: true,
+      title: "Banco de datos inscrito en el RNPD",
+    });
+    expect(plan.allDone).toBe(true);
+  });
+
+  it("adds no RNPD row while the compliance answer is unknown", () => {
+    // A failed /api/compliance/report must not turn into a permanent reminder.
+    const plan = buildGettingStarted(base);
+    expect(plan.steps.map((entry) => entry.id)).not.toContain("rnpd-inscripcion");
+  });
 });

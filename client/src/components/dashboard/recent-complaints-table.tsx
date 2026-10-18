@@ -17,18 +17,18 @@ import { COMPLAINT_TYPES } from "@/lib/constants";
 import ComplaintDetail from "@/components/complaints/complaint-detail";
 import ComplaintResponseDialog from "@/components/complaints/complaint-response-dialog";
 import AIAssistantDialog from "@/components/ai/ai-assistant-dialog";
-import type { Complaint } from "@shared/schema";
+import type { DashboardComplaint } from "@/hooks/use-complaints";
 
 interface RecentComplaintsTableProps {
-  complaints?: Complaint[];
+  complaints?: DashboardComplaint[];
 }
 
 export default function RecentComplaintsTable({ complaints = [] }: RecentComplaintsTableProps) {
   const { getBusinessDaysRemaining, getUrgencyLevel } = useBusinessDays();
   const [, setLocation] = useLocation();
 
-  const [viewTarget, setViewTarget] = useState<Complaint | null>(null);
-  const [respondTarget, setRespondTarget] = useState<Complaint | null>(null);
+  const [viewTarget, setViewTarget] = useState<DashboardComplaint | null>(null);
+  const [respondTarget, setRespondTarget] = useState<DashboardComplaint | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
 
   const getStatusBadge = (status: string) => {
@@ -75,9 +75,9 @@ export default function RecentComplaintsTable({ complaints = [] }: RecentComplai
   return (
     <Card data-testid="recent-complaints-table">
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle>Reclamaciones Recientes</CardTitle>
-          <div className="flex items-center space-x-3">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -146,7 +146,9 @@ export default function RecentComplaintsTable({ complaints = [] }: RecentComplai
                       </div>
                     </TableCell>
 
-                    <TableCell className="hidden lg:table-cell">{complaint.establishmentId}</TableCell>
+                    <TableCell className="hidden lg:table-cell">{
+                      complaint.establishmentName ?? 'Sin local asignado'
+                    }</TableCell>
 
                     <TableCell>
                       {getUrgencyBadge(complaint.dueDate)}
@@ -176,16 +178,6 @@ export default function RecentComplaintsTable({ complaints = [] }: RecentComplai
                           onClick={() => setRespondTarget(complaint)}
                         >
                           <span className="material-icons text-sm">reply</span>
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-purple-600"
-                          title="Asistente IA"
-                          data-testid={`button-ai-${complaint.id}`}
-                          onClick={() => setAiOpen(true)}
-                        >
-                          <span className="material-icons text-sm">psychology</span>
                         </Button>
                       </div>
                     </TableCell>

@@ -92,10 +92,10 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
       {!isMobile && <Sidebar />}
       
       {/* Main Content */}
-      <main id="main-content" className="flex-1 min-h-screen">
+      <main id="main-content" className="min-w-0 flex-1 min-h-screen">
         <Header title={title} subtitle={subtitle} />
         
-        <div className="p-6 pb-20 lg:pb-6">
+        <div className="p-4 pb-20 sm:p-6 lg:pb-6">
           <EmailVerificationBanner />
           {children}
         </div>

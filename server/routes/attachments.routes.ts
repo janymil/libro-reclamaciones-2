@@ -6,7 +6,8 @@ import { requireAuth, requireStaff } from "../middleware/requireAuth";
 import { evidenceUploadLimiter, uploadLimiter } from "../middleware/rateLimits";
 import {
   attachmentUpload,
-  readAttachment,
+  readAttachmentBytes,
+  encryptStoredAttachment,
   resolveMimeType,
   documentMatches,
   MAX_FILE_SIZE_BYTES,
@@ -114,6 +115,12 @@ export function registerAttachmentsRoutes(app: Express): void {
           return res.status(402).json({ message: quota.reason, code: "quota_exceeded" });
         }
 
+        // Encrypt each file at rest BEFORE recording it: a row must never point
+        // at a plaintext file. If this throws, the catch below removes the files.
+        for (const file of files) {
+          encryptStoredAttachment(file);
+        }
+
         const created = [];
         for (const file of files) {
           const attachment = await storage.createAttachment({
@@ -181,14 +188,14 @@ export function registerAttachmentsRoutes(app: Express): void {
         return res.status(404).json({ message: "Archivo no encontrado" });
       }
 
-      const stream = readAttachment(attachment.fileName);
-      if (!stream) {
+      const bytes = readAttachmentBytes(attachment.fileName);
+      if (!bytes) {
         return res.status(410).json({ message: "El archivo ya no está disponible (política de retención)" });
       }
 
       res.setHeader('Content-Type', attachment.mimeType);
       res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(attachment.originalName)}"`);
-      stream.pipe(res);
+      res.end(bytes);
     } catch (error) {
       console.error('Error downloading attachment:', error);
       res.status(500).json({ message: "Failed to download attachment" });

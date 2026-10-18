@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   type Book,
   type Business,
@@ -9,11 +9,13 @@ import {
   type LibroConfiguration,
   books,
   businesses,
+  complianceTracking,
   establishments,
   libroConfiguration,
   userBusinessAccess,
   users,
 } from "@shared/schema";
+import type { RnpdDeclaration } from "@shared/rnpd";
 
 /** Everything step 2 of the wizard collects, minus the ids the store assigns. */
 export interface CompleteOnboardingInput {
@@ -47,6 +49,13 @@ export interface CompleteOnboardingInput {
    * nor rewrite the onboarding state of a finished account.
    */
   makeActive?: boolean;
+  /**
+   * What the customer answered in the wizard about the RNPD (SIPDP) inscription.
+   * Written in the same transaction as the tenant: an "onboarded" account must
+   * not end up without its declaration, or the compliance card would show
+   * "unknown" for a question the customer already answered.
+   */
+  rnpdRegistration?: RnpdDeclaration;
 }
 
 export interface CompleteOnboardingResult {
@@ -159,6 +168,31 @@ export const onboardingStorage = {
             isActive: true,
           })
           .returning();
+      }
+
+      // The answer about the RNPD (SIPDP) inscription. Stored as a declaration
+      // (`pending` when the customer says "not yet"), never as a verification:
+      // the platform cannot check the State registry. Idempotent on resume.
+      if (input.rnpdRegistration) {
+        const [existingDeclaration] = await tx
+          .select()
+          .from(complianceTracking)
+          .where(and(
+            eq(complianceTracking.businessId, business.id),
+            eq(complianceTracking.complianceType, "rnpd_registration"),
+          ));
+
+        if (!existingDeclaration) {
+          await tx.insert(complianceTracking).values({
+            businessId: business.id,
+            complianceType: "rnpd_registration",
+            status: input.rnpdRegistration.registered ? "compliant" : "pending",
+            completedDate: input.rnpdRegistration.registered ? new Date() : null,
+            notes: input.rnpdRegistration.code?.trim()
+              ? `Código del banco de datos: ${input.rnpdRegistration.code.trim()}`
+              : null,
+          });
+        }
       }
 
       if (input.makeActive !== false) {

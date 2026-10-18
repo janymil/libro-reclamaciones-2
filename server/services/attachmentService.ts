@@ -3,6 +3,13 @@ import path from "path";
 import crypto from "crypto";
 import multer from "multer";
 
+import {
+  decryptAttachmentPayload,
+  encryptFileAtRest,
+  getAttachmentKey,
+  isEncryptedAttachment,
+} from "./attachmentCrypto";
+
 /**
  * Evidence attachments (Phase 1.1).
  *
@@ -117,13 +124,42 @@ export function resolveAttachmentPath(fileName: string): string | null {
   return absolute;
 }
 
-/** Reads a stored attachment for streaming back to the client. */
-export function readAttachment(fileName: string): fs.ReadStream | null {
+/**
+ * Encrypts an uploaded file at rest, right after multer writes it and before the
+ * attachment is recorded in the database: a row must never point at plaintext.
+ * No-op when the deployment has no ATTACHMENT_ENCRYPTION_KEY configured.
+ */
+export function encryptStoredAttachment(file: { path: string }): void {
+  encryptFileAtRest(file.path);
+}
+
+/**
+ * Reads a stored attachment and returns what the client should receive.
+ *
+ * Encrypted files are decrypted; files written before this format existed are
+ * returned untouched, so the change needs no migration to keep serving evidence.
+ * Throws when the file is encrypted and the key is missing or wrong, so the
+ * route answers an error instead of sending ciphertext labelled as a PDF.
+ */
+export function readAttachmentBytes(fileName: string): Buffer | null {
   const absolute = resolveAttachmentPath(fileName);
   if (!absolute || !fs.existsSync(absolute)) {
     return null;
   }
-  return fs.createReadStream(absolute);
+
+  const payload = fs.readFileSync(absolute);
+  const key = getAttachmentKey();
+
+  if (!key) {
+    if (isEncryptedAttachment(payload)) {
+      throw new Error(
+        "El adjunto está cifrado y falta ATTACHMENT_ENCRYPTION_KEY: no se puede descifrar.",
+      );
+    }
+    return payload;
+  }
+
+  return decryptAttachmentPayload(payload, key);
 }
 
 /** Deletes the stored file (used by manual removal and the retention sweep). */

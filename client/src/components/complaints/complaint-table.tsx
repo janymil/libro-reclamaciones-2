@@ -339,9 +339,9 @@ export default function ComplaintTable({ showFilters = true }: ComplaintTablePro
       {/* Table */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <CardTitle>Reclamaciones ({filteredComplaints.length})</CardTitle>
-            <div className="flex items-center space-x-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 variant="outline"
                 size="sm"

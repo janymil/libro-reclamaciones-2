@@ -151,7 +151,7 @@ export async function buildExpedienteZip(request: ExpedienteRequest): Promise<{ 
 
   let attachmentCount = 0;
   const archive: Archiver = new ZipArchive({ zlib: { level: 9 } });
-  const { readAttachment } = await import("./attachmentService");
+  const { readAttachmentBytes } = await import("./attachmentService");
 
   // Public status link printed as a QR on every constancia
   const libroConfig = await storage.getLibroConfiguration(business.id);
@@ -173,9 +173,9 @@ export async function buildExpedienteZip(request: ExpedienteRequest): Promise<{ 
     archive.append(pdf, { name: `hojas/${safeCorrelative}.pdf` });
 
     for (const attachment of attachments) {
-      const stream = readAttachment(attachment.fileName);
-      if (stream) {
-        archive.append(stream, {
+      const bytes = readAttachmentBytes(attachment.fileName);
+      if (bytes) {
+        archive.append(bytes, {
           name: `adjuntos/${safeCorrelative}/${attachment.originalName.replace(/[/\\]/g, '-')}`,
         });
         attachmentCount += 1;

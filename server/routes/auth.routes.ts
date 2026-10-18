@@ -479,10 +479,23 @@ export function registerAuthRoutes(app: Express): void {
         resumableBusinessId = existingBusiness.id;
       }
 
+      // Optional: what the wizard asked about the RNPD (SIPDP) inscription. It is
+      // a declaration by the customer, not a verification; `registered: false`
+      // is stored so the obligation is visible as pending from day one.
+      const rnpdRegistration = req.body.rnpdRegistration
+        ? z
+            .object({
+              registered: z.boolean(),
+              code: z.string().trim().max(100).optional(),
+            })
+            .parse(req.body.rnpdRegistration)
+        : undefined;
+
       const result = await storage.completeOnboarding({
         userId: user.id,
         existingBusinessId: resumableBusinessId,
         refreshBusinessProfile: Boolean(resumableBusinessId),
+        rnpdRegistration,
         // Plan and lifecycle are server-assigned: a wizard payload can never
         // mint a paid plan or skip the trial. The trial length is the one from
         // the console (Planes), not the compiled-in constant.

@@ -458,7 +458,7 @@ export async function executeAgentTool(
           respondidos: stats.responded,
           resueltos: stats.resolved,
           vencidos: stats.overdue,
-          cumplimientoSla: stats.slaCompliance,
+          cumplimientoSla: stats.slaOnTimeRate ?? 'sin datos',
           tiempoPromedioRespuestaHoras: stats.avgResponseTime,
         },
       };
