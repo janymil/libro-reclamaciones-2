@@ -83,6 +83,11 @@ const navigationSections: NavigationSection[] = [
         name: 'Integraciones',
         href: '/integraciones',
         icon: 'extension'
+      },
+      {
+        name: 'Ayuda',
+        href: '/ayuda',
+        icon: 'help_outline'
       }
     ]
   },

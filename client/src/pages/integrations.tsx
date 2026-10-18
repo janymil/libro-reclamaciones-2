@@ -43,6 +43,40 @@ const WEBHOOK_EVENT_OPTIONS = [
   { value: "complaint.responded", label: "Respuesta enviada" },
 ];
 
+/** Why a company would want the API (shown with and without the plan). */
+const API_BENEFITS = [
+  "Evite la doble digitación: cada reclamo nace en su CRM, ERP o tienda y queda en el Libro con su correlativo legal.",
+  "Responda, cambie el estado y adjunte evidencias desde su propio sistema, sin entrar al panel.",
+  "Mantenga el plazo legal de 15 días hábiles bajo control con estados y fechas sincronizados.",
+  "Un solo libro para todas sus sucursales, con trazabilidad y auditoría.",
+];
+
+/** Why a company would want webhooks (shown with and without the plan). */
+const WEBHOOK_BENEFITS = [
+  "Su sistema se entera del reclamo en segundos, sin consultar el panel ni revisar el correo.",
+  "Cree tickets, avise al área responsable o actualice su CRM automáticamente.",
+  "Firma HMAC-SHA256 y reintentos automáticos: la integración no depende de una persona.",
+  "Puede excluir los datos personales del consumidor del webhook y consultarlos por la API.",
+];
+
+function BenefitList({ items }: { items: string[] }) {
+  return (
+    <div className="rounded-lg border border-[#e3d9c6] bg-[#fdfaf3] p-3">
+      <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-gray-600">
+        Por qué le conviene
+      </p>
+      <ul className="space-y-1.5 text-sm text-gray-700">
+        {items.map((item) => (
+          <li key={item} className="flex gap-2">
+            <span aria-hidden="true" className="text-[#c02b0a]">✓</span>
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /**
  * Integraciones: how the business puts its Libro where its customers are.
  *
@@ -112,6 +146,26 @@ export default function IntegrationsPage() {
   return (
     <AppLayout title="Integraciones" subtitle="Enlace, redes sociales, widget y API para su negocio">
       <div className="max-w-4xl mx-auto space-y-8">
+        {/* Always visible, whatever the plan: the API guide and the help page
+            must be readable before an upgrade. */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-gray-600">
+            Enlaces, widget, API y webhooks para conectar su Libro con sus sistemas.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/ayuda">
+              <Button variant="outline" size="sm" data-testid="link-help-center">
+                Ayuda y guías
+              </Button>
+            </Link>
+            <Link href="/integraciones/api">
+              <Button className="btn-primary" size="sm" data-testid="link-api-docs-top">
+                Documentación de la API
+              </Button>
+            </Link>
+          </div>
+        </div>
+
         {/* Qué guía corresponde según dónde vende */}
         <Card data-testid="channel-guide-intro">
           <CardHeader>
@@ -183,7 +237,8 @@ export default function IntegrationsPage() {
         <PlanGate
           feature="api"
           title="Claves de API para su CRM/ERP"
-          description="Cree y consulte reclamaciones desde su propio sistema con POST/GET /api/v1/complaints."
+          description="Conecte su CRM, ERP, call center o tienda para crear y gestionar reclamaciones sin doble digitación."
+          benefits={API_BENEFITS}
         >
         <Card>
           <CardHeader>
@@ -201,6 +256,7 @@ export default function IntegrationsPage() {
                 </Button>
               </Link>
             </div>
+            <BenefitList items={API_BENEFITS} />
             <div className="flex gap-2">
               <Input
                 placeholder="Nombre de la clave (ej.: Mi CRM)"
@@ -294,7 +350,8 @@ export default function IntegrationsPage() {
         <PlanGate
           feature="webhooks"
           title="Webhooks a su sistema"
-          description="Le avisamos a su sistema cada evento, con firma HMAC-SHA256 y reintentos automáticos."
+          description="Reciba cada evento en su sistema en tiempo real, con firma HMAC-SHA256 y reintentos automáticos."
+          benefits={WEBHOOK_BENEFITS}
         >
         <Card>
           <CardHeader>
@@ -306,6 +363,7 @@ export default function IntegrationsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <BenefitList items={WEBHOOK_BENEFITS} />
             <div className="space-y-2">
               <p className="text-xs font-medium text-gray-700">Eventos a notificar</p>
               <div className="grid gap-2 sm:grid-cols-3">

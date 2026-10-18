@@ -31,6 +31,36 @@ documents every variable.
 | `AI_FORCE_FALLBACK` | test only | `true` sends every model call to the fallback, to validate the second provider without failing the primary. Never leave it on in production. |
 | `AI_PRICE_INPUT_PER_MTOK`, `AI_PRICE_OUTPUT_PER_MTOK` | optional | Price per million tokens in USD, used only to show an estimated cost in the per-tenant AI usage meter. Unset ⇒ cost is shown as "—", tokens are still counted. |
 
+### Enabling a customer's own sender domain (Remitente propio)
+
+The customer's address is stored in `libro_configuration.email_from_address`, but
+`shared/email-identity.ts` only uses it when its domain is listed in
+`SMTP_ALLOWED_SENDER_DOMAINS`. Everything else falls back to `SMTP_FROM_EMAIL`
+with the business display name and its Reply-To. This is intentionally assisted:
+Zoho must authorize the domain first, so the console can never mark an address
+as usable on its own.
+
+1. Customer saves the address in **Personalización → Remitente propio** and sends
+   the domain, company and RUC to `hola@librodigital.pe`.
+2. In Zoho Mail (the platform's mail host) add the customer's domain as an
+   allowed sending domain / customer domain and copy the DNS values it issues
+   (SPF TXT, DKIM selector, optional DMARC).
+3. Send those exact values to the customer. They publish them in their DNS; do
+   not copy generic records from the internet.
+4. Wait for propagation (usually minutes, up to 48 h) and verify SPF/DKIM.
+5. Add the domain to `SMTP_ALLOWED_SENDER_DOMAINS` in `docker-compose.yml`
+   (comma-separated, e.g. `librodigital.pe,miempresa.pe`), then
+   `docker compose up -d` to recreate the app. The default is
+   `librodigital.pe`, so without this step the address is never used.
+6. Have the customer send a test complaint. Check the `From` and `Reply-To`
+   headers, and `/api/libro-configuration/email-sender` should report
+   `"status":"custom"`.
+
+The customer-facing version of this procedure is the **Ayuda → Remitente
+propio** page; keep both in sync. A domain removed from the list immediately
+falls back to the platform sender on the next message.
+
+
 ### Free fallback provider: Cloudflare Workers AI
 
 The production primary is Groq's free tier: **30 RPM, 1,000 RPD, 8,000 TPM and

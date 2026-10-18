@@ -34,6 +34,7 @@ export const SECONDARY_MOBILE_NAV: MobileNavItem[] = [
   // Configuración (de la app y del libro: plantillas, marca e integraciones)
   { name: 'Personalización', href: '/personalizacion', icon: 'palette' },
   { name: 'Integraciones', href: '/integraciones', icon: 'extension' },
+  { name: 'Ayuda', href: '/ayuda', icon: 'help_outline' },
   // Cuenta (la persona, sus empresas, su equipo y su plan)
   { name: 'Mi Perfil', href: '/perfil', icon: 'account_circle' },
   { name: 'Empresas', href: '/empresas', icon: 'business' },

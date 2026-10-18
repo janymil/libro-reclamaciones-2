@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "wouter";
 import AppLayout from "@/components/layout/app-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useUpgradeToast } from "@/hooks/use-plan-upgrade";
 import PlanGate from "@/components/plan/plan-gate";
@@ -125,7 +127,7 @@ const emailSenderFields = [
     placeholder: "reclamos@miempresa.pe",
     type: "input" as const,
     description:
-      "Requiere verificar su dominio con nuestro proveedor de correo (registros SPF/DKIM). Mientras no esté verificado, los correos salen desde nuestra dirección con el nombre visible que indicó arriba; escríbanos para completar la verificación.",
+      "Requiere verificar su dominio con nuestro proveedor de correo (registros SPF/DKIM). No es inmediato: nuestro equipo debe habilitar el dominio. Mientras no esté verificado, los correos salen desde nuestra dirección con el nombre visible que indicó arriba, y las respuestas siguen llegando a su empresa.",
   },
 ];
 
@@ -452,12 +454,57 @@ export default function CustomizationPage() {
             <CardTitle>Remitente propio</CardTitle>
             <CardDescription>
               Para que sus correos salgan desde una dirección de su dominio, primero verificamos ese
-              dominio (registros SPF/DKIM) con nuestro proveedor de correo. Mientras no esté
-              verificado, el correo sale desde nuestra dirección mostrando el nombre visible que
-              configuró arriba, y las respuestas siguen llegando a su empresa.
+              dominio (registros SPF/DKIM) con nuestro proveedor de correo. Es un proceso asistido:
+              usted configura la dirección, nosotros habilitamos el dominio y le indicamos qué
+              registros DNS publicar. Mientras no esté verificado, el correo sale desde nuestra
+              dirección mostrando el nombre visible que configuró arriba, y las respuestas siguen
+              llegando a su empresa.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">{emailSenderFields.map(renderField)}</CardContent>
+          <CardContent className="space-y-6">
+            {sender && (
+              <div className="rounded-lg border border-[#e3d9c6] bg-[#fdfaf3] p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-gray-800">Estado actual:</span>
+                  <Badge
+                    className={
+                      sender.status === "custom"
+                        ? "bg-green-100 text-green-800"
+                        : sender.status === "pending_verification"
+                          ? "bg-yellow-100 text-yellow-800"
+                          : sender.status === "invalid"
+                            ? "bg-red-100 text-red-800"
+                            : "bg-gray-100 text-gray-700"
+                    }
+                  >
+                    {sender.status === "custom"
+                      ? "Personalizado"
+                      : sender.status === "pending_verification"
+                        ? "Pendiente de verificación"
+                        : sender.status === "invalid"
+                          ? "Dirección inválida"
+                          : "Remitente de la plataforma"}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-gray-600">{senderSummary()}</p>
+              </div>
+            )}
+            {emailSenderFields.map(renderField)}
+            <div className="flex flex-wrap gap-2">
+              <Link href="/ayuda#remitente-propio">
+                <Button variant="outline" size="sm" data-testid="link-sender-guide">
+                  Ver guía paso a paso
+                </Button>
+              </Link>
+              <a
+                href="mailto:hola@librodigital.pe?subject=Solicitud%20de%20verificaci%C3%B3n%20de%20dominio%20remitente&body=Hola%2C%20quiero%20usar%20mi%20propio%20dominio%20como%20remitente.%20Mi%20empresa%20es%3A%20%0AMi%20dominio%20es%3A%20%0ALa%20direcci%C3%B3n%20que%20quiero%20usar%20es%3A%20"
+              >
+                <Button variant="outline" size="sm" data-testid="link-sender-request">
+                  Solicitar verificación
+                </Button>
+              </a>
+            </div>
+          </CardContent>
         </Card>
         </PlanGate>
 

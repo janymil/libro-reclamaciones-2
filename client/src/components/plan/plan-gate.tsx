@@ -34,11 +34,14 @@ export default function PlanGate({
   feature,
   title,
   description,
+  benefits,
   children,
 }: {
   feature: GatedFeature;
   title: string;
   description: string;
+  /** Why the feature matters, shown while the plan does not include it. */
+  benefits?: string[];
   children: ReactNode;
 }) {
   const { data: subscription, isLoading } = useSubscription();
@@ -67,6 +70,16 @@ export default function PlanGate({
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {benefits && benefits.length > 0 && (
+          <ul className="space-y-1.5 text-sm text-gray-700">
+            {benefits.map((benefit) => (
+              <li key={benefit} className="flex gap-2">
+                <span aria-hidden="true" className="text-[#c02b0a]">✓</span>
+                <span>{benefit}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         <p className="text-sm text-gray-700">
           Disponible desde el plan <strong>{plan?.name ?? 'Pro'}</strong>
           {plan ? ` (S/ ${plan.priceAnnual} al año)` : ''}. Su plan actual es{' '}

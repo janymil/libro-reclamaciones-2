@@ -48,6 +48,7 @@ import SubscribePage from "@/pages/subscribe";
 import CustomizationPage from "@/pages/customization";
 import IntegrationsPage from "@/pages/integrations";
 import ApiDocsPage from "@/pages/api-docs";
+import HelpPage from "@/pages/help";
 import StatusPage from "@/pages/status";
 import AccessibilityPage from "@/pages/accessibility";
 import AuthPage from "@/pages/auth-page";
@@ -116,6 +117,8 @@ function Router() {
       <Route path="/personalizacion" component={CustomizationPage} />
       <Route path="/integraciones" component={IntegrationsPage} />
       <Route path="/integraciones/api" component={ApiDocsPage} />
+      <Route path="/ayuda" component={HelpPage} />
+      <Route path="/help"><Redirect to="/ayuda" /></Route>
       <Route path="/integrations/api"><Redirect to="/integraciones/api" /></Route>
 
       {/* Páginas públicas de transparencia (Phase 3.13) */}
