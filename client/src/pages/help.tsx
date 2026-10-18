@@ -227,7 +227,7 @@ export default function HelpPage() {
               Sí, es una función real: sus correos de confirmación y de respuesta pueden salir desde
               una dirección de su propio dominio, por ejemplo{" "}
               <code className="rounded bg-gray-100 px-1">reclamos@miempresa.pe</code>. No es
-              automático: requiere verificar el dominio con nuestro proveedor de correo y habilitarlo
+              automático: requiere verificar el dominio con nuestro servicio de correo y habilitarlo
               de nuestro lado.
             </CardDescription>
           </CardHeader>
@@ -240,11 +240,10 @@ export default function HelpPage() {
                   escribe la dirección que quiere usar. Se guarda en su configuración.
                 </Step>
                 <Step number={2}>
-                  Nuestro servidor solo la usa si el <strong>dominio</strong> de esa dirección está en
-                  la lista de dominios autorizados del proveedor de correo
-                  (<code className="rounded bg-gray-100 px-1">SMTP_ALLOWED_SENDER_DOMAINS</code>).
-                  Hoy esa lista contiene <code className="rounded bg-gray-100 px-1">librodigital.pe</code>{" "}
-                  y los dominios que hayamos verificado para clientes.
+                  La dirección solo se usa si el <strong>dominio</strong> figura entre los que
+                  tenemos habilitados para enviar. Hoy esa lista contiene únicamente{" "}
+                  <code className="rounded bg-gray-100 px-1">librodigital.pe</code> y los dominios
+                  que hayamos verificado para clientes.
                 </Step>
                 <Step number={3}>
                   Si el dominio no está autorizado, el correo <strong>sigue saliendo</strong> desde
@@ -309,13 +308,13 @@ export default function HelpPage() {
                   con: empresa, RUC, dominio y dirección que quiere usar.
                 </Step>
                 <Step number={4}>
-                  Nuestro equipo agrega el dominio en el proveedor de correo (Zoho Mail) y le envía
+                  Nuestro equipo agrega el dominio en nuestro servicio de correo y le envía
                   los valores exactos de los registros DNS.
                 </Step>
                 <Step number={5}>
                   Usted (o quien administre su DNS) publica los registros. Normalmente son:
                   <ul className="mt-1 list-disc space-y-1 pl-5">
-                    <li>Un registro <strong>TXT SPF</strong> que autoriza al proveedor de correo.</li>
+                    <li>Un registro <strong>TXT SPF</strong> que autoriza a nuestro servicio de correo.</li>
                     <li>Un registro <strong>TXT DKIM</strong> con el selector que le indiquemos.</li>
                     <li>Opcional pero recomendado: un <strong>TXT DMARC</strong> en modo monitoreo.</li>
                   </ul>
@@ -326,9 +325,8 @@ export default function HelpPage() {
                   verificamos que SPF y DKIM respondan.
                 </Step>
                 <Step number={7}>
-                  Habilitamos el dominio en la lista de remitentes autorizados y reiniciamos el
-                  servicio de correo. Desde ese momento la dirección se usa y el estado pasa a{" "}
-                  <strong>Personalizado</strong>.
+                  Habilitamos el dominio en nuestra configuración de envío. Desde ese momento la
+                  dirección se usa y el estado pasa a <strong>Personalizado</strong>.
                 </Step>
                 <Step number={8}>
                   Haga una prueba real: cree un reclamo de prueba y revise la cabecera{" "}
@@ -353,7 +351,7 @@ export default function HelpPage() {
               <ul className="mt-1 list-disc space-y-1 pl-5">
                 <li><strong>Sigue en “Pendiente”:</strong> faltan los registros DNS, no se han propagado o el dominio aún no fue habilitado por nosotros.</li>
                 <li><strong>El correo llega a spam:</strong> revise SPF, DKIM y DMARC; no publique dos registros SPF distintos.</li>
-                <li><strong>Cambió de proveedor de correo:</strong> avísenos; los registros y la autorización deben actualizarse.</li>
+                <li><strong>Cambió su servicio de correo:</strong> avísenos; los registros y la autorización deben actualizarse.</li>
                 <li><strong>Dirección inválida:</strong> use solo letras, números, punto, guion y guion bajo antes de la @; sin espacios.</li>
               </ul>
             </div>

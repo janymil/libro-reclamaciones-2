@@ -17,18 +17,14 @@ export interface StatusComponent {
 
 export interface AIStatusComponent extends StatusComponent {
   enabled?: boolean;
-  model?: string;
   latencyMs?: number | null;
   checkedAt?: string;
-  fallbackConfigured?: boolean;
-  error?: string;
 }
 
 export interface EmailStatusComponent extends StatusComponent {
   configured?: boolean;
   latencyMs?: number | null;
   checkedAt?: string;
-  error?: string;
 }
 
 /**

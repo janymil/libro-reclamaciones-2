@@ -64,6 +64,56 @@ export function computeOverallStatus(
 }
 
 /**
+ * Public job projection: the status is enough. A degraded run must not publish
+ * the raw exception (it can contain hostnames, paths or provider messages).
+ */
+export function toPublicJobHealth(job: JobSnapshot): StatusJob {
+  const health = toJobHealth(job);
+  return {
+    ...health,
+    lastResult: health.status === "degraded" ? null : health.lastResult,
+  };
+}
+
+/**
+ * Public projection of the AI probe.
+ *
+ * The internal probe knows the provider URL and model name. Neither may leave
+ * the server: the status page only needs to say whether the service works.
+ */
+export function toPublicAIStatus(health: {
+  status: ComponentStatus;
+  enabled?: boolean;
+  latencyMs?: number | null;
+  checkedAt?: string;
+}) {
+  return {
+    status: health.status,
+    ...(health.enabled !== undefined ? { enabled: health.enabled } : {}),
+    ...(health.latencyMs !== undefined ? { latencyMs: health.latencyMs } : {}),
+    ...(health.checkedAt ? { checkedAt: health.checkedAt } : {}),
+  };
+}
+
+/**
+ * Public projection of the email probe. No SMTP host, user, mode or raw error:
+ * those are internal infrastructure details, not customer information.
+ */
+export function toPublicEmailStatus(health: {
+  status: ComponentStatus;
+  configured?: boolean;
+  latencyMs?: number | null;
+  checkedAt?: string;
+}) {
+  return {
+    status: health.status,
+    ...(health.configured !== undefined ? { configured: health.configured } : {}),
+    ...(health.latencyMs !== undefined ? { latencyMs: health.latencyMs } : {}),
+    ...(health.checkedAt ? { checkedAt: health.checkedAt } : {}),
+  };
+}
+
+/**
  * The version comes from package.json (the single source of truth), read at
  * runtime from the application root. The image copies package.json to /app and
  * starts the process there; local runs use the repository root.

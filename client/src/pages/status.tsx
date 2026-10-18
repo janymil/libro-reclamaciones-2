@@ -21,7 +21,7 @@ const STATUS_LABELS: Record<ComponentStatus, { label: string; className: string 
 
 const COMPONENT_LABELS: Record<string, string> = {
   api: "API",
-  database: "Base de datos",
+  database: "Servicio de datos",
   ai: "Inteligencia artificial",
   email: "Correo electrónico",
 };
@@ -42,13 +42,12 @@ function componentDetail(key: string, component: ComponentEntry): string | null 
   if (key === "ai") {
     const ai = component as StatusResponse["components"]["ai"];
     if (ai.status === "disabled") {
-      return "Sin configurar: la app sigue funcionando con heurísticas locales.";
+      return "Sin configurar: la app sigue funcionando con análisis local.";
     }
     if (ai.status === "degraded") {
-      return ai.error ? `Proveedor no disponible: ${ai.error}` : "Proveedor no disponible.";
+      return "Servicio de IA no disponible temporalmente.";
     }
     const parts = [
-      ai.model ? `Modelo ${ai.model}` : null,
       ai.latencyMs != null ? `${ai.latencyMs} ms` : null,
       ai.checkedAt ? `comprobado ${formatTime(ai.checkedAt)}` : null,
     ].filter(Boolean);
@@ -58,18 +57,16 @@ function componentDetail(key: string, component: ComponentEntry): string | null 
   if (key === "email") {
     const email = component as StatusResponse["components"]["email"];
     if (email.status === "disabled") {
-      return "Sin configurar (SMTP_USER / SMTP_PASSWORD).";
+      return "Sin configurar.";
     }
     if (email.status === "pending") {
-      return "Comprobando la conexión SMTP con el proveedor…";
+      return "Comprobando el servicio de correo…";
     }
     if (email.status === "degraded") {
-      return email.error
-        ? `No se pudo autenticar con el servidor SMTP: ${email.error}`
-        : "No se pudo autenticar con el servidor SMTP.";
+      return "No se pudo verificar el servicio de correo.";
     }
     const parts = [
-      "Conexión SMTP verificada",
+      "Servicio de correo verificado",
       email.latencyMs != null ? `${email.latencyMs} ms` : null,
       email.checkedAt ? `comprobado ${formatTime(email.checkedAt)}` : null,
     ].filter(Boolean);
@@ -77,7 +74,7 @@ function componentDetail(key: string, component: ComponentEntry): string | null 
   }
 
   if (key === "database" && component.status === "down") {
-    return "La consulta SELECT 1 no respondió.";
+    return "La comprobación del servicio de datos no respondió.";
   }
 
   return null;
@@ -192,8 +189,7 @@ export default function StatusPage() {
             </div>
 
             <p className="text-center text-xs text-gray-500">
-              La base de datos se comprueba en cada consulta, la IA cada 2 minutos y el correo cada
-              10 minutos. Esta página se actualiza cada 60 segundos.
+              Los servicios se comprueban automáticamente. Esta página se actualiza cada 60 segundos.
             </p>
           </>
         )}

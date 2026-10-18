@@ -4,7 +4,8 @@ import { z } from "zod";
 import { buildConsumerDraftContext } from "@shared/consumer-draft-context";
 import type { Complaint } from "@shared/schema";
 import { PERU_TIME_ZONE, startOfPeruMonth } from "@shared/peru-time";
-import { aiService, getAIHealth, getAIStatus } from "../services/aiService";
+import { aiService, getAIHealth } from "../services/aiService";
+import { toPublicAIStatus } from "../services/statusService";
 import type { ResponseLength, ResponseTone } from "../services/aiService";
 import { renderComplaintAIContext } from "../services/complaintAIContext";
 import { rankSlaRisk } from "../services/slaPredictionService";
@@ -60,7 +61,8 @@ export function registerAiRoutes(app: Express): void {
   // Provider configuration + a real (cached) connectivity probe.
   app.get('/api/ai/status', requireAuth, async (_req, res) => {
     const health = await getAIHealth();
-    res.json({ ...getAIStatus(), health });
+    // Public shape only: provider, model and fallback are internal details.
+    res.json(toPublicAIStatus(health));
   });
 
   app.post('/api/ai/classify', requireAuth, aiLimiter, async (req: any, res) => {

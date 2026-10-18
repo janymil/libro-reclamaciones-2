@@ -24,7 +24,6 @@ export interface AgentReply {
 
 export interface AgentCapabilities {
   enabled: boolean;
-  model: string;
   tools: Array<{ name: string; description?: string }>;
   knowledgeBaseSize: number;
 }

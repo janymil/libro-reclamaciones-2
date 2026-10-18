@@ -678,12 +678,11 @@ export async function runAgent(
   }
 }
 
-/** Describes the agent for the UI: provider state, tools and corpus size. */
+/** Describes the agent for the UI: whether it is active, its tools and corpus size. */
 export function agentCapabilities() {
   const status = getAIStatus();
   return {
     enabled: status.enabled,
-    model: AGENT_MODEL,
     tools: AGENT_TOOLS.map((tool) => ({
       name: tool.function.name,
       description: tool.function.description,

@@ -127,7 +127,7 @@ const emailSenderFields = [
     placeholder: "reclamos@miempresa.pe",
     type: "input" as const,
     description:
-      "Requiere verificar su dominio con nuestro proveedor de correo (registros SPF/DKIM). No es inmediato: nuestro equipo debe habilitar el dominio. Mientras no esté verificado, los correos salen desde nuestra dirección con el nombre visible que indicó arriba, y las respuestas siguen llegando a su empresa.",
+      "Requiere verificar su dominio con nuestro servicio de correo (registros SPF/DKIM). No es inmediato: nuestro equipo debe habilitar el dominio. Mientras no esté verificado, los correos salen desde nuestra dirección con el nombre visible que indicó arriba, y las respuestas siguen llegando a su empresa.",
   },
 ];
 
@@ -262,7 +262,7 @@ export default function CustomizationPage() {
       return `Configuró un correo remitente propio, pero todavía no puede usarse${
         sender.fromName ? `; por ahora se envía como ${sender.fromName}` : ""
       } desde ${sender.fromAddress}. ${
-        sender.status === "invalid" ? "La dirección no es válida." : "Falta verificar el dominio con nuestro proveedor de correo."
+        sender.status === "invalid" ? "La dirección no es válida." : "Falta verificar el dominio con nuestro servicio de correo."
       }`;
     }
     return `Sus correos salen desde ${sender.fromAddress} como ${sender.fromName}${
@@ -454,7 +454,7 @@ export default function CustomizationPage() {
             <CardTitle>Remitente propio</CardTitle>
             <CardDescription>
               Para que sus correos salgan desde una dirección de su dominio, primero verificamos ese
-              dominio (registros SPF/DKIM) con nuestro proveedor de correo. Es un proceso asistido:
+              dominio (registros SPF/DKIM) con nuestro servicio de correo. Es un proceso asistido:
               usted configura la dirección, nosotros habilitamos el dominio y le indicamos qué
               registros DNS publicar. Mientras no esté verificado, el correo sale desde nuestra
               dirección mostrando el nombre visible que configuró arriba, y las respuestas siguen

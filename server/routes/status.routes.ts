@@ -6,7 +6,7 @@ import { db } from "../db";
 import { jobStatus } from "../services/scheduler";
 import { getAIHealth } from "../services/aiService";
 import { getEmailHealth } from "../services/emailService";
-import { computeOverallStatus, readAppVersion, toJobHealth } from "../services/statusService";
+import { computeOverallStatus, readAppVersion, toPublicAIStatus, toPublicEmailStatus, toPublicJobHealth } from "../services/statusService";
 
 /**
  * Public status page endpoint (Phase 3.13): shows the health of the system
@@ -49,27 +49,13 @@ export function registerStatusRoutes(app: Express): void {
     const components: StatusResponse['components'] = {
       api: { status: 'operational' },
       database: { status: databaseUp ? 'operational' : 'down' },
-      ai: {
-        status: ai.status,
-        enabled: ai.enabled,
-        model: ai.model,
-        latencyMs: ai.latencyMs,
-        checkedAt: ai.checkedAt,
-        fallbackConfigured: ai.fallbackConfigured,
-        ...(ai.error ? { error: ai.error } : {}),
-      },
-      email: {
-        status: email.status,
-        configured: email.configured,
-        latencyMs: email.latencyMs,
-        checkedAt: email.checkedAt,
-        ...(email.error ? { error: email.error } : {}),
-      },
+      ai: toPublicAIStatus(ai),
+      email: toPublicEmailStatus(email),
     };
 
     const jobs: StatusResponse['jobs'] = {
-      retention: toJobHealth(jobStatus.retention),
-      slaMonitoring: toJobHealth(jobStatus.slaMonitoring),
+      retention: toPublicJobHealth(jobStatus.retention),
+      slaMonitoring: toPublicJobHealth(jobStatus.slaMonitoring),
     };
 
     const body: StatusResponse = {

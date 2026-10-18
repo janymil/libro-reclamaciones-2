@@ -98,7 +98,7 @@ export default function ComplaintResponseDialog({ complaint, open, onOpenChange 
         title: result.source === 'fallback' ? "IA no disponible" : "Sugerencia generada",
         description:
           result.source === 'fallback'
-            ? "No hay proveedor de IA configurado: redacte la respuesta manualmente."
+            ? "La asistencia de IA no está disponible en este momento: redacte la respuesta manualmente."
             : "Revise y ajuste la respuesta antes de enviarla.",
       });
     } catch (error) {

@@ -119,7 +119,7 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
         title: result.source === 'fallback' ? "Análisis heurístico local" : "Análisis completado",
         description:
           result.source === 'fallback'
-            ? "No hay proveedor de IA configurado: se aplicaron reglas locales. Configure AI_API_KEY para usar el modelo."
+            ? "La asistencia de IA no está disponible en este momento: se aplicaron reglas locales."
             : "El texto ha sido clasificado exitosamente",
       });
     } catch (error) {
@@ -158,7 +158,7 @@ export default function AIAssistant({ onSuggestionAccept }: AIAssistantProps) {
         title: result.source === 'fallback' ? "IA no disponible" : "Sugerencia generada",
         description:
           result.source === 'fallback'
-            ? "No hay proveedor de IA configurado: redacte la respuesta manualmente."
+            ? "La asistencia de IA no está disponible en este momento: redacte la respuesta manualmente."
             : "Se ha generado una respuesta sugerida. Revísela antes de enviarla.",
       });
     } catch (error) {

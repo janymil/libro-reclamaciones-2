@@ -134,9 +134,9 @@ export function useComplaintAuditLog(complaintId: string) {
 
 export interface AIStatus {
   enabled: boolean;
-  provider: string;
-  model: string;
-  fastModel: string;
+  status?: 'operational' | 'degraded' | 'disabled';
+  latencyMs?: number | null;
+  checkedAt?: string;
 }
 
 export function useAIStatus() {

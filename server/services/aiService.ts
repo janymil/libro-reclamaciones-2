@@ -1139,7 +1139,7 @@ Responde en JSON con exactamente estas claves:
       hasAbusiveClauses: false,
       clauses: [],
       recommendations: [
-        'Configure un proveedor de IA (AI_API_KEY) para el análisis de cláusulas, o revise manualmente el texto contra los artículos 49 y 50 del Código de Protección y Defensa del Consumidor.',
+        'La asistencia de IA no está disponible en este momento. Revise manualmente el texto contra los artículos 49 y 50 del Código de Protección y Defensa del Consumidor.',
       ],
       source: 'fallback',
     };
@@ -1220,7 +1220,7 @@ Responde en JSON con exactamente estas claves:
 
     if (!ai) {
       return {
-        summary: 'Configure un proveedor de IA (AI_API_KEY) para generar resúmenes ejecutivos.',
+        summary: 'La asistencia de IA no está disponible en este momento.',
         keyFacts: [],
         riskLevel: 'medium',
         recommendedAction: 'Revise manualmente el detalle de la reclamación.',
