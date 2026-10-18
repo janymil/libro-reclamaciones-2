@@ -292,6 +292,12 @@ export class EmailService {
 
     this.transporter = nodemailer.createTransport({
       ...emailConfig,
+      // Bound every phase of the SMTP handshake. Without these, a host that
+      // accepts the TCP connection and then stalls leaves verify()/sendMail()
+      // waiting until the OS gives up (minutes).
+      connectionTimeout: 8_000,
+      greetingTimeout: 8_000,
+      socketTimeout: 10_000,
       tls: {
         rejectUnauthorized
       }
@@ -1534,11 +1540,21 @@ ${identityFooterLines(identity).join('\n')}
   }
 
   /**
+   * Opens the SMTP connection and authenticates. Throws when the host is
+   * unreachable or rejects the credentials, which is what the public status
+   * probe needs; `testConnection()` keeps the boolean/logging behaviour used by
+   * the admin diagnostics.
+   */
+  async verifyConnection(): Promise<void> {
+    await this.transporter.verify();
+  }
+
+  /**
    * Test email connection
    */
   async testConnection(): Promise<boolean> {
     try {
-      await this.transporter.verify();
+      await this.verifyConnection();
       return true;
     } catch (error) {
       console.error('Email connection test failed:', error);
@@ -1548,3 +1564,120 @@ ${identityFooterLines(identity).join('\n')}
 }
 
 export const emailService = new EmailService();
+
+// ============================================================================
+// Health probe for GET /api/status
+// ============================================================================
+//
+// The status page used to report "operational" from the presence of
+// SMTP_USER/SMTP_PASSWORD alone, so a revoked password or a Zoho outage stayed
+// green. This performs a real `verify()` (connect + authenticate) and caches the
+// result:
+//
+//  - 10 minutes after a success: the configuration rarely changes;
+//  - 30 seconds after a failure: recovery is visible quickly;
+//  - never blocks the HTTP response: the probe runs in the background and the
+//    caller gets the last result (or `pending` on the first check after boot).
+//    The Docker HEALTHCHECK hits /api/status every 30s with a 5s timeout, so a
+//    synchronous SMTP handshake would make the container look unhealthy.
+
+/** Health of the SMTP connection, as reported by GET /api/status. */
+export interface EmailHealth {
+  status: 'operational' | 'degraded' | 'disabled' | 'pending';
+  configured: boolean;
+  checkedAt: string;
+  latencyMs: number | null;
+  error?: string;
+}
+
+const EMAIL_HEALTH_OK_MS = 10 * 60 * 1000;
+const EMAIL_HEALTH_FAIL_MS = 30 * 1000;
+const EMAIL_PROBE_TIMEOUT_MS = 8 * 1000;
+
+let emailHealthCache: { expiresAt: number; value: EmailHealth } | null = null;
+let emailProbeInFlight: Promise<void> | null = null;
+
+function emailConfigured(): boolean {
+  return Boolean(process.env.SMTP_USER && process.env.SMTP_PASSWORD);
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms);
+    timer.unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function runEmailProbe(): Promise<void> {
+  const startedAt = Date.now();
+  try {
+    await withTimeout(emailService.verifyConnection(), EMAIL_PROBE_TIMEOUT_MS);
+    emailHealthCache = {
+      expiresAt: Date.now() + EMAIL_HEALTH_OK_MS,
+      value: {
+        status: 'operational',
+        configured: true,
+        checkedAt: new Date().toISOString(),
+        latencyMs: Date.now() - startedAt,
+      },
+    };
+  } catch (error) {
+    emailHealthCache = {
+      expiresAt: Date.now() + EMAIL_HEALTH_FAIL_MS,
+      value: {
+        status: 'degraded',
+        configured: true,
+        checkedAt: new Date().toISOString(),
+        latencyMs: null,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+}
+
+/** Cached, non-blocking SMTP health. */
+export function getEmailHealth(): EmailHealth {
+  if (!emailConfigured()) {
+    return {
+      status: 'disabled',
+      configured: false,
+      checkedAt: new Date().toISOString(),
+      latencyMs: null,
+    };
+  }
+
+  if (emailHealthCache && emailHealthCache.expiresAt > Date.now()) {
+    return emailHealthCache.value;
+  }
+
+  if (!emailProbeInFlight) {
+    emailProbeInFlight = runEmailProbe().finally(() => {
+      emailProbeInFlight = null;
+    });
+  }
+
+  return (
+    emailHealthCache?.value ?? {
+      status: 'pending',
+      configured: true,
+      checkedAt: new Date().toISOString(),
+      latencyMs: null,
+    }
+  );
+}
+
+/** Test/maintenance hook: forget the cached probe. */
+export function resetEmailHealthCache(): void {
+  emailHealthCache = null;
+  emailProbeInFlight = null;
+}

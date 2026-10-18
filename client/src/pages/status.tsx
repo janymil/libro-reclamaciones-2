@@ -1,26 +1,22 @@
 import { useEffect, useState } from "react";
 import BackToTop from "@/components/layout/back-to-top";
+import type { ComponentStatus, StatusResponse } from "@shared/status";
 
 /**
  * Public status page (Phase 3.13). Standalone (no AppLayout/auth) so it stays
  * reachable during incidents; polls /api/status every 60s.
+ *
+ * The badges render what the API actually observed: `disabled` means "not
+ * configured" (not a failure) and `pending` means "the first probe is still
+ * running", so a missing key or a cold start is never dressed up as "Operativo".
  */
 
-interface StatusResponse {
-  status: string;
-  version: string;
-  checkedAt: string;
-  components: Record<string, { status: string; [key: string]: unknown }>;
-  jobs: {
-    retention: { lastRun: string | null; lastResult: string | null };
-    slaMonitoring: { lastRun: string | null; lastResult: string | null };
-  };
-}
-
-const STATUS_LABELS: Record<string, { label: string; className: string }> = {
+const STATUS_LABELS: Record<ComponentStatus, { label: string; className: string }> = {
   operational: { label: "Operativo", className: "bg-green-100 text-green-800" },
   degraded: { label: "Degradado", className: "bg-yellow-100 text-yellow-800" },
   down: { label: "Caído", className: "bg-red-100 text-red-800" },
+  disabled: { label: "No configurado", className: "bg-gray-100 text-gray-600" },
+  pending: { label: "Comprobando", className: "bg-blue-100 text-blue-800" },
 };
 
 const COMPONENT_LABELS: Record<string, string> = {
@@ -29,6 +25,63 @@ const COMPONENT_LABELS: Record<string, string> = {
   ai: "Inteligencia artificial",
   email: "Correo electrónico",
 };
+
+const JOB_LABELS: Record<string, string> = {
+  retention: "Retención de datos (2 años)",
+  slaMonitoring: "Monitoreo de SLA",
+};
+
+type ComponentEntry = StatusResponse["components"][keyof StatusResponse["components"]];
+type JobEntry = StatusResponse["jobs"][keyof StatusResponse["jobs"]];
+
+const formatTime = (value: string | null) =>
+  value ? new Date(value).toLocaleString("es-PE") : "—";
+
+/** One line of evidence under a component, so the badge is not all you get. */
+function componentDetail(key: string, component: ComponentEntry): string | null {
+  if (key === "ai") {
+    const ai = component as StatusResponse["components"]["ai"];
+    if (ai.status === "disabled") {
+      return "Sin configurar: la app sigue funcionando con heurísticas locales.";
+    }
+    if (ai.status === "degraded") {
+      return ai.error ? `Proveedor no disponible: ${ai.error}` : "Proveedor no disponible.";
+    }
+    const parts = [
+      ai.model ? `Modelo ${ai.model}` : null,
+      ai.latencyMs != null ? `${ai.latencyMs} ms` : null,
+      ai.checkedAt ? `comprobado ${formatTime(ai.checkedAt)}` : null,
+    ].filter(Boolean);
+    return parts.length ? parts.join(" · ") : null;
+  }
+
+  if (key === "email") {
+    const email = component as StatusResponse["components"]["email"];
+    if (email.status === "disabled") {
+      return "Sin configurar (SMTP_USER / SMTP_PASSWORD).";
+    }
+    if (email.status === "pending") {
+      return "Comprobando la conexión SMTP con el proveedor…";
+    }
+    if (email.status === "degraded") {
+      return email.error
+        ? `No se pudo autenticar con el servidor SMTP: ${email.error}`
+        : "No se pudo autenticar con el servidor SMTP.";
+    }
+    const parts = [
+      "Conexión SMTP verificada",
+      email.latencyMs != null ? `${email.latencyMs} ms` : null,
+      email.checkedAt ? `comprobado ${formatTime(email.checkedAt)}` : null,
+    ].filter(Boolean);
+    return parts.join(" · ");
+  }
+
+  if (key === "database" && component.status === "down") {
+    return "La consulta SELECT 1 no respondió.";
+  }
+
+  return null;
+}
 
 export default function StatusPage() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
@@ -63,8 +116,10 @@ export default function StatusPage() {
     };
   }, []);
 
-  const formatTime = (value: string | null) =>
-    value ? new Date(value).toLocaleString("es-PE") : "—";
+  const components = status
+    ? (Object.entries(status.components) as Array<[string, ComponentEntry]>)
+    : [];
+  const jobs = status ? (Object.entries(status.jobs) as Array<[string, JobEntry]>) : [];
 
   return (
     <div className="min-h-screen bg-surface py-12 px-4">
@@ -96,23 +151,50 @@ export default function StatusPage() {
             </div>
 
             <div className="space-y-3">
-              {Object.entries(status.components).map(([key, component]) => (
-                <div key={key} className="rounded-lg border p-4 bg-white shadow-sm flex items-center justify-between">
-                  <span className="text-gray-800">{COMPONENT_LABELS[key] ?? key}</span>
-                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${STATUS_LABELS[component.status]?.className ?? ""}`}>
-                    {STATUS_LABELS[component.status]?.label ?? component.status}
-                  </span>
-                </div>
-              ))}
+              {components.map(([key, component]) => {
+                const detail = componentDetail(key, component);
+                const badge = STATUS_LABELS[component.status];
+                return (
+                  <div key={key} className="rounded-lg border p-4 bg-white shadow-sm flex items-start justify-between gap-4">
+                    <div>
+                      <span className="text-gray-800">{COMPONENT_LABELS[key] ?? key}</span>
+                      {detail && <p className="text-xs text-gray-500 mt-1">{detail}</p>}
+                    </div>
+                    <span className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium ${badge?.className ?? ""}`}>
+                      {badge?.label ?? component.status}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
 
-            <div className="rounded-lg border p-4 bg-white shadow-sm space-y-2">
+            <div className="rounded-lg border p-4 bg-white shadow-sm space-y-4">
               <p className="font-medium text-gray-900 text-sm">Tareas programadas</p>
-              <div className="text-sm text-gray-600">
-                <p>Retención de datos (2 años): última ejecución {formatTime(status.jobs.retention.lastRun)}</p>
-                <p>Monitoreo de SLA: última ejecución {formatTime(status.jobs.slaMonitoring.lastRun)}</p>
-              </div>
+              {jobs.map(([key, job]) => {
+                const badge = STATUS_LABELS[job.status];
+                return (
+                  <div key={key} className="border-t border-gray-100 pt-3 first:border-t-0 first:pt-0">
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-sm text-gray-800">{JOB_LABELS[key] ?? key}</span>
+                      <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${badge?.className ?? ""}`}>
+                        {badge?.label ?? job.status}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Última ejecución: {formatTime(job.lastRun)}
+                    </p>
+                    {job.lastResult && (
+                      <p className="text-xs text-gray-500">Resultado: {job.lastResult}</p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+
+            <p className="text-center text-xs text-gray-500">
+              La base de datos se comprueba en cada consulta, la IA cada 2 minutos y el correo cada
+              10 minutos. Esta página se actualiza cada 60 segundos.
+            </p>
           </>
         )}
 

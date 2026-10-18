@@ -195,6 +195,11 @@ export function registerAttachmentsRoutes(app: Express): void {
 
       res.setHeader('Content-Type', attachment.mimeType);
       res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(attachment.originalName)}"`);
+      // Evidence is personal data: never let Cloudflare, a proxy or the browser
+      // keep a copy of it on disk.
+      res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
       res.end(bytes);
     } catch (error) {
       console.error('Error downloading attachment:', error);
