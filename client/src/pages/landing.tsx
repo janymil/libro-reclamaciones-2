@@ -47,6 +47,8 @@ import {
   BookOpenCheck,
   Mail,
   Phone,
+  Pause,
+  Play,
 } from 'lucide-react';
 
 /* -------------------------------------------------------------------------- */
@@ -480,6 +482,89 @@ function StatsBand() {
   );
 }
 
+function IntroVideo() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(true);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Respect the OS "reduce motion" setting: no autoplay at all.
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      video.pause();
+      setPlaying(false);
+      return;
+    }
+
+    if (typeof IntersectionObserver === 'undefined') return;
+
+    // Decode only while visible. The clip loops, so an off-screen decoder would
+    // burn CPU/battery for nothing.
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          void video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+        } else {
+          video.pause();
+          setPlaying(false);
+        }
+      },
+      { threshold: 0.35 },
+    );
+    observer.observe(video);
+    return () => observer.disconnect();
+  }, []);
+
+  const togglePlayback = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      void video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+    } else {
+      video.pause();
+      setPlaying(false);
+    }
+  };
+
+  return (
+    <Reveal delay={140}>
+      <figure className="relative mt-10 overflow-hidden rounded-2xl border border-[#e3d9c6] bg-[#1b1611] shadow-[0_24px_60px_-30px_rgba(27,22,17,0.55)]">
+        <video
+          ref={videoRef}
+          className="aspect-video w-full"
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="metadata"
+          poster="/assets/intro-video-v1-poster.webp"
+          aria-label="Recorrido de 10 segundos por LibroDigital"
+        >
+          <source src="/assets/intro-video-v1.webm" type="video/webm" />
+          <source src="/assets/intro-video-v1.mp4" type="video/mp4" />
+          Su navegador no admite video HTML5.
+        </video>
+        <figcaption className="pointer-events-none absolute bottom-3 left-3 rounded-full bg-[#1b1611]/70 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[#f7f2e8]/90 backdrop-blur">
+          LibroDigital en 10 segundos
+        </figcaption>
+        <button
+          type="button"
+          onClick={togglePlayback}
+          className="absolute bottom-3 right-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/25 bg-[#1b1611]/70 text-[#f7f2e8] backdrop-blur transition-colors hover:bg-[#1b1611] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f7f2e8]"
+          aria-label={playing ? 'Pausar el video' : 'Reproducir el video'}
+        >
+          {playing ? (
+            <Pause className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <Play className="h-4 w-4" aria-hidden="true" />
+          )}
+        </button>
+      </figure>
+    </Reveal>
+  );
+}
+
 function HowItWorks() {
   return (
     <section id="como-funciona" className="mx-auto max-w-6xl px-5 py-20 sm:px-8 md:py-28">
@@ -493,6 +578,8 @@ function HowItWorks() {
           mismo día.
         </p>
       </Reveal>
+
+      <IntroVideo />
 
       <ol className="mt-14 grid gap-10 md:grid-cols-2 lg:grid-cols-4 lg:gap-6">
         {STEPS.map((step, i) => (
