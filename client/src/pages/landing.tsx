@@ -538,11 +538,11 @@ function IntroVideo() {
           muted
           playsInline
           preload="metadata"
-          poster="/assets/intro-video-v1-poster.webp"
+          poster="/assets/intro-video-v2-poster.webp"
           aria-label="Recorrido de 10 segundos por LibroDigital"
         >
-          <source src="/assets/intro-video-v1.webm" type="video/webm" />
-          <source src="/assets/intro-video-v1.mp4" type="video/mp4" />
+          <source src="/assets/intro-video-v2.webm" type="video/webm" />
+          <source src="/assets/intro-video-v2.mp4" type="video/mp4" />
           Su navegador no admite video HTML5.
         </video>
         <figcaption className="pointer-events-none absolute bottom-3 left-3 rounded-full bg-[#1b1611]/70 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[#f7f2e8]/90 backdrop-blur">
