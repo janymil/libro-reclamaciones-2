@@ -31,6 +31,7 @@ import {
 } from '@/components/blog/article-visuals';
 import { EDITORIAL_ARTICLES } from '@/data/editorial-articles';
 import { OPERATOR, LEGAL_DOCUMENTS } from '@/lib/platform-legal';
+import { SeoHead } from '@/components/seo/seo-head';
 
 export default function ArticlePage() {
   const article = EDITORIAL_ARTICLES[0];
@@ -46,6 +47,45 @@ export default function ArticlePage() {
 
   return (
     <div className="landing-root landing-paper min-h-screen">
+      <SeoHead
+        title={article.title}
+        description={article.summary}
+        type="article"
+        publishedTime="2026-10-15T09:00:00-05:00"
+        author={article.author.name}
+        ogImage="https://librodigital.pe/assets/librodigital-promo-poster.webp"
+        keywords={[
+          'libro de reclamaciones fisico',
+          'multas indecopi libro de reclamaciones',
+          'libro de reclamaciones virtual peru',
+          'ds 011 2011 pcm',
+          'hojas autocopiables reclamaciones',
+          'librodigital pe',
+        ]}
+        jsonLd={{
+          '@context': 'https://schema.org',
+          '@type': 'BlogPosting',
+          'headline': article.title,
+          'description': article.summary,
+          'image': ['https://librodigital.pe/assets/librodigital-promo-poster.webp'],
+          'datePublished': '2026-10-15T09:00:00-05:00',
+          'dateModified': '2026-10-20T12:00:00-05:00',
+          'author': {
+            '@type': 'Organization',
+            'name': article.author.name,
+          },
+          'publisher': {
+            '@type': 'Organization',
+            'name': 'LibroDigital.pe',
+            'logo': {
+              '@type': 'ImageObject',
+              'url': 'https://librodigital.pe/icon.svg',
+            },
+          },
+          'inLanguage': 'es-PE',
+        }}
+      />
+
       {/* Top Header */}
       <header className="sticky top-0 z-40 border-b border-[#e3d9c6] bg-[#f7f2e8]/90 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-5 sm:px-8">

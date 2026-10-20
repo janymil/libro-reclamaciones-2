@@ -1,0 +1,20 @@
+User-agent: *
+Allow: /
+Allow: /articulos
+Allow: /articulos/*
+Allow: /normativa
+Allow: /terminos
+Allow: /privacidad
+Allow: /aviso-legal
+Allow: /contacto
+Allow: /estado
+Allow: /accesibilidad
+
+# Disallow internal authenticated and admin portals
+Disallow: /panel/
+Disallow: /admin/
+Disallow: /api/admin/
+Disallow: /api/auth/
+Disallow: /api/dashboard/
+
+Sitemap: https://librodigital.pe/sitemap.xml

@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import fs from "fs";
 import path from "path";
 import { type Server } from "http";
+import { SEO_ARTICLES, buildArticleHtml, buildHubHtml } from "./services/seoService";
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -15,12 +16,39 @@ export function log(message: string, source = "express") {
 }
 
 /**
+ * Injects route-specific SEO tags (title, description, OpenGraph, Twitter, JSON-LD schema)
+ * into index.html before returning it to the browser or search engine crawler.
+ */
+function injectSeoHeaders(html: string, url: string, host: string): string {
+  const cleanPath = url.split("?")[0].replace(/\/+$/, "");
+
+  // Match /articulos/:slug
+  const articleMatch = cleanPath.match(/^\/articulos\/([a-z0-9-]+)$/);
+  if (articleMatch) {
+    const slug = articleMatch[1];
+    const article = SEO_ARTICLES[slug];
+    if (article) {
+      const seoSnippet = buildArticleHtml(article, host);
+      // Remove default title and description
+      let modified = html.replace(/<title>.*?<\/title>/i, "");
+      modified = modified.replace(/<meta\s+name=["']description["'].*?>/i, "");
+      return modified.replace("</head>", `${seoSnippet}\n  </head>`);
+    }
+  }
+
+  // Match /articulos hub
+  if (cleanPath === "/articulos") {
+    const hubSnippet = buildHubHtml(host);
+    let modified = html.replace(/<title>.*?<\/title>/i, "");
+    modified = modified.replace(/<meta\s+name=["']description["'].*?>/i, "");
+    return modified.replace("</head>", `${hubSnippet}\n  </head>`);
+  }
+
+  return html;
+}
+
+/**
  * The service worker and the recovery page must never come from a cache.
- *
- * A browser that keeps an old worker can otherwise never be told about a new
- * deploy: it answers navigations with its cached shell, and the cached shell
- * points at the old code. `no-store` keeps the update check honest.
- * (See client/public/sw.js, client/public/reset.html and client/src/main.tsx.)
  */
 function noStoreForWorkerFiles(app: Express) {
   app.use(["/sw.js", "/reset.html"], (_req, res, next) => {
@@ -30,9 +58,6 @@ function noStoreForWorkerFiles(app: Express) {
 }
 
 export async function setupVite(app: Express, server: Server) {
-  // Loaded dynamically so the production bundle (which installs only
-  // dependencies, not devDependencies) never imports Vite. `serveStatic` is the
-  // production path; this function only runs when NODE_ENV === "development".
   const { createServer: createViteServer, createLogger } = await import("vite");
   const { nanoid } = await import("nanoid");
   const viteLogger = createLogger();
@@ -60,6 +85,7 @@ export async function setupVite(app: Express, server: Server) {
   app.use(vite.middlewares);
   app.use("*", async (req, res, next) => {
     const url = req.originalUrl;
+    const host = req.get("host") || "librodigital.pe";
 
     try {
       const clientTemplate = path.resolve(
@@ -75,7 +101,8 @@ export async function setupVite(app: Express, server: Server) {
         `src="/src/main.tsx"`,
         `src="/src/main.tsx?v=${nanoid()}"`,
       );
-      const page = await vite.transformIndexHtml(url, template);
+      let page = await vite.transformIndexHtml(url, template);
+      page = injectSeoHeaders(page, url, host);
       res.status(200).set({ "Content-Type": "text/html" }).end(page);
     } catch (e) {
       vite.ssrFixStacktrace(e as Error);
@@ -97,7 +124,16 @@ export function serveStatic(app: Express) {
   app.use(express.static(distPath));
 
   // fall through to index.html if the file doesn't exist
-  app.use("*", (_req, res) => {
-    res.sendFile(path.resolve(distPath, "index.html"));
+  app.use("*", (req, res) => {
+    const indexPath = path.resolve(distPath, "index.html");
+    const host = req.get("host") || "librodigital.pe";
+    try {
+      let html = fs.readFileSync(indexPath, "utf-8");
+      html = injectSeoHeaders(html, req.originalUrl, host);
+      res.status(200).set({ "Content-Type": "text/html" }).end(html);
+    } catch {
+      res.sendFile(indexPath);
+    }
   });
 }
+

@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { EDITORIAL_ARTICLES } from '@/data/editorial-articles';
 import { OPERATOR } from '@/lib/platform-legal';
+import { SeoHead } from '@/components/seo/seo-head';
 
 export default function ArticlesHubPage() {
   const [selectedCategory, setSelectedCategory] = useState<string>('todos');
@@ -33,6 +34,32 @@ export default function ArticlesHubPage() {
 
   return (
     <div className="landing-root landing-paper min-h-screen">
+      <SeoHead
+        title="Guías, Casos Reales y Normativa del Libro de Reclamaciones 2026"
+        description="Aprende cómo evitar multas de Indecopi de hasta 5 UIT, gestionar reclamos en 15 días y cumplir la Ley 29571 con nuestras guías y casos reales analizados."
+        keywords={[
+          'libro de reclamaciones articulos',
+          'multas indecopi',
+          'fiscalizacion mype',
+          'normativa libro de reclamaciones',
+          'librodigital pe',
+        ]}
+        ogImage="https://librodigital.pe/icon.svg"
+        jsonLd={{
+          '@context': 'https://schema.org',
+          '@type': 'CollectionPage',
+          'name': 'Guías, Casos Reales y Normativa del Libro de Reclamaciones',
+          'description': 'Artículos, análisis de multas de Indecopi y guías prácticas para MYPEs y comercios sobre el Libro de Reclamaciones en Perú.',
+          'url': 'https://librodigital.pe/articulos',
+          'publisher': {
+            '@type': 'Organization',
+            'name': 'LibroDigital.pe',
+            'url': 'https://librodigital.pe',
+          },
+          'inLanguage': 'es-PE',
+        }}
+      />
+
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-[#e3d9c6] bg-[#f7f2e8]/90 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-5 sm:px-8">
