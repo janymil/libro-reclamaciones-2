@@ -57,7 +57,7 @@ export interface PayerProfile {
    * An invalid number is dropped, never "repaired".
    */
   identification?: { type: string; number: string };
-  /** Contact phone as typed in the panel (`+51 938 693 848`, `938693848`). */
+  /** Contact phone as typed in the panel (`+51 965 403 196`, `965403196`). */
   phone?: string;
 }
 
@@ -371,7 +371,7 @@ export function normalizeMercadoPagoPhone(
   phone?: string | null,
 ): { area_code: string; number: string } | undefined {
   const digits = String(phone ?? "").replace(/\D/g, "");
-  // "+51 938 693 848" -> "51938693848" -> "938693848".
+  // "+51 965 403 196" -> "51965403196" -> "965403196".
   const national = digits.startsWith("51") && digits.length > 9 ? digits.slice(2) : digits;
 
   if (!/^9\d{8}$/.test(national)) {

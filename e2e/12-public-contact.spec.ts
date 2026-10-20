@@ -41,8 +41,8 @@ test.describe('Public about & contact page', () => {
       pageRoot.getByRole('link', { name: 'Correo hola@librodigital.pe' }),
     ).toHaveAttribute('href', 'mailto:hola@librodigital.pe');
     await expect(
-      pageRoot.getByRole('link', { name: 'Teléfono / WhatsApp +51 938 693 848' }),
-    ).toHaveAttribute('href', 'tel:+51938693848');
+      pageRoot.getByRole('link', { name: 'Teléfono / WhatsApp +51 965 403 196' }),
+    ).toHaveAttribute('href', 'tel:+51965403196');
     await expect(pageRoot).not.toContainText('Dirección');
 
     // The contact form is not the Libro de Reclamaciones, and the page says so.

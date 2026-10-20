@@ -28,9 +28,9 @@ test.describe('Public legal pages and footer identity', () => {
     // Operator identity: business name, RUC, phone and contact mailbox.
     await expect(footer.getByText(/Servicios SAAS/).first()).toBeVisible();
     await expect(footer.getByText(/10411592982/).first()).toBeVisible();
-    await expect(footer.getByRole('link', { name: '+51 938 693 848' })).toHaveAttribute(
+    await expect(footer.getByRole('link', { name: '+51 965 403 196' })).toHaveAttribute(
       'href',
-      'tel:+51938693848',
+      'tel:+51965403196',
     );
     await expect(footer.getByRole('link', { name: 'hola@librodigital.pe' })).toHaveAttribute(
       'href',

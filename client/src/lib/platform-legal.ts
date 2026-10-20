@@ -41,8 +41,8 @@ export interface OperatorIdentity {
 export const OPERATOR: OperatorIdentity = {
   businessName: 'Servicios SAAS',
   ruc: '10411592982',
-  phone: '+51 938 693 848',
-  phoneHref: '+51938693848',
+  phone: '+51 965 403 196',
+  phoneHref: '+51965403196',
   email: 'hola@librodigital.pe',
   website: 'librodigital.pe',
   address: '',

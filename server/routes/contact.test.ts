@@ -39,7 +39,7 @@ vi.mock("../services/platformSettingsService", () => ({
     ruc: "10411592982",
     fiscalAddress: "",
     contactEmail: h.contactEmail,
-    contactPhone: "+51 938 693 848",
+    contactPhone: "+51 965 403 196",
     website: "https://librodigital.pe",
   }),
 }));

@@ -93,7 +93,7 @@ describe("mercadopagoPreferenceBody - payer profile", () => {
       firstName: "Ana",
       lastName: "Sotomayor",
       identification: { type: "RUC", number: "10411592982" },
-      phone: "+51 938 693 848",
+      phone: "+51 965 403 196",
     },
   };
 
@@ -103,7 +103,7 @@ describe("mercadopagoPreferenceBody - payer profile", () => {
     expect(payer.name).toBe("Ana");
     expect(payer.surname).toBe("Sotomayor");
     expect(payer.identification).toEqual({ type: "RUC", number: "10411592982" });
-    expect(payer.phone).toEqual({ area_code: "51", number: "938693848" });
+    expect(payer.phone).toEqual({ area_code: "51", number: "965403196" });
   });
 
   it("keeps the email-only payload when nothing else is known", () => {
@@ -153,8 +153,8 @@ describe("normalizeMercadoPagoIdentification", () => {
 
 describe("normalizeMercadoPagoPhone", () => {
   it("turns the typed mobile into area code + national number", () => {
-    expect(normalizeMercadoPagoPhone("938693848")).toEqual({ area_code: "51", number: "938693848" });
-    expect(normalizeMercadoPagoPhone("+51 938 693 848")).toEqual({ area_code: "51", number: "938693848" });
+    expect(normalizeMercadoPagoPhone("965403196")).toEqual({ area_code: "51", number: "965403196" });
+    expect(normalizeMercadoPagoPhone("+51 965 403 196")).toEqual({ area_code: "51", number: "965403196" });
     expect(normalizeMercadoPagoPhone("987-654-321")).toEqual({ area_code: "51", number: "987654321" });
   });
 

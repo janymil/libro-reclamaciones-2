@@ -39,14 +39,14 @@ const NOW = new Date("2026-06-15T12:00:00.000Z");
  */
 describe("buildPayerProfile", () => {
   it("sends the account name plus the company RUC and phone", () => {
-    expect(buildPayerProfile(business({ phone: "938693848" }), {
+    expect(buildPayerProfile(business({ phone: "965403196" }), {
       userFirstName: "Ana",
       userLastName: "Sotomayor",
     })).toEqual({
       firstName: "Ana",
       lastName: "Sotomayor",
       identification: { type: "RUC", number: "12345678901" },
-      phone: "938693848",
+      phone: "965403196",
     });
   });
 
