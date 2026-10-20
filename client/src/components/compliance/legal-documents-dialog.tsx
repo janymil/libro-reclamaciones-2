@@ -34,8 +34,8 @@ const DOCUMENTS: LegalDocument[] = [
   },
   {
     key: 'anexo-ii',
-    title: 'Hoja de Reclamación (campos del Anexo I)',
-    description: 'Formato de apoyo en A4 con los campos del Anexo I vigente; para el libro físico use el formato oficial publicado por INDECOPI.',
+    title: 'Hojas Físicas de Respaldo (campos del Anexo I)',
+    description: 'Formato imprimible en A4 con los campos del Anexo I vigente para respaldo en caso de corte de luz, falla de internet o solicitud presencial (Art. 4-A DS 011-2011-PCM). Si se usa, regístrelo en el sistema dentro de 1 día calendario.',
     endpoint: '/api/documents/anexo-ii',
     filename: 'anexo-ii-hoja-de-reclamacion.pdf',
   },

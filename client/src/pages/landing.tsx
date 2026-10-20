@@ -257,6 +257,13 @@ function Nav() {
             </a>
           ))}
           <Link
+            href="/articulos"
+            className="text-sm font-medium text-[#5c5246] transition-colors hover:text-[#c02b0a]"
+            data-testid="nav-articulos"
+          >
+            Artículos
+          </Link>
+          <Link
             href="/contacto"
             className="text-sm font-medium text-[#5c5246] transition-colors hover:text-[#c02b0a]"
             data-testid="nav-nosotros"
@@ -305,6 +312,13 @@ function Nav() {
                 {link.label}
               </a>
             ))}
+            <Link
+              href="/articulos"
+              onClick={() => setOpen(false)}
+              className="rounded-lg px-3 py-2.5 text-sm font-medium text-[#1b1611] hover:bg-[#1b1611]/5"
+            >
+              Artículos & Guías
+            </Link>
             <Link
               href="/contacto"
               onClick={() => setOpen(false)}
@@ -1240,6 +1254,7 @@ function Footer() {
               <li><a href="#como-funciona" className="transition-colors hover:text-amber-300">Cómo funciona</a></li>
               <li><a href="#precios" className="transition-colors hover:text-amber-300">Precios</a></li>
               <li><a href="#faq" className="transition-colors hover:text-amber-300">Preguntas frecuentes</a></li>
+              <li><Link href="/articulos" className="transition-colors hover:text-amber-300">Artículos y guías</Link></li>
               <li><Link href="/contacto" className="transition-colors hover:text-amber-300">Nosotros y contacto</Link></li>
               <li><Link href="/estado" className="transition-colors hover:text-amber-300">Estado del servicio</Link></li>
               {user?.isPlatformAdmin && (
@@ -1367,6 +1382,94 @@ function Footer() {
   );
 }
 
+function FeaturedEditorialSection() {
+  return (
+    <section className="border-t border-[#e3d9c6] bg-[#fbf7ed] py-20 px-5 sm:px-8" aria-label="Artículo destacado">
+      <div className="mx-auto max-w-6xl">
+        <Reveal className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+          <div>
+            <Eyebrow>Crónicas & Cumplimiento</Eyebrow>
+            <h2 className="mt-3 text-balance font-display text-3xl sm:text-4xl font-extrabold tracking-tight text-[#1b1611]">
+              Lo que de verdad pasa con el Libro de Reclamaciones
+            </h2>
+          </div>
+          <Link
+            href="/articulos"
+            className="inline-flex items-center gap-1.5 font-mono text-xs font-bold uppercase tracking-wider text-[#c02b0a] hover:underline"
+          >
+            Ver todas las guías y artículos
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </Reveal>
+
+        <Reveal delay={120} className="mt-10">
+          <div className="rounded-3xl border-2 border-[#e3d9c6] bg-white p-6 sm:p-10 shadow-lg">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+              <div className="lg:col-span-7 space-y-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-[#c02b0a] px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-white">
+                    Crónica & Realidad 2026
+                  </span>
+                  <span className="rounded-full bg-[#e8deca] px-2.5 py-0.5 font-mono text-[10px] font-medium text-[#5c5246]">
+                    Fiscalización & MYPEs
+                  </span>
+                  <span className="font-mono text-xs text-[#8a7a67] ml-2">4 min de lectura</span>
+                </div>
+
+                <h3 className="font-display text-2xl sm:text-3xl font-extrabold text-[#1b1611] leading-tight">
+                  <Link href="/articulos/libro-fisico-vs-virtual-2026" className="hover:text-[#c02b0a] transition-colors">
+                    El libro de reclamaciones físico en 2026: el equivalente a seguir usando un fax
+                  </Link>
+                </h3>
+
+                <p className="text-sm sm:text-base text-[#5c5246] leading-relaxed">
+                  Llega el inspector a tu bodega o consultorio y empieza la expedición debajo del mostrador, entre cargadores viejos y manchas de café. Por qué un cuaderno de papel te puede costar hasta S/ 27,500 en multas y cómo resolverlo legalmente.
+                </p>
+
+                <div className="pt-2 flex flex-wrap items-center gap-4">
+                  <Link href="/articulos/libro-fisico-vs-virtual-2026">
+                    <Button className="bg-[#c02b0a] hover:bg-[#9c2107] text-white font-medium text-xs sm:text-sm">
+                      Leer artículo completo
+                      <ArrowRight className="ml-1.5 h-4 w-4" />
+                    </Button>
+                  </Link>
+                  <Link href="/acceso?modo=registro">
+                    <Button variant="outline" className="border-[#1b1611]/20 text-xs">
+                      Probar LibroDigital.pe gratis
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+
+              {/* Graphic snippet */}
+              <div className="lg:col-span-5 rounded-2xl border border-[#d6c7b0] bg-[#fbf7ed] p-5">
+                <div className="flex items-center justify-between border-b border-[#e0d3c0] pb-2 text-[11px] font-mono uppercase text-[#8a7a67]">
+                  <span>Cuadro comparativo</span>
+                  <span className="text-[#c02b0a] font-bold">Multa 0.5 a 5 UIT</span>
+                </div>
+                <div className="mt-4 space-y-3 font-mono text-xs">
+                  <div className="flex justify-between items-center rounded-lg bg-red-100/70 p-2.5 text-red-900">
+                    <span>Libro físico perdido</span>
+                    <span className="font-bold">Multa hasta S/ 27,500</span>
+                  </div>
+                  <div className="flex justify-between items-center rounded-lg bg-red-50 p-2.5 text-red-800">
+                    <span>Hojas rotas / arrancadas</span>
+                    <span className="font-bold">Sanción INDECOPI</span>
+                  </div>
+                  <div className="flex justify-between items-center rounded-lg bg-emerald-100/80 p-2.5 text-[#1e6b4a] font-bold">
+                    <span>LibroDigital.pe</span>
+                    <span>100% Legal y Resguardado</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
 /* -------------------------------------------------------------------------- */
 /* Page                                                                        */
 /* -------------------------------------------------------------------------- */
@@ -1384,6 +1487,7 @@ export default function Landing() {
         <ProductShowcase />
         <SocialProof />
         <Pricing />
+        <FeaturedEditorialSection />
         <Faq />
         <FinalCta />
       </main>

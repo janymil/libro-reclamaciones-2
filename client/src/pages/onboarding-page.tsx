@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, apiErrorMessage } from "@/lib/queryClient";
@@ -22,6 +23,7 @@ import {
   AlertTriangle,
   Info,
   HelpCircle,
+  ShieldCheck,
   X,
 } from "lucide-react";
 import BackToTop from "@/components/layout/back-to-top";
@@ -170,6 +172,7 @@ export default function OnboardingPage() {
    */
   const [rnpdRegistered, setRnpdRegistered] = useState<'si' | 'no'>('no');
   const [rnpdCode, setRnpdCode] = useState('');
+  const [physicalBackupConfirmed, setPhysicalBackupConfirmed] = useState(false);
 
   // Set when the RUC is already registered by another account: the wizard can
   // then offer "solicitar acceso" instead of leaving the user stuck.
@@ -568,6 +571,19 @@ export default function OnboardingPage() {
         variant: "destructive",
       });
       document.getElementById('urlSlug')?.focus();
+      return;
+    }
+
+    if (scenario !== 'solo_online' && !physicalBackupConfirmed) {
+      const message =
+        'Debes confirmar el compromiso de mantener hojas físicas de respaldo y exhibir el cartel oficial en tu local (DS 011-2011-PCM).';
+      setFormError(message);
+      toast({
+        title: 'Confirmación normativa requerida',
+        description: message,
+        variant: 'destructive',
+      });
+      document.getElementById('checkbox-physical-backup')?.focus();
       return;
     }
 
@@ -1171,6 +1187,50 @@ export default function OnboardingPage() {
                       </a>
                     </p>
                   </div>
+
+                  {/* Compromiso de respaldo físico y aviso visible (DS 011-2011-PCM art. 4-A).
+                      Exigido únicamente cuando el negocio cuenta con local abierto al público. */}
+                  {scenario !== 'solo_online' && (
+                    <div
+                      className="space-y-3 rounded-xl border border-amber-300 bg-amber-50/70 p-4"
+                      data-testid="card-physical-backup-onboarding"
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-800" aria-hidden="true" />
+                        <div>
+                          <p className="text-sm font-semibold text-amber-950">
+                            Respaldo físico de contingencia y cartel visible (DS 011-2011-PCM)
+                          </p>
+                          <p className="mt-1 text-xs leading-relaxed text-amber-900">
+                            La norma exige que todo local abierto al público que use Libro Virtual mantenga el{' '}
+                            <strong>cartel oficial visible</strong> y un juego de{' '}
+                            <strong>hojas físicas de respaldo</strong> (que podrás descargar gratis en PDF desde tu panel) para casos de corte de luz, caída de internet o si un cliente en el local solicita reclamar en papel. Si se usa una hoja de respaldo, tienes 1 día calendario para registrarla en el sistema.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-white/90 p-3">
+                        <Checkbox
+                          id="checkbox-physical-backup"
+                          checked={physicalBackupConfirmed}
+                          onCheckedChange={(checked) => {
+                            setPhysicalBackupConfirmed(checked === true);
+                            if (checked === true && formError) {
+                              setFormError(null);
+                            }
+                          }}
+                          data-testid="checkbox-physical-backup"
+                          className="mt-0.5"
+                        />
+                        <Label
+                          htmlFor="checkbox-physical-backup"
+                          className="cursor-pointer text-xs font-medium leading-relaxed text-gray-900"
+                        >
+                          Confirmo que exhibiré el cartel oficial en mi local y mantendré hojas físicas de respaldo impresas para casos de contingencia o solicitud presencial *
+                        </Label>
+                      </div>
+                    </div>
+                  )}
 
                   {/* The AI assistant and the preview live in the help column
                       (they were here, at the very bottom, where nobody saw

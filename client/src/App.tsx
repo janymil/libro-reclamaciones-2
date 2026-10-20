@@ -51,6 +51,10 @@ import ApiDocsPage from "@/pages/api-docs";
 import HelpPage from "@/pages/help";
 import StatusPage from "@/pages/status";
 import AccessibilityPage from "@/pages/accessibility";
+import ArticlePage from "@/pages/article-page";
+import ArticleClientesPage from "@/pages/article-clientes-page";
+import ArticleCasosRealesPage from "@/pages/article-casos-reales-page";
+import ArticlesHubPage from "@/pages/articles-hub";
 import AuthPage from "@/pages/auth-page";
 import OnboardingPage from "@/pages/onboarding-page";
 import NotFound from "@/pages/not-found";
@@ -140,6 +144,14 @@ function Router() {
       {/* Ficha del encargado: lo que la empresa necesita para declarar a
           LibroDigital en el SIPDP (rol, alojamiento y flujo transfronterizo). */}
       <Route path="/encargado" component={EncargadoPage} />
+
+      {/* Artículos, crónicas de fiscalización y guías editoriales */}
+      <Route path="/articulos" component={ArticlesHubPage} />
+      <Route path="/articulos/nadie-fiscaliza-a-las-mype-historias-reales-multas" component={ArticleCasosRealesPage} />
+      <Route path="/articulos/cuidado-con-estos-5-clientes-libro-reclamaciones" component={ArticleClientesPage} />
+      <Route path="/articulos/libro-fisico-vs-virtual-2026" component={ArticlePage} />
+      <Route path="/articulos/:slug" component={ArticlePage} />
+      <Route path="/blog"><Redirect to="/articulos" /></Route>
 
       {/* Nosotros y contacto: página pública con el formulario de contacto. */}
       <Route path="/contacto" component={ContactoPage} />

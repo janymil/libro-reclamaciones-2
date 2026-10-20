@@ -72,13 +72,14 @@ export default function NormativaPage() {
               feriados peruanos y alerta antes del vencimiento. No existe prórroga legal.
             </>,
             <>
-              <strong>Libro virtual y constancia</strong> (Reglamento, DS N.° 011-2011-PCM y sus
-              modificatorias): el formulario replica los campos del Anexo I vigente y entrega al
-              consumidor la constancia de recepción descargable.
+              <strong>Libro virtual, constancia y respaldo físico de contingencia</strong> (Reglamento, DS N.° 011-2011-PCM y sus
+              modificatorias, art. 4-A y 4-B): el formulario virtual replica los campos del Anexo I vigente y entrega al
+              consumidor la constancia de recepción inmediata; además, para locales físicos incluye las hojas de respaldo
+              imprimibles en caso de corte eléctrico, falta de internet o asistencia presencial.
             </>,
             <>
               <strong>Aviso obligatorio</strong> (Anexo II, con las medidas del DS N.° 006-2014-PCM):
-              se genera el cartel A4 imprimible con el texto normado, y el enlace o widget para
+              se genera el cartel A4 imprimible con el texto normado para exhibir en el local, y el enlace o widget para
               publicarlo en la web o en una plataforma de comercio electrónico (art. 151 del Código).
             </>,
             <>

@@ -34,12 +34,13 @@ class LegalComplianceService {
       description: 'Reglamento del Libro de Reclamaciones - DS 011-2011-PCM',
       actions: compliant ? [
         'Mantener el Libro disponible en todos los establecimientos',
+        'Exhibir el Aviso Oficial (Anexo II) y contar con hojas físicas de respaldo ante cortes de luz o internet (Art. 4-A)',
         'Conservar hojas de reclamación por 2 años',
         'Actualizar avisos si hay cambios normativos',
       ] : establishments.length === 0 ? [
         'Registrar al menos un establecimiento',
         'Configurar el Libro de Reclamaciones',
-        'Instalar aviso visible en establecimiento',
+        'Instalar aviso visible y hojas físicas de respaldo en establecimiento',
       ] : [
         `Crear el Libro de Reclamaciones de ${missingBooks.length} local(es)`,
         'Exportar el registro de cada local para una inspección',
