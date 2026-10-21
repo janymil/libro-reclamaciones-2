@@ -74,6 +74,26 @@ export const SEO_ARTICLES: Record<string, SeoArticleMeta> = {
       "fiscalizacion mype indecopi 2026",
     ],
   },
+  "vendi-solo-por-instagram-y-mercado-libre-indecopi": {
+    slug: "vendi-solo-por-instagram-y-mercado-libre-indecopi",
+    title: "Vendí solo por Instagram y Mercado Libre. ¿Por qué me cayó INDECOPI?",
+    subtitle: "Spoiler: 'solo vendo por Instagram' no es un escudo anti-INDECOPI. Es, como mucho, un chaleco antibalas de cartón. Las 3 excusas que ya no valen tras la Ley 32495.",
+    description: "La Ley 32495 obliga a tiendas de Instagram, WhatsApp y vendedores de Mercado Libre a tener Libro de Reclamaciones propio y exhibir el enlace visible. Evita multas con nuestro test de 60 segundos.",
+    category: "Ley 32495 & Ecommerce",
+    readTime: "5 min de lectura",
+    publishedTime: "2026-10-20T21:00:00-05:00",
+    modifiedTime: "2026-10-20T21:45:00-05:00",
+    author: "Equipo Editorial LibroDigital.pe",
+    image: "https://librodigital.pe/assets/chat-ley-poster.webp",
+    keywords: [
+      "ley 32495 libro de reclamaciones",
+      "libro de reclamaciones instagram peru",
+      "libro de reclamaciones mercado libre peru",
+      "comercio electronico indecopi",
+      "enlace libro reclamaciones bio instagram",
+      "librodigital pe",
+    ],
+  },
 };
 
 export function buildArticleHtml(article: SeoArticleMeta, host: string): string {

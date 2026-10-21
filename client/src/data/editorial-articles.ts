@@ -87,4 +87,23 @@ export const EDITORIAL_ARTICLES: EditorialArticle[] = [
     keyTakeaway:
       'Arreglarlo después de que te llega la carta de Indecopi no borra la infracción. El libro debe estar publicado y operativo antes de cualquier reclamo o inspección.',
   },
+  {
+    slug: 'vendi-solo-por-instagram-y-mercado-libre-indecopi',
+    badge: 'Comercio Online & Redes',
+    category: 'Ley 32495 & Ecommerce',
+    readTime: '5 min de lectura',
+    publishedAt: 'Octubre 2026',
+    title: 'Vendí solo por Instagram y Mercado Libre. ¿Por qué me cayó INDECOPI?',
+    subtitle:
+      'Spoiler: “solo vendo por Instagram” no es un escudo anti-INDECOPI. Es, como mucho, un chaleco antibalas de cartón. Las 3 excusas que ya no valen tras la Ley 32495.',
+    summary:
+      'Toda persona o negocio con RUC que vende habitualmente por Instagram, WhatsApp o marketplaces debe tener Libro de Reclamaciones propio y exhibir el enlace visible según la Ley 32495. Mini test de 60 segundos y guía práctica.',
+    heroVisual: 'qr-compliance',
+    author: {
+      name: 'Equipo Editorial LibroDigital.pe',
+      role: 'Especialistas en Ecommerce y Ley 32495',
+    },
+    keyTakeaway:
+      'Vender por Instagram, DM o Mercado Libre no te exonera: si tienes RUC y vendes habitualmente a consumidores finales, necesitas tu propio libro y el enlace visible.',
+  },
 ];

@@ -54,6 +54,7 @@ import AccessibilityPage from "@/pages/accessibility";
 import ArticlePage from "@/pages/article-page";
 import ArticleClientesPage from "@/pages/article-clientes-page";
 import ArticleCasosRealesPage from "@/pages/article-casos-reales-page";
+import ArticleInstagramMercadoLibrePage from "@/pages/article-instagram-mercadolibre-page";
 import ArticlesHubPage from "@/pages/articles-hub";
 import AuthPage from "@/pages/auth-page";
 import OnboardingPage from "@/pages/onboarding-page";
@@ -147,6 +148,7 @@ function Router() {
 
       {/* Artículos, crónicas de fiscalización y guías editoriales */}
       <Route path="/articulos" component={ArticlesHubPage} />
+      <Route path="/articulos/vendi-solo-por-instagram-y-mercado-libre-indecopi" component={ArticleInstagramMercadoLibrePage} />
       <Route path="/articulos/nadie-fiscaliza-a-las-mype-historias-reales-multas" component={ArticleCasosRealesPage} />
       <Route path="/articulos/cuidado-con-estos-5-clientes-libro-reclamaciones" component={ArticleClientesPage} />
       <Route path="/articulos/libro-fisico-vs-virtual-2026" component={ArticlePage} />

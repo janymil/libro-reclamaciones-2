@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'wouter';
 import { Button } from '@/components/ui/button';
 import {
@@ -652,6 +653,263 @@ export function GoogleFormComparisonVisual() {
 
       <figcaption className="mt-4 pt-3 border-t border-[#e3d9c6] text-xs text-[#5c5246]">
         <strong>Advertencia:</strong> Un formulario improvisado te expone a multas por información mínima omitida.
+      </figcaption>
+    </figure>
+  );
+}
+
+/* Interactive WhatsApp chat simulation with typing effect and realistic bubbles */
+export function WhatsAppChatSimulation() {
+  const [messagesCount, setMessagesCount] = useState<number>(3);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+
+  const messages = [
+    { sender: 'vanessa', name: 'Vanessa 🧁', text: 'Amiga, ¿viste lo de la ley nueva del libro de reclamaciones?', time: '11:42 AM' },
+    { sender: 'karla', name: 'Karla 💅', text: 'Sí po, pero eso es para tiendas grandes, ¿no? Yo vendo solo por Insta y Mercado Libre.', time: '11:43 AM' },
+    { sender: 'vanessa', name: 'Vanessa 🧁', text: 'Pero igual vendes, ¿no?', time: '11:43 AM' },
+    { sender: 'karla', name: 'Karla 💅', text: 'Sí, pero no tengo local ni nada. Todo es por DM. Mercado Libre se encarga de todo lo demás.', time: '11:44 AM' },
+    { sender: 'vanessa', name: 'Vanessa 🧁', text: 'Y tienes RUC, ¿no?', time: '11:44 AM' },
+    { sender: 'karla', name: 'Karla 💅', text: 'Sí…', time: '11:45 AM' },
+    { sender: 'vanessa', name: 'Vanessa 🧁', text: '¿Y le vendes a personas, o sea, a consumidores finales?', time: '11:45 AM' },
+    { sender: 'karla', name: 'Karla 💅', text: 'Obvio, ¿a quién más le voy a vender las velas aromáticas?', time: '11:46 AM' },
+    { sender: 'vanessa', name: 'Vanessa 🧁', text: '…', time: '11:46 AM' },
+    { sender: 'karla', name: 'Karla 💅', text: '¿Por qué me escribes “…”? No me asustes.', time: '11:47 AM' },
+    { sender: 'vanessa', name: 'Vanessa 🧁', text: 'Amiga, léete la Ley 32495. Ahora. Con calma. Y con un té.', time: '11:48 AM' },
+  ];
+
+  const handleNextMessage = () => {
+    if (messagesCount < messages.length) {
+      setMessagesCount(prev => prev + 1);
+    }
+  };
+
+  const handleShowAll = () => {
+    setMessagesCount(messages.length);
+  };
+
+  const handleReset = () => {
+    setMessagesCount(3);
+  };
+
+  return (
+    <figure className="my-8 mx-auto max-w-md overflow-hidden rounded-3xl border-4 border-[#242b2e] bg-[#0b141a] text-white shadow-2xl ring-1 ring-black/20">
+      {/* WhatsApp Header */}
+      <div className="flex items-center justify-between bg-[#1f2c34] px-4 py-3 border-b border-[#2a3942]">
+        <div className="flex items-center gap-3">
+          <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-tr from-pink-500 to-rose-400 text-white font-bold text-sm shadow">
+            V
+            <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-[#1f2c34] bg-emerald-500" />
+          </div>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <p className="font-semibold text-sm text-[#e9edef] leading-tight">Vanessa 🧁</p>
+            </div>
+            <p className="text-[11px] text-[#8696a0]">en línea</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {messagesCount < messages.length ? (
+            <button
+              onClick={handleShowAll}
+              className="text-[11px] font-mono text-emerald-400 hover:text-emerald-300 underline underline-offset-2 px-2 py-1"
+            >
+              Ver completo
+            </button>
+          ) : (
+            <button
+              onClick={handleReset}
+              className="text-[11px] font-mono text-[#8696a0] hover:text-[#e9edef] px-2 py-1"
+            >
+              Reiniciar
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* WhatsApp Background Chat Area */}
+      <div
+        className="p-4 space-y-3 min-h-[360px] max-h-[500px] overflow-y-auto bg-[#0b141a]"
+        style={{
+          backgroundImage: 'radial-gradient(circle at 50% 50%, rgba(31, 44, 52, 0.4) 0%, rgba(11, 20, 26, 0.95) 100%)',
+        }}
+      >
+        <div className="text-center my-2">
+          <span className="inline-block rounded-lg bg-[#182229] px-3 py-1 font-mono text-[10px] text-[#8696a0] uppercase tracking-wider">
+            Hoy · 11:42 AM
+          </span>
+        </div>
+
+        {messages.slice(0, messagesCount).map((msg, idx) => {
+          const isMe = msg.sender === 'karla';
+          return (
+            <div
+              key={idx}
+              className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} transition-all duration-300 animate-in fade-in slide-in-from-bottom-2`}
+            >
+              <div
+                className={`max-w-[82%] rounded-2xl px-3.5 py-2 text-sm shadow-sm ${
+                  isMe
+                    ? 'bg-[#005c4b] text-[#e9edef] rounded-tr-xs'
+                    : 'bg-[#202c33] text-[#e9edef] rounded-tl-xs'
+                }`}
+              >
+                <p className="text-[10px] font-semibold text-emerald-400 mb-0.5">
+                  {msg.name}
+                </p>
+                <p className="leading-relaxed text-[13px]">{msg.text}</p>
+                <div className="flex items-center justify-end gap-1 mt-1 text-[10px] text-[#8696a0]">
+                  <span>{msg.time}</span>
+                  {isMe && <span className="text-[#53bdeb]">✓✓</span>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {messagesCount < messages.length && (
+          <div className="pt-2 flex justify-center">
+            <Button
+              size="sm"
+              onClick={handleNextMessage}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-full px-4 py-1.5 shadow-md flex items-center gap-1.5"
+            >
+              <span>Continuar leyendo chat</span>
+              <span className="text-[10px] opacity-75">({messagesCount}/{messages.length})</span>
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <figcaption className="border-t border-[#242b2e] bg-[#111b21] px-4 py-2 text-center text-xs text-[#8696a0]">
+        <strong>Chat real entre emprendedoras:</strong> cuando descubres que la Ley 32495 también te incluye a ti.
+      </figcaption>
+    </figure>
+  );
+}
+
+/* Interactive Mini Quiz of 60 seconds */
+export function MiniQuizEcommerceVisual() {
+  const [answers, setAnswers] = useState<Record<number, boolean | null>>({
+    0: null,
+    1: null,
+    2: null,
+    3: null,
+  });
+
+  const questions = [
+    '¿Tienes RUC activo como persona natural o jurídica?',
+    '¿Le vendes a personas naturales que compran para uso propio (no para revender)?',
+    '¿Vendes por tu web propia, app, redes sociales (Instagram/Facebook/TikTok) o marketplaces?',
+    '¿Lo haces con cierta frecuencia o habitualidad (es un negocio y no una venta ocasional de ropa usada)?',
+  ];
+
+  const handleToggle = (index: number, val: boolean) => {
+    setAnswers(prev => ({ ...prev, [index]: val }));
+  };
+
+  const answeredCount = Object.values(answers).filter(v => v !== null).length;
+  const allYes = Object.values(answers).every(v => v === true);
+  const isComplete = answeredCount === 4;
+
+  return (
+    <figure className="my-10 overflow-hidden rounded-3xl border-2 border-[#e3d9c6] bg-white p-6 sm:p-8 shadow-lg">
+      <div className="flex items-center justify-between border-b border-[#e3d9c6] pb-4 mb-5">
+        <div>
+          <span className="rounded-full bg-[#c02b0a]/10 px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-[#c02b0a]">
+            Test de 60 segundos
+          </span>
+          <h3 className="font-display text-xl font-bold text-[#1b1611] mt-1">
+            ¿Tu negocio online está obligado por la Ley 32495?
+          </h3>
+        </div>
+        <span className="font-mono text-xs text-[#8a7a67]">
+          {answeredCount}/4 respondidas
+        </span>
+      </div>
+
+      <div className="space-y-4">
+        {questions.map((q, idx) => (
+          <div
+            key={idx}
+            className={`rounded-xl border p-4 transition-colors ${
+              answers[idx] !== null ? 'border-[#c02b0a]/30 bg-[#fdfaf3]' : 'border-gray-200 bg-white'
+            }`}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <span className="text-sm font-medium text-[#1b1611] leading-relaxed">
+                {idx + 1}. {q}
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleToggle(idx, true)}
+                  className={`rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all ${
+                    answers[idx] === true
+                      ? 'bg-[#1e6b4a] text-white shadow-sm'
+                      : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  SÍ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggle(idx, false)}
+                  className={`rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all ${
+                    answers[idx] === false
+                      ? 'bg-neutral-800 text-white shadow-sm'
+                      : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  NO
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Quiz Evaluation Box */}
+      {isComplete && (
+        <div className={`mt-6 rounded-2xl p-5 border-2 animate-in fade-in duration-300 ${
+          allYes
+            ? 'border-red-300 bg-red-50/70 text-red-950'
+            : 'border-blue-300 bg-blue-50/70 text-blue-950'
+        }`}>
+          {allYes ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 font-display text-lg font-bold text-red-900">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-red-600 text-white text-sm">!</span>
+                Resultado: SÍ estás obligado a tener Libro de Reclamaciones
+              </div>
+              <p className="text-sm text-red-900 leading-relaxed font-medium">
+                Respondiste <strong>SÍ a las 4 preguntas</strong>: conforme a la Ley 32495 y al Código de Protección al Consumidor,
+                debes contar con tu propio Libro de Reclamaciones Virtual y exhibir el enlace de forma permanente y accesible en tu bio de Instagram, web o empaque.
+              </p>
+              <div className="pt-2">
+                <Link href="/acceso?modo=registro">
+                  <Button size="sm" className="bg-[#c02b0a] hover:bg-[#9c2107] text-white font-bold text-xs">
+                    Crear mi Libro Digital en 3 minutos
+                    <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 font-display text-base font-bold text-blue-900">
+                <span>ℹ</span> Resultado: Situación especial
+              </div>
+              <p className="text-xs text-blue-900 leading-relaxed">
+                Respondiste NO a alguna de las preguntas. Si no realizas ventas habituales a consumidores finales o no cuentas con RUC comercial, podrías estar en un supuesto distinto; no obstante, si tu volumen crece es aconsejable formalizar tu canal preventivamente.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      <figcaption className="mt-4 pt-3 border-t border-[#e3d9c6] text-xs text-[#5c5246] text-center">
+        Diagnóstico rápido según la Ley N.° 32495 (publicada el 11 de noviembre de 2025).
       </figcaption>
     </figure>
   );
