@@ -45,6 +45,15 @@ export default function ScrollToTop() {
     root.style.scrollBehavior = "auto";
     window.scrollTo(0, 0);
     root.style.scrollBehavior = previousBehavior;
+
+    // Send pageview to Google Analytics 4 on SPA route transitions
+    if (typeof (window as any).gtag === "function") {
+      (window as any).gtag("event", "page_view", {
+        page_path: location,
+        page_location: window.location.href,
+        page_title: document.title,
+      });
+    }
   }, [location]);
 
   return null;
