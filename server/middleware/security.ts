@@ -89,13 +89,13 @@ export function applySecurityMiddleware(app: Express): void {
       directives: {
         defaultSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-        scriptSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://www.googletagmanager.com"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
         frameAncestors: ["'self'"],
-        imgSrc: ["'self'", "data:", "https:"],
+        imgSrc: ["'self'", "data:", "https:", "https://*.google-analytics.com", "https://*.googletagmanager.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
-        connectSrc: ["'self'", "ws:", "wss:"],
+        connectSrc: ["'self'", "ws:", "wss:", "https://*.google-analytics.com", "https://*.analytics.google.com", "https://*.googletagmanager.com"],
       },
     } : false, // Disable CSP in development
   }));
