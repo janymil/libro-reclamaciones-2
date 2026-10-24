@@ -85,17 +85,19 @@ export function applySecurityMiddleware(app: Express): void {
   // them would neutralize the CSP against stored-XSS payloads embedded in
   // complaint content.
   app.use(helmet({
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
     contentSecurityPolicy: process.env.NODE_ENV === 'production' ? {
       directives: {
         defaultSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https://www.googletagmanager.com"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://www.googletagmanager.com", "https://tagassistant.google.com"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
-        frameAncestors: ["'self'"],
-        imgSrc: ["'self'", "data:", "https:", "https://*.google-analytics.com", "https://*.googletagmanager.com"],
+        frameAncestors: ["'self'", "https://tagassistant.google.com"],
+        frameSrc: ["'self'", "https://tagassistant.google.com"],
+        imgSrc: ["'self'", "data:", "https:", "https://*.google-analytics.com", "https://*.googletagmanager.com", "https://tagassistant.google.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
-        connectSrc: ["'self'", "ws:", "wss:", "https://*.google-analytics.com", "https://*.analytics.google.com", "https://*.googletagmanager.com"],
+        connectSrc: ["'self'", "ws:", "wss:", "https://*.google-analytics.com", "https://*.analytics.google.com", "https://*.googletagmanager.com", "https://tagassistant.google.com"],
       },
     } : false, // Disable CSP in development
   }));
